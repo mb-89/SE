@@ -3175,8 +3175,8 @@ fields:
 
 <!-- risks: One item per risk, or None. -->
 '''
-OFF_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n"
-ON_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
+OFF_TEMPLATE_NOTE = "---\nderived_from: {template: note, version: \"1.0.0\"}\n---\n\n# A note\n\n## Risks\n\n"
+ON_TEMPLATE_NOTE = "---\nderived_from: {template: note, version: \"1.0.0\"}\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
 
 
 def claimed_checkout(tmp_path: Path, monkeypatch, note: str, claims: bool = True) -> Path:

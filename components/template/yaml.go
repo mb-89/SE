@@ -46,6 +46,13 @@ func yamlScalar(text, where string) (any, error) {
 	if text == "" || strings.ContainsAny(text[:1], "\"[{") {
 		v, err := pyJSON(text)
 		if err != nil {
+			if strings.HasPrefix(text, "{") {
+				if flow, ok, ferr := flowMapping(text, where); ferr != nil {
+					return nil, ferr
+				} else if ok {
+					return flow, nil
+				}
+			}
 			what := err.Error()
 			if e, ok := err.(*jsonError); ok {
 				what = e.what
@@ -74,6 +81,76 @@ func yamlScalar(text, where string) (any, error) {
 		return nil, fmt.Errorf("%s: %s is a plain value another YAML reader may read otherwise; quote it as a JSON string", where, text)
 	}
 	return text, nil
+}
+
+var flowKey = regexp.MustCompile(`^[ \t]*([A-Za-z_][\w.-]*)[ \t]*:[ \t]+`)
+
+// flowMapping is templates.py `_flow_mapping`: text as a one-line YAML flow mapping, each key a
+// plain word, each value a JSON string or plain words read as yamlScalar reads them, up to the next
+// `,` or the closing `}`; ok false where it is none such.
+func flowMapping(text, where string) (Object, bool, error) {
+	if !strings.HasSuffix(text, "}") {
+		return nil, false, nil
+	}
+	inner := text[1 : len(text)-1]
+	found := Object{}
+	at := 0
+	for {
+		m := flowKey.FindStringSubmatchIndex(inner[at:])
+		if m == nil {
+			return nil, false, nil
+		}
+		key := inner[at+m[2] : at+m[3]]
+		if found.Has(key) {
+			return nil, false, nil
+		}
+		at += m[1]
+		var value any
+		switch {
+		case strings.HasPrefix(inner[at:], "\""):
+			end := at + 1
+			for end < len(inner) && inner[end] != '"' {
+				if inner[end] == '\\' {
+					end++
+				}
+				end++
+			}
+			if end >= len(inner) {
+				return nil, false, nil
+			}
+			v, err := pyJSON(inner[at : end+1])
+			if err != nil {
+				return nil, false, nil
+			}
+			value, at = v, end+1
+		case at >= len(inner) || strings.ContainsRune("'[{", rune(inner[at])):
+			return nil, false, nil
+		default:
+			end := strings.Index(inner[at:], ",")
+			if end < 0 {
+				end = len(inner)
+			} else {
+				end += at
+			}
+			if strip(inner[at:end]) == "" {
+				return nil, false, nil
+			}
+			v, err := yamlScalar(strip(inner[at:end]), where)
+			if err != nil {
+				return nil, false, err
+			}
+			value, at = v, end
+		}
+		found = append(found, Pair{key, value})
+		rest := strings.TrimLeft(inner[at:], " \t")
+		if rest == "" {
+			return found, true, nil
+		}
+		if rest[0] != ',' {
+			return nil, false, nil
+		}
+		at = len(inner) - len(rest) + 1
+	}
 }
 
 func isItem(text string) bool { return text == "-" || strings.HasPrefix(text, "- ") }

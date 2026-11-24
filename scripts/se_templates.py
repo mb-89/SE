@@ -714,8 +714,8 @@ def kern_problems(template) -> list[str]:
     """Why kern's GitHub component cannot file `template`'s document: it files a whole issue or
     comment, which an adapter, a file's, a message or a scoped template does not make; empty where
     it can."""
-    if template.is_adapter or template.is_file or template.message or template.scope:
-        what = ("an adapter" if template.is_adapter else "a file's" if template.is_file
+    if template.is_adapter or template.writes_file or template.message or template.scope:
+        what = ("an adapter" if template.is_adapter else "a file's" if template.writes_file
                 else "a message" if template.message else "scoped")
         return [f"{template.name} is {what} template, and kern files a whole issue or comment"]
     return []

@@ -166,10 +166,37 @@ in. Emptiness is judged without HTML comments.
 **Files.** For a `file.write` template the text is a file: its front matter and its page title, the
 first `#` line above the first field, are its head. `parse` never reads the page title as a field,
 even where its text is a field's heading; `render` keeps the head as it stands and writes neither
-marker, its fields as `## ` headings below the title. Into the front matter it writes the marker's
-three as the lines a file records its template by (`Template.front_lines`): `template:
-<repository>/<name>`, `version: <version>` and `overlay: <digest>`, each in its place where the
-front matter holds it, a missing one after the last of them (a new block where the file has none).
+marker, its fields as `## ` headings below the title. Into the front matter it writes the two
+lines a file records its template by (`Template.front_lines`): `derived_from: {template: <name>,
+version: "<version>"}`, as obs reads a filled document (obs spec/design_input/input-model.md,
+Templates), and `overlay: <digest>`, the marker's digest; each in its place where the front matter
+holds it, a missing one after the last of them (a new block where the file has none).
+`derived_from` is read on its line, a flow mapping, or as the mapping indented below it
+(`derived_from`), and where it is no mapping of a nonempty `template` and `version` it names none.
+
+**Template manifests** (docs/templates.md "Template manifests"): a template may also be obs's
+template manifest, `templates/<name>/manifest.md`, with its template nodes beside it in that
+folder, a second source form that `manifest_data` reads into the data a note gives, so loading,
+overlays, `fill`, `check` and the digest are one path for both forms:
+
+- the manifest's front matter carries `obs.template`: `name`, the folder's, `version`, one to three
+  whole numbers joined by dots (MANIFEST_VERSION, compared as a semantic version whose missing
+  numbers are 0, `version_parts`), and optionally `source`; obs's other keys, `title` among them,
+  are obs's;
+- its table of contents, one `- [[<note>]]` or `- [[<note>|<title>]]` line per chapter (TOC_LINE),
+  lists the nodes in order; its other lines are the template's `says`, else its `title`;
+- a chapter whose front matter carries `obs.guidance` is a template node and becomes one `text`
+  field: named after its note (hyphens as `_`), its heading the chapter's title, else the note's
+  name, `required` where `gate` is `mandatory` (else `judgment`), and its `says` the guidance, in
+  turn `contents`, `Why: <motivation>`, `Form: <form>` and `Sources: <sources>`, which the fill
+  hands the agent; its body is its fill slot alone, a paragraph of `{{slot}}` (SLOT). Any other
+  chapter is an ordinary one, such as a note on how to use the template, and no field;
+- the template is a `document` shaping no action of its own (fill it by name), `reader: owner`, no
+  tags, the rule `required` refusing; its document is a file, written as a `file.write` template's
+  (`Template.writes_file`): the front matter and the `##` sections, no marker and none of the guidance;
+- its overlay is `templates/<name>.overlay.md`, beside the folder, as a note's; its digest covers the
+  manifest's text and each template node's, a NUL byte between (`manifest_data`);
+- `templates/<name>.md` beside `templates/<name>/manifest.md` does not load: one name, one template.
 
 **Writing.** `render` writes SE's fleet marker once, then the template marker,
 `<!-- se:template <repository>/<name> <version> <digest> -->` (with a scope, the template marker
@@ -207,13 +234,13 @@ path=)`), in this order; for `file.write` the order below it:
 For a file, `path` (relative to the project root) selects:
 
 1. The allowed templates: the `file.write` templates whose `paths` match it; none, and the file is free.
-2. The front matter's `template: <name>` (or `<repository>/<name>`, as `render` writes it) naming an
-   allowed template chooses it, as a body's template marker does; one naming another template is a
-   refused finding (rule `template`).
+2. The front matter's `derived_from` naming an allowed template (by `<name>`, or `<repository>/<name>`)
+   chooses it, as a body's template marker does; one naming another template is a refused finding
+   (rule `template`).
 3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
-   template: <name>`.
+   derived_from: {template: <name>, version: <version>}`.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
@@ -225,6 +252,9 @@ A `quote` field always refuses (QUOTE_RULE, never a template's to set) a value t
 and, given the raw input (`check(raw=)`, as `fill` gives it), a quote the raw input does not hold
 word for word (`quoted`). A quote is a span in `"..."` or `“...”` on one line, or a run of `>`
 lines (`quotes`); whitespace and line breaks aside, case counts.
+A field whose text still holds the fill slot `{{slot}}` outside code (a fence, a code span) always
+refuses (SLOT_RULE, never a template's to set, `holds_slot`), naming the section, as obs refuses a
+filled note that holds one.
 Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, taken as
 `work_tickets.goal_summary` takes it, runs past `first_sentence_chars`: a work issue's Goal's
 becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
@@ -291,7 +321,7 @@ fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude A
 alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
 adapter, its checker. Each command resolves its template names by `catalog` for the project
 `--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
-the working tree's `templates/`; `--templates DIR`, on all four, reads
+the working tree's `templates/`; `--templates DIR`, on each of them, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
 `fill` and `interfaces` (Interfaces, above) writes a file; none calls GitHub or starts a model.
 
@@ -317,7 +347,9 @@ fields.
 - Where nothing refuses, a file template (`file.write`) writes the file `--path` names, which its
   `paths` must claim; a file that exists keeps its head and its undeclared sections, its fields
   the values alone. `--path` without a template selects as `check --path` does, so a new file
-  names its template. Another template's document goes to `--out`, else to stdout as it stands.
+  names its template. Another template's document goes to `--out`, else to stdout as it stands; a
+  template manifest's document that exists at `--out` keeps its head and its undeclared sections, as
+  a file's does.
   A write prints `wrote <path>: <template> <version>`, exit 0.
 - `--repo OWNER/REPO` (with `--number N`, a comment; with `--label`, the issue's labels) files the
   document instead: the call goes whole to `se_templates.py fill`, the door's tool action, which
@@ -344,6 +376,21 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
 TEMPLATE_SUFFIX = ".md"  # a template is the note templates/<name>.md
+#: A template manifest, `templates/<name>/manifest.md`, its template nodes beside it in that folder
+#: (the module docstring: Template manifests).
+MANIFEST_FILE = "manifest.md"
+#: A template manifest's version, as obs writes it: one to three whole numbers joined by dots.
+MANIFEST_VERSION = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){0,2}$")
+#: A template manifest's table of contents: one chapter per line, `- [[<note>]]` or
+#: `- [[<note>|<title>]]`.
+TOC_LINE = re.compile(r"^[ \t]*[-*+][ \t]+\[\[([^\]|#]+)(?:\|([^\]]+))?\]\][ \t]*$")
+#: A template node's `obs.guidance`: what goes into its section, in the order the fill hands it on;
+#: `contents` and `gate` are required.
+GUIDANCE_KEYS = ("contents", "motivation", "form", "sources", "gate")
+GUIDANCE_LABELS = {"motivation": "Why", "form": "Form", "sources": "Sources"}
+GATES = ("mandatory", "judgment")
+#: A template node's fill slot: a paragraph of it alone in the node, never in a filled document.
+SLOT = "{{slot}}"
 
 FLEET_MARKER = "<!-- se:fleet -->"
 TEMPLATE_MARKER = "<!-- se:template {repository}/{name} {version} {digest} -->"
@@ -376,6 +423,9 @@ VERSION_RULE = "version"
 #: The rule of a `quote` field's quotes against the raw input (`quoted`): it always refuses, never
 #: a template's to set.
 QUOTE_RULE = "quote"
+#: The rule of a fill slot, `{{slot}}`, left in a field's text outside code (`holds_slot`): it always
+#: refuses, never a template's to set.
+SLOT_RULE = "slot"
 #: A quote in a field's value: a span in straight or curly double quotes on one line, or a run of
 #: `>` lines.
 QUOTE_SPANS = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
@@ -398,10 +448,11 @@ RESULTS = ("problems", "raises", "truth")
 REFERENCE = re.compile(r"^[a-z_][a-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 FRONT_MATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-FRONT_TEMPLATE = re.compile(r"^template[ \t]*:[ \t]*['\"]?(?:[\w.-]+/)*([\w-]+)['\"]?[ \t]*$",
-                            re.MULTILINE)
-#: The three front matter keys a claimed file records its template by (`Template.front_lines`).
-PROVENANCE_KEYS = ("template", "version", "overlay")
+#: The front matter's `derived_from` line: its value on the line (a flow mapping), or nothing, its
+#: mapping indented below it (`derived_from`).
+DERIVED_KEY = re.compile(r"^derived_from[ \t]*:[ \t]*(.*?)[ \t]*$")
+#: The front matter keys a file document records its template by (`Template.front_lines`).
+PROVENANCE_KEYS = ("derived_from", "overlay")
 HEADING = re.compile(r"^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -519,6 +570,8 @@ class Template:
     digest: str = ""
     #: A message interface's one line, its fields as `{<field>}` (scripts/interfaces.py owns it).
     message: str = ""
+    #: Whether the template is a template manifest with its nodes (Template manifests), not a note.
+    manifest: bool = False
 
     @property
     def is_snippet(self) -> bool:
@@ -539,10 +592,16 @@ class Template:
 
     @property
     def front_lines(self) -> tuple[tuple[str, str], ...]:
-        """What a claimed file's front matter records: `template: <repository>/<name>`, `version`
-        and `overlay`, the marker's three in turn."""
-        return tuple(zip(PROVENANCE_KEYS, (f"{self.repository}/{self.name}", self.version,
+        """What a file document's front matter records: `derived_from: {template: <name>, version:
+        "<version>"}` and `overlay: <digest>`."""
+        return tuple(zip(PROVENANCE_KEYS, (f'{{template: {self.name}, version: "{self.version}"}}',
                                            self.digest)))
+
+    @property
+    def writes_file(self) -> bool:
+        """Whether its document is a file, its head the front matter: a `file.write` template's, or a
+        template manifest's."""
+        return self.is_file or self.manifest
 
     @property
     def is_file(self) -> bool:
@@ -633,8 +692,16 @@ def _template_file(name: str) -> bool:
 
 
 def _folder_files(folder: Path) -> dict[str, str]:
-    return {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.iterdir())
-            if path.is_file() and _template_file(path.name)}
+    """The template notes and the term list of `folder`, then each template manifest's notes, as
+    `<manifest folder>/<note>` (Template manifests)."""
+    files = {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.iterdir())
+             if path.is_file() and _template_file(path.name)}
+    for sub in sorted(folder.iterdir()):
+        if sub.is_dir() and (sub / MANIFEST_FILE).is_file():
+            files.update({f"{sub.name}/{path.name}": path.read_text(encoding="utf-8")
+                          for path in sorted(sub.iterdir())
+                          if path.is_file() and path.name.endswith(TEMPLATE_SUFFIX)})
+    return files
 
 
 def _integration_branch(root: Path) -> str:
@@ -655,11 +722,16 @@ def _git_files(root: Path) -> dict[str, str]:
     if listed.returncode != 0:
         return {}
     files = {}
-    for path in listed.stdout.splitlines():
-        if path.startswith(f"{TEMPLATES}/") and path.count("/") == 1 and _template_file(path.split("/", 1)[1]):
+    paths = [path for path in listed.stdout.splitlines() if path.startswith(f"{TEMPLATES}/")]
+    manifests = {path.split("/")[1] for path in paths
+                 if path.count("/") == 2 and path.endswith(f"/{MANIFEST_FILE}")}
+    for path in paths:
+        name = path.split("/", 1)[1]
+        if (path.count("/") == 1 and _template_file(name)) or (
+                path.count("/") == 2 and name.split("/")[0] in manifests and name.endswith(TEMPLATE_SUFFIX)):
             shown = door.run("show", f"{ref}:{path}", root=root)
             if shown.returncode == 0:
-                files[path.split("/", 1)[1]] = shown.stdout
+                files[name] = shown.stdout
     return files if any(name.endswith(TEMPLATE_SUFFIX) for name in files) else {}
 
 
@@ -712,6 +784,9 @@ def _yaml_scalar(text: str, where: str) -> object:
         try:
             return json.loads(text)
         except json.JSONDecodeError as error:
+            flow = _flow_mapping(text, where) if text[:1] == "{" else None
+            if flow is not None:
+                return flow
             raise TemplateError(f"{where}: {text} is no JSON value ({error.msg}); write a quoted "
                                 "string, a list or a mapping as JSON") from error
     if text[:1] == "'":
@@ -727,6 +802,44 @@ def _yaml_scalar(text: str, where: str) -> object:
         raise TemplateError(f"{where}: {text} is a plain value another YAML reader may read "
                             "otherwise; quote it as a JSON string")
     return text
+
+
+#: A key of a flow mapping and the `:` after it.
+FLOW_KEY = re.compile(r"[ \t]*([A-Za-z_][\w.-]*)[ \t]*:[ \t]+")
+
+
+def _flow_mapping(text: str, where: str) -> dict[str, object] | None:
+    """`text` as a one-line YAML flow mapping, as obs writes `obs.template` and `derived_from`:
+    `{<key>: <value>, ...}`, each key a plain word, each value a JSON string or plain words read as
+    `_yaml_scalar` reads them, up to the next `,` or the closing `}`; None where it is none such."""
+    if not text.endswith("}"):
+        return None
+    inner, at, found = text[1:-1], 0, {}
+    while True:
+        match = FLOW_KEY.match(inner, at)
+        if match is None or match.group(1) in found:
+            return None
+        key, at = match.group(1), match.end()
+        if inner[at:at + 1] == '"':
+            try:
+                value, at = json.JSONDecoder().raw_decode(inner, at)
+            except json.JSONDecodeError:
+                return None
+        elif inner[at:at + 1] in ("'", "[", "{", ""):
+            return None
+        else:
+            end = inner.find(",", at)
+            end = len(inner) if end < 0 else end
+            if not inner[at:end].strip():
+                return None
+            value, at = _yaml_scalar(inner[at:end].strip(), where), end
+        found[key] = value
+        rest = inner[at:].lstrip(" \t")
+        if not rest:
+            return found
+        if rest[0] != ",":
+            return None
+        at = len(inner) - len(rest) + 1
 
 
 def _yaml_block(lines: list[tuple[int, int, str]], index: int, indent: int,
@@ -808,6 +921,9 @@ def note_data(text: str, where: str) -> dict[str, object]:
     """A template note as the data `_build` reads: its front matter, each field of its skeleton
     given its `heading` and its `says` from its section (the module docstring: Template files)."""
     data, body, first = _note_parts(text, where)
+    if "manifest" in data:  # the mark of a template manifest's data, which no note writes
+        raise TemplateError(f"{where}: unknown keys manifest; the template file format is "
+                            "scripts/templates.py's docstring")
     fields = data.get("fields", [])
     if not isinstance(fields, list) or not all(isinstance(entry, dict) for entry in fields):
         raise TemplateError(f"{where}: fields is a list of mappings, one per field")
@@ -832,6 +948,102 @@ def note_data(text: str, where: str) -> dict[str, object]:
     for entry, (_, heading, says) in zip(in_body, sections):
         entry["heading"], entry["says"] = heading, says
     return data
+
+
+def manifest_data(name: str, files: dict[str, str], where_of) -> tuple[dict[str, object], str]:
+    """Template manifest `<name>/manifest.md` of `files`, with its nodes beside it, as the data
+    `_build` reads, a note's (`note_data`), and the text its digest covers: the manifest's, then each
+    template node's in its order, a NUL byte between (the module docstring: Template manifests)."""
+    key = f"{name}/{MANIFEST_FILE}"
+    where = where_of(key)
+    front, body, first = _note_parts(files[key], where)
+    obs = front.get("obs")
+    declared = obs.get("template") if isinstance(obs, dict) else None
+    if not isinstance(declared, dict):
+        raise TemplateError(f"{where}: a template manifest carries obs.template, its name and version, "
+                            "in its front matter")
+    unknown = sorted(set(declared) - {"name", "version", "source"})
+    if unknown:
+        raise TemplateError(f"{where}: obs.template has unknown keys {', '.join(unknown)}; its keys are "
+                            "name, version and source")
+    for part in ("name", "version", "source"):
+        if part in declared and (not isinstance(declared[part], str) or not declared[part].strip()):
+            raise TemplateError(f"{where}: obs.template.{part} is {declared[part]!r}; write it as "
+                                "nonempty text")
+    if declared.get("name") != name:
+        raise TemplateError(f"{where}: obs.template.name is {declared.get('name')!r}; it is the "
+                            f"manifest's folder's name, {name!r}")
+    version = declared.get("version")
+    if not isinstance(version, str) or not MANIFEST_VERSION.match(version):
+        raise TemplateError(f"{where}: obs.template.version is {version!r}; write one to three whole "
+                            "numbers joined by dots, such as \"2\" or \"1.2.0\"")
+    title = front.get("title", "")
+    chapters, prose = [], []
+    for number, line in enumerate(body.splitlines(), first):
+        match = TOC_LINE.match(line)
+        if match:
+            chapters.append((number, match.group(1).strip(), (match.group(2) or "").strip()))
+        elif line.strip():
+            prose.append(line.strip())
+    fields: list[dict[str, object]] = []
+    texts = [files[key]]
+    for number, target, alias in chapters:
+        node = f"{name}/{target}{TEMPLATE_SUFFIX}"
+        if "/" in target or node not in files:
+            raise TemplateError(f"{where}:{number}: chapter [[{target}]] is no note beside the manifest, "
+                                f"{TEMPLATES}/{node}")
+        entry = _template_node(files[node], where_of(node), target, alias)
+        if entry is None:
+            continue  # an ordinary chapter, such as a note on how to use the template
+        if any(made["name"] == entry["name"] for made in fields):
+            raise TemplateError(f"{where}:{number}: chapter [[{target}]] is listed twice")
+        fields.append(entry)
+        texts.append(files[node])
+    if not fields:
+        raise TemplateError(f"{where}: a template manifest lists at least one template node, a chapter "
+                            "whose front matter carries obs.guidance")
+    says = _says(*prose) or (title if isinstance(title, str) else "") or name
+    return ({"name": name, "version": version, "kind": "document", "tags": [], "reader": "owner",
+             "says": says, "rules": {"required": REFUSE}, "fields": fields, "manifest": True},
+            "\0".join(texts))
+
+
+def _template_node(text: str, where: str, target: str, alias: str) -> dict[str, object] | None:
+    """A template node as the entry of its field: named after its note, its heading the chapter's
+    title, required where its gate is `mandatory`, its guidance its instruction; None for an
+    ordinary chapter, a note without `obs.guidance`."""
+    if not text.replace("\r\n", "\n").startswith("---\n"):
+        return None
+    front, body, _ = _note_parts(text, where)
+    obs = front.get("obs")
+    guidance = obs.get("guidance") if isinstance(obs, dict) else None
+    if guidance is None:
+        return None
+    if not isinstance(guidance, dict):
+        raise TemplateError(f"{where}: obs.guidance is a mapping of {', '.join(GUIDANCE_KEYS)}")
+    unknown = sorted(set(guidance) - set(GUIDANCE_KEYS))
+    if unknown:
+        raise TemplateError(f"{where}: obs.guidance has unknown keys {', '.join(unknown)}; its keys are "
+                            f"{', '.join(GUIDANCE_KEYS)}")
+    for part in GUIDANCE_KEYS:
+        if part in ("contents", "gate") and part not in guidance:
+            raise TemplateError(f"{where}: obs.guidance.{part} is required")
+        if part in guidance and (not isinstance(guidance[part], str) or not guidance[part].strip()):
+            raise TemplateError(f"{where}: obs.guidance.{part} is {guidance[part]!r}; write it as "
+                                "nonempty text")
+    if guidance["gate"] not in GATES:
+        raise TemplateError(f"{where}: obs.guidance.gate is {guidance['gate']!r}; one of {', '.join(GATES)}")
+    if body.strip() != SLOT:
+        raise TemplateError(f"{where}: a template node's body is its fill slot alone, a paragraph of "
+                            f"{SLOT}")
+    field = re.sub(r"[-\s]+", "_", target.strip().lower())
+    if not re.fullmatch(r"[a-z_][a-z0-9_]*", field):
+        raise TemplateError(f"{where}: the note's name {target!r} makes no field name; name it in "
+                            "lower-case letters, digits and hyphens")
+    says = _says(guidance["contents"], *(f"{GUIDANCE_LABELS[part]}: {guidance[part]}"
+                                         for part in ("motivation", "form", "sources") if part in guidance))
+    return {"name": field, "kind": "text", "required": guidance["gate"] == "mandatory",
+            "heading": alias or target, "says": says}
 
 
 def _interface_data(data: dict[str, object], body: str, where: str, first: int) -> dict[str, object]:
@@ -938,9 +1150,25 @@ def _loaded(layers: list[tuple[str, dict[str, str], object]]) -> dict[str, Templ
     terms: tuple[Term, ...] | None = None
     for repository, files, where_of in layers:
         won = set()
-        for name, text in files.items():
+        for name, text in sorted(files.items()):
             where = where_of(name)
-            if name.endswith(OVERLAY_SUFFIX):
+            if name.endswith(OVERLAY_SUFFIX) and "/" not in name:
+                continue
+            if "/" in name:
+                folder, note = name.split("/", 1)
+                if note != MANIFEST_FILE:
+                    continue  # a template node, read with its manifest
+                if f"{folder}{TEMPLATE_SUFFIX}" in files:
+                    raise TemplateError(f"{where}: {TEMPLATES}/{folder}{TEMPLATE_SUFFIX} is a template of "
+                                        f"that name too; keep one of the two")
+                if folder in raw:
+                    continue  # an earlier layer holds the name: it resolves there
+                data, text = manifest_data(folder, files, where_of)
+                data["path"] = where
+                raw[folder] = data
+                texts[folder] = text
+                repositories[folder] = repository
+                won.add(folder)
                 continue
             if name == TERMS_FILE:
                 try:
@@ -963,14 +1191,15 @@ def _loaded(layers: list[tuple[str, dict[str, str], object]]) -> dict[str, Templ
             texts[template_name] = text
             repositories[template_name] = repository
             won.add(template_name)
-        for name, text in files.items():
-            if not name.endswith(OVERLAY_SUFFIX):
+        for name, text in sorted(files.items()):
+            if not name.endswith(OVERLAY_SUFFIX) or "/" in name:
                 continue
             base = name.removesuffix(OVERLAY_SUFFIX)
-            if f"{base}{TEMPLATE_SUFFIX}" not in files:
+            if f"{base}{TEMPLATE_SUFFIX}" not in files and f"{base}/{MANIFEST_FILE}" not in files:
                 raise TemplateError(f"{where_of(name)}: an overlay of {base!r}, which this "
                                     f"{TEMPLATES}/ does not hold; an overlay lies beside its "
-                                    f"template, {TEMPLATES}/{base}{TEMPLATE_SUFFIX}")
+                                    f"template, {TEMPLATES}/{base}{TEMPLATE_SUFFIX} or "
+                                    f"{TEMPLATES}/{base}/{MANIFEST_FILE}")
             if base in won:  # an earlier layer's template of that name takes no overlay of this one
                 overlays[base] = (text, where_of(name))
     overlaid = _overlaid(raw, overlays)
@@ -1013,7 +1242,7 @@ TIGHTER_LIMITS = ("max_words", "first_sentence_chars")
 #: The template's own keys, which its overlay never changes.
 TEMPLATE_SAME = ("name", "version", "kind", "reader", "actions", "order", "marker", "title_pattern",
                  "keep_unknown", "actors", "scope", "paths", "marker_pattern", "labels", "base",
-                 "fallback", "checker", "adapter", "message", "is_adapter")
+                 "fallback", "checker", "adapter", "message", "is_adapter", "manifest")
 
 
 def _says(*parts: object) -> str:
@@ -1225,7 +1454,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
            seen: tuple[str, ...]) -> Template:
     data = raw[name]
     where = data["path"]
-    unknown = set(data) - TEMPLATE_KEYS - {"path"}
+    unknown = set(data) - TEMPLATE_KEYS - {"path", "manifest"}
     if unknown:
         raise TemplateError(f"{where}: unknown keys {', '.join(sorted(unknown))}; the template file format "
                         "is scripts/templates.py's docstring")
@@ -1242,8 +1471,8 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         raise TemplateError(f"{where}: applies has unknown keys "
                         f"{', '.join(sorted(set(applies) - APPLIES_KEYS))}; the keys are "
                         f"{', '.join(sorted(APPLIES_KEYS))}")
-    if applies is None and parent is None and data.get("kind") in PART_KINDS:
-        applies = {"actions": []}  # a part a node checks, shaping no action of its own
+    if applies is None and parent is None and (data.get("kind") in PART_KINDS or data.get("manifest")):
+        applies = {"actions": []}  # a part a node checks, or a manifest: no action of its own
     elif not isinstance(applies, dict) or not applies.get("actions"):
         if parent is None:
             raise TemplateError(f"{where}: applies.actions is required; name the actions the template "
@@ -1256,7 +1485,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         if action not in ACTIONS:
             raise TemplateError(f"{where}: action {action!r} is none of {', '.join(ACTIONS)}")
     version, kind, tags = data.get("version"), data.get("kind"), data.get("tags")
-    if not isinstance(version, str) or not SEMVER.match(version):
+    if not isinstance(version, str) or not (MANIFEST_VERSION if data.get("manifest") else SEMVER).match(version):
         raise TemplateError(f"{where}: version is {version!r}; write the template's semantic version, "
                             "such as 1.2.0")
     if kind not in TEMPLATE_KINDS:
@@ -1330,7 +1559,8 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         labels=tuple(str(label) for label in applies.get("labels", parent.labels if parent else ())),
         base=base_branch, fallback=bool(applies.get("fallback", False)),
         checker=str(data.get("checker", "")), adapter=adapter,
-        paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message))
+        paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message),
+        manifest=bool(data.get("manifest")))
 
 
 def _message(message: object, kind: object, fields: list[Field], parent: Template | None,
@@ -1744,7 +1974,7 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
         found = (_sibling("interfaces").snippet_fields(template.message, body, *template.snippet_parts)
                  if template.is_snippet else _sibling("interfaces").fields_of(template.message, body)) or {}
         return Document(template=template.name, fields=dict(found), source=body, read=dict(found))
-    if template.is_file:
+    if template.writes_file:
         return _parse_file(template, body)
     text = FRONT_MATTER.sub("", body, count=1)
     document = Document(template=template.name, fields={}, source=text,
@@ -1871,11 +2101,45 @@ def _parse_file(template: Template, body: str) -> Document:
     return document
 
 
+def derived_from(front: str) -> tuple[int, int, str, str] | None:
+    """Where front matter `front` holds `derived_from`, from its key to the end of its last line, and
+    the template and version it names (the module docstring: Files); None where it holds none. A
+    `derived_from` that is no mapping of a nonempty `template` and `version` names "" for both."""
+    offset = 0
+    lines = front.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        match = DERIVED_KEY.match(line.rstrip("\r\n"))
+        if match is None:
+            offset += len(line)
+            continue
+        end = offset + len(line.rstrip("\r\n"))
+        text = f"derived_from: {match.group(1)}\n"
+        if not match.group(1):
+            after = offset + len(line)
+            for following in lines[index + 1:]:
+                if following[:1] not in (" ", "\t") or not following.strip():
+                    break
+                text += following.rstrip("\r\n") + "\n"
+                end = after + len(following.rstrip("\r\n"))
+                after += len(following)
+        try:
+            value = front_data(text, "derived_from").get("derived_from")
+        except TemplateError:
+            value = None
+        named = [value.get(key) if isinstance(value, dict) else None for key in ("template", "version")]
+        named = [str(part).strip() if isinstance(part, (str, int)) and not isinstance(part, bool)
+                 else "" for part in named]
+        if not all(named):
+            named = ["", ""]
+        return offset, end, named[0], named[1]
+    return None
+
+
 def front_matter_template(body: str) -> str | None:
-    """The template a file's front matter names on its `template:` line, or None."""
+    """The template a file's front matter names in its `derived_from`, or None."""
     front = FRONT_MATTER.match(body)
-    found = FRONT_TEMPLATE.search(front.group(0)) if front else None
-    return found.group(1) if found else None
+    found = derived_from(front.group(0)) if front else None
+    return found[2].rsplit("/", 1)[-1] if found and found[2] else None
 
 
 def _front_key(key: str) -> re.Pattern:
@@ -1884,13 +2148,12 @@ def _front_key(key: str) -> re.Pattern:
 
 
 def front_version(template: Template, front: str) -> str:
-    """The version front matter `front` records for `template`: its `version:` line, read only where
-    its `template:` line names `template`, else ""."""
-    if not front or FRONT_TEMPLATE.search(front) is None or \
-            FRONT_TEMPLATE.search(front).group(1) != template.name:
+    """The version front matter `front` records for `template`: its `derived_from`'s, read only where
+    it names `template`, else ""."""
+    found = derived_from(front) if front else None
+    if found is None or found[2].rsplit("/", 1)[-1] != template.name:
         return ""
-    found = _front_key("version").search(front)
-    return found.group(1).strip() if found else ""
+    return found[3]
 
 
 def marked_version(template: Template, body: str) -> str:
@@ -1903,20 +2166,26 @@ def marked_version(template: Template, body: str) -> str:
 
 def _with_template(front: str, template: Template) -> str:
     """Front matter `front` recording `template` (`Template.front_lines`), every other byte kept: a
-    line of the three already there is written in its place, a missing one after the last of them,
-    else before the closing `---`; a new block where `front` is empty."""
+    key of them already there is written in its place (a `derived_from` of several lines as one), a
+    missing one after the last of them, else before the closing `---`; a new block where `front` is
+    empty."""
     lines = template.front_lines
     if not front:
         return "---\n" + "".join(f"{key}: {value}\n" for key, value in lines) + "---\n\n"
     newline = "\r\n" if "\r\n" in front else "\n"
-    after = None  # just after the last of the three written so far
+    after = None  # just after the last of them written so far
     for key, value in lines:
         closing = front.rstrip("\r\n").rfind("\n") + 1
         line = f"{key}: {value}"
-        found = (FRONT_TEMPLATE if key == "template" else _front_key(key)).search(front, 0, closing)
-        if found:
-            front = front[:found.start()] + line + front[found.end():]
-            after = found.start() + len(line) + len(newline)
+        if key == "derived_from":
+            found = derived_from(front[:closing])
+            span = (found[0], found[1]) if found else None
+        else:
+            match = _front_key(key).search(front, 0, closing)
+            span = (match.start(), match.end()) if match else None
+        if span:
+            front = front[:span[0]] + line + front[span[1]:]
+            after = span[0] + len(line) + len(newline)
         else:
             at = closing if after is None else after
             front = front[:at] + line + newline + front[at:]
@@ -2043,7 +2312,7 @@ def render(template: Template, document: Document | dict) -> str:
                  Part("scope", heading=f"## {template.scope.get('section', '')}"),
                  Part("preamble"), Part("suffix")]
     elif not parts:
-        parts = [Part("front"), Part("head"), Part("preamble")] if template.is_file else \
+        parts = [Part("front"), Part("head"), Part("preamble")] if template.writes_file else \
             [Part("preamble")]
     # Fields with a value but no section yet, and fence nodes not yet in the text, go after the
     # nearest earlier field that has one.
@@ -2079,7 +2348,7 @@ def render(template: Template, document: Document | dict) -> str:
             out.append(part.heading + "\n")
         elif part.kind == "preamble":
             preamble = _labels(template, document, _without_markers(part.raw))
-            if template.is_file:
+            if template.writes_file:
                 out.append(preamble)
             elif not template.scope:
                 out.append(f"{FLEET_MARKER}\n{marker}\n")
@@ -2151,7 +2420,7 @@ def draft(template: Template) -> str:
         return "\n".join([template.message, *(f"<!-- {item.name}: {item.says} -->"
                                                for item in template.fields)]) + "\n"
     lines = []
-    if template.is_file:
+    if template.writes_file:
         lines += ["---", *(f"{key}: {value}" for key, value in template.front_lines), "---", ""]
     elif template.scope:
         lines += [template.scope.get("after", ""), template.marker_line,
@@ -2471,9 +2740,9 @@ def _select_file(templates: dict[str, Template], body: str, title: str | None, p
         chosen = next((template for template in candidates if template.name == named), None)
         if chosen is not None:
             return Selection(chosen)
-        refused.append(Finding("body", "template", REFUSE, f"{path}: the front matter names "
-                               f"template: {named}, which does not claim this file; name one of "
-                               f"{names}"))
+        refused.append(Finding("body", "template", REFUSE, f"{path}: the front matter is "
+                               f"derived from template {named}, which does not claim this file; "
+                               f"name one of {names}"))
     lines = {line.strip() for line in body.splitlines()}
     for template in candidates:
         if not template.marker and not template.marker_pattern and not template.title_pattern:
@@ -2484,7 +2753,8 @@ def _select_file(templates: dict[str, Template], body: str, title: str | None, p
             continue
         return Selection(template, tuple(refused))
     refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
-                           f"template in the front matter, template: <name> (one of {names})"))
+                           f"template in the front matter, derived_from: {{template: <name>, version: "
+                           f"<version>}} (one of {names})"))
     return Selection(None, tuple(refused))
 
 
@@ -2650,6 +2920,9 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
             continue
         filled[item.name] = value
         text = _plain(value)
+        if holds_slot(text):
+            found.append(Finding(item.name, SLOT_RULE, REFUSE, f"section {item.heading or item.label or item.name} "
+                                 f"still holds the fill slot {SLOT}: write the section in its place"))
         if item.node:  # its own template checks it, by its own rules
             found += nested_findings(item, text, root=root, bare_scripts=bare_scripts, raw=raw)
             continue
@@ -2728,6 +3001,21 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     order = {item.name: index for index, item in enumerate(template.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
+
+
+def holds_slot(text: str) -> bool:
+    """Whether `text` holds the fill slot `{{slot}}` outside code: a fence, or a code span."""
+    kept, fence = [], None
+    for line in text.splitlines():
+        marker = FENCE.match(line)
+        if fence is None and marker:
+            fence = marker.group(1)
+        elif fence is not None:
+            if marker and marker.group(1).startswith(fence):
+                fence = None
+        else:
+            kept.append(CODE_SPAN.sub("", line))
+    return SLOT in "\n".join(kept)
 
 
 def nested_findings(item: Field, text: str, *, root: Path = ROOT, bare_scripts: bool = True,
@@ -2822,20 +3110,31 @@ def provenance(template: Template, document: Document) -> list[Finding]:
     move warns; a major move, or a recorded version that is none, refuses, naming both versions and
     the fill that brings the document up."""
     recorded, current = document.recorded, template.version
-    if not recorded or not current or recorded == current:
+    if not recorded or not current or recorded == current or \
+            (version_parts(template, recorded) or ()) == version_parts(template, current):
         return []
     named = f"the document records {template.name} {recorded}; the template is at {current}"
     where = "--path <file>" if template.is_file else template.name
     given = "" if template.is_file else " --body-file <file>"
-    if SEMVER.match(recorded) and recorded.split(".")[0] == current.split(".")[0]:
+    parts = version_parts(template, recorded)
+    if parts and parts[0] == version_parts(template, current)[0]:
         return [Finding("template", VERSION_RULE, WARN, f"{named}, another minor or patch version: "
                         f"render it again to record {current}: `templates.py check {where}{given} "
                         "--render`")]
-    why = (f"and {recorded} is no semantic version" if not SEMVER.match(recorded) else
+    why = (f"and {recorded} is no semantic version" if not parts else
            "another major version, which the document no longer fits")
     return [Finding("template", VERSION_RULE, REFUSE, f"{named}, {why}: fill it again at {current}: "
                     f"`templates.py draft {where} --json` gives its fields, and `templates.py check "
                     f"{where} --fields <fields> --render` writes it")]
+
+
+def version_parts(template: Template, version: str) -> tuple[int, int, int] | None:
+    """`version` as its three whole numbers, None where it is no version of `template`'s form: a
+    semantic version, or for a template manifest one to three numbers, the missing ones 0."""
+    if not (MANIFEST_VERSION if template.manifest else SEMVER).match(version):
+        return None
+    numbers = [int(part) for part in version.split(".")]
+    return (*numbers, *[0] * (3 - len(numbers)))
 
 
 class _Refused(Exception):
@@ -3553,7 +3852,8 @@ def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
                             f"match ({', '.join(template.paths)})")
     values = (fields_data(options.fields_json, "--fields-json", FILL) if options.fields is None
               else fields_file(options.fields, FILL))
-    existing = _file_text(options.path, FILL, missing_ok=True) if options.path is not None else None
+    kept = options.path if options.path is not None else options.out if template.manifest else None
+    existing = _file_text(kept, FILL, missing_ok=True) if kept is not None else None
     rendered, found = fill(template, values, raw, title=options.title, existing=existing)
     if any(item.severity == REFUSE for item in found):
         print("\n".join([*_capped(found), f"{FILL}: nothing was written; fix every finding and fill "
