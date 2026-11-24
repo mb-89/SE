@@ -335,7 +335,7 @@ func tightens(base, over *Template, where string) error {
 		{"scope", base.Scope, over.Scope}, {"paths", base.Paths, over.Paths}, {"marker_pattern", base.MarkerPattern, over.MarkerPattern},
 		{"labels", base.Labels, over.Labels}, {"base", base.Base, over.Base}, {"fallback", base.Fallback, over.Fallback},
 		{"checker", base.Checker, over.Checker}, {"adapter", base.Adapter, over.Adapter}, {"message", base.Message, over.Message},
-		{"is_adapter", base.IsAdapter(), over.IsAdapter()},
+		{"is_adapter", base.IsAdapter(), over.IsAdapter()}, {"manifest", base.Manifest, over.Manifest},
 	}
 	for _, key := range same {
 		if !reflect.DeepEqual(key.was, key.would) {

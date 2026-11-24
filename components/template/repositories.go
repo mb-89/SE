@@ -94,6 +94,27 @@ func folderFiles(folder string) (map[string]string, error) {
 		}
 		files[name] = string(data)
 	}
+	for _, entry := range entries { // each template manifest's notes, as <folder>/<note>
+		sub := filepath.Join(folder, entry.Name())
+		if info, err := os.Stat(filepath.Join(sub, manifestFile)); !entry.IsDir() || err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		notes, err := os.ReadDir(sub)
+		if err != nil {
+			continue
+		}
+		for _, note := range notes {
+			info, err := os.Stat(filepath.Join(sub, note.Name()))
+			if !strings.HasSuffix(note.Name(), templateSuffix) || err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(sub, note.Name()))
+			if err != nil {
+				return nil, err
+			}
+			files[entry.Name()+"/"+note.Name()] = string(data)
+		}
+	}
 	return files, nil
 }
 
@@ -124,9 +145,18 @@ func gitFiles(root string) map[string]string {
 	}
 	files := map[string]string{}
 	note := false
-	for _, path := range splitLines(listed, false) {
+	paths := splitLines(listed, false)
+	manifests := map[string]bool{}
+	for _, path := range paths {
+		if name, found := strings.CutPrefix(path, TemplatesFolder+"/"); found && strings.Count(path, "/") == 2 && strings.HasSuffix(path, "/"+manifestFile) {
+			manifests[strings.SplitN(name, "/", 2)[0]] = true
+		}
+	}
+	for _, path := range paths {
 		name, found := strings.CutPrefix(path, TemplatesFolder+"/")
-		if !found || strings.Count(path, "/") != 1 || !templateFile(name) {
+		top := strings.Count(path, "/") == 1 && templateFile(name)
+		nested := strings.Count(path, "/") == 2 && manifests[strings.SplitN(name, "/", 2)[0]] && strings.HasSuffix(name, templateSuffix)
+		if !found || !(top || nested) {
 			continue
 		}
 		shown, err := git.Run(ctx, "", "-C", root, "show", ref+":"+path)

@@ -319,6 +319,21 @@ On main, released as 13.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/upgrade_guide.py show --guide docs/upgrading.md --name <repository> --from <released> --to <next>`
   names the section.
 
+## SE 14
+
+On main, released as 14.0.0 at the next release.
+
+### A file records its template in `derived_from`
+
+- **Change:** a file a template writes records its template as obs reads a filled document,
+  `derived_from: {template: <name>, version: "<version>"}`, beside `overlay:`; the lines
+  `template: <name>` and `version: <version>` select nothing and record no version
+  ([docs/templates.md "The document"](templates.md#the-document)).
+- **Steps:** in every file a project template claims, replace the two lines `template: <name>` and
+  `version: <version>` by the one line `derived_from: {template: <name>, version: "<version>"}`, or
+  fill the file again with `templates.py fill --path <file>`.
+- **Check:** `git grep -nE '^template: ' -- '*.md'` prints no file a project template claims.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

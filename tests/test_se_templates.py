@@ -785,8 +785,8 @@ fields:
 
 <!-- risks: One item per risk, or None. -->
 '''
-GOOD_STEP = "---\ntemplate: step-risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
-EMPTY_STEP = "---\ntemplate: step-risks\n---\n\n# Risks\n\n## Risks\n\n"
+GOOD_STEP = "---\nderived_from: {template: step-risks, version: \"1.0.0\"}\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
+EMPTY_STEP = "---\nderived_from: {template: step-risks, version: \"1.0.0\"}\n---\n\n# Risks\n\n## Risks\n\n"
 
 
 def step_book(root: Path, **steps: str) -> Path:
