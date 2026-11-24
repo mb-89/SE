@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Templates: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
@@ -18,7 +19,7 @@ another reader takes for something else (`off`, `yes`, `null`, `1.5`), or that h
 are refused until quoted. It declares:
 
 - `name`, the file's; `version`, the template's semantic version (`1.2.0`), which its marker
-  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry` or `interface`); `tags`, a list of
+  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry`, `interface` or `code`); `tags`, a list of
   words, the template's one link to guidance, which `scripts/se_guidance.py` reads
   (docs/guidance.md "Resolution"); `reader` (`owner` or `fleet`: who reads what it
   shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
@@ -77,6 +78,22 @@ owns the field's `heading` and its `says`, the instruction, so the front matter 
 title or label field keeps its `says` in the front matter. An inherited field's section stays in
 the note it is declared in. Outside the sections the body holds nothing but blank lines; an
 adapter's body, and an interface's, is empty.
+
+**Code templates** (`kind: code`, CODE, docs/templates.md "Code templates"): an adapter without a
+checker of its own whose `lines` hold the shape of the files it claims (`applies.paths` with
+`file.write`, selected by its `marker_pattern`, the marker line it writes). Its body is the files
+`scaffold` writes, each a `## <path>` heading followed by one fenced block, the file's text, a
+fence of more backticks where the text holds three (`_code_data`; blank lines only between them).
+The paths and texts take the placeholders `{{name}}` (the file's stem or the folder's name),
+`{{ident}}` (it with `_` for each run of other characters), `{{package}}` (it without them),
+`{{says}}`, `{{template}}` (`<repository>/<name>`) and `{{version}}` (CODE_PLACEHOLDERS); any
+other is refused at load. `scaffold(template, path, says, name=)` gives the files: a template of
+one file the file `path`, one of several the files in the folder `path`.
+`templates.py scaffold <template> --path PATH --says LINE [--name NAME] [--root DIR]` writes them,
+refusing a file that exists and one the template claiming it would refuse, and prints `wrote
+<path>: <template> <version>` per file. A code template has no fields to fill: `fill` names its
+scaffold. Where every template that claims a file is a code template, a file none takes is refused
+naming the scaffold (Selection, for a file).
 
 **Interfaces** (`kind: interface`, docs/templates.md "Nesting"): a text code sends and reads, whose
 document is data. Its body is empty and its fields are the whole template: each field keeps its
@@ -213,7 +230,8 @@ For a file, `path` (relative to the project root) selects:
 3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
-   template: <name>`.
+   template: <name>`, or, where every template that claims it is a code template, one naming the
+   scaffold: the file carries no template marker.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
@@ -340,6 +358,8 @@ import sys
 import tomllib
 from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields, replace
 from pathlib import Path
+
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = "templates"
@@ -520,6 +540,8 @@ class Template:
     digest: str = ""
     #: A message interface's one line, its fields as `{<field>}` (scripts/interfaces.py owns it).
     message: str = ""
+    #: A code template's files, (path, text) each, as its note's body holds them (`scaffold`).
+    code: tuple[tuple[str, str], ...] = ()
 
     @property
     def is_snippet(self) -> bool:
@@ -686,9 +708,17 @@ YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
 INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n]*(.*?)[ \t\r\n]*-->[ \t\r\n]*\Z",
                          re.DOTALL)
 SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
-TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+TEMPLATE_KINDS = ("document", "block", "entry", "interface", "code")
 #: The kind whose document is data only: its body is empty, its fields the whole template.
 INTERFACE = "interface"
+#: A code template's kind (the module docstring: Code templates): an adapter whose body is the files
+#: `scaffold` writes.
+CODE = "code"
+#: Where note_data keeps a code template's files, (path, text) each; no note writes the key.
+CODE_FILES = "_code"
+#: A code template's placeholders, `{{<name>}}`, in its paths and files (`scaffold`).
+PLACEHOLDER = re.compile(r"\{\{([a-z]+)\}\}")
+CODE_PLACEHOLDERS = ("name", "ident", "package", "says", "template", "version")
 #: The kinds that may be parts of a document only, shaping no action of their own (no `applies`).
 PART_KINDS = ("block", "entry")
 
@@ -816,6 +846,8 @@ def note_data(text: str, where: str) -> dict[str, object]:
     level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
     if data.get("kind") == INTERFACE:
         return _interface_data(data, body, where, first)
+    if data.get("kind") == CODE:
+        return _code_data(data, body, where, first)
     sections = _skeleton(body, where, first, level)
     in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")
                and not entry.get("fence")]
@@ -850,6 +882,56 @@ def _interface_data(data: dict[str, object], body: str, where: str, first: int) 
         if message and "heading" in entry:
             raise TemplateError(f"{where}: field {entry.get('name', '?')} is a part of the message "
                                 "line, which has no headings; take heading out")
+    return data
+
+
+def _code_data(data: dict[str, object], body: str, where: str, first: int) -> dict[str, object]:
+    """A code template note's data: no fields, and its body the files `scaffold` writes, each a
+    `## <path>` heading followed by one fenced block, the file's text; outside them blank lines only."""
+    if data.get("fields"):
+        raise TemplateError(f"{where}: a code template has no fields; its adapter's lines hold its shape")
+    lines = body.splitlines(keepends=True)
+    files: list[list[str]] = []
+    index = 0
+    while index < len(lines):
+        number = first + index
+        if not lines[index].strip():
+            index += 1
+            continue
+        heading = re.match(r"^## +(\S.*?)[ \t]*$", lines[index].rstrip("\r\n"))
+        if heading is None:
+            raise TemplateError(f"{where}:{number}: a code template's body holds only `## <path>` "
+                                "headings, each followed by one fenced block, the file's text")
+        path = heading.group(1).strip("`")
+        index += 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        opening = FENCE.match(lines[index]) if index < len(lines) else None
+        if opening is None:
+            raise TemplateError(f"{where}:{number}: the file {path} has no fenced block under its heading")
+        fence = opening.group(1)
+        index += 1
+        start = index
+        while index < len(lines) and not (set(stripped := lines[index].strip()) == {fence[0]}
+                                          and len(stripped) >= len(fence)):
+            index += 1
+        if index == len(lines):
+            raise TemplateError(f"{where}:{number}: the fenced block of {path} is never closed")
+        files.append([path, "".join(lines[start:index])])
+        index += 1
+    if not files:
+        raise TemplateError(f"{where}: a code template's body holds the files it scaffolds, each a "
+                            "`## <path>` heading followed by one fenced block")
+    paths = [path for path, _ in files]
+    if len(set(paths)) != len(paths):
+        raise TemplateError(f"{where}: a code template names each file once; it names "
+                            f"{', '.join(sorted({path for path in paths if paths.count(path) > 1}))} twice")
+    for path, text in files:
+        for name in PLACEHOLDER.findall(path + text):
+            if name not in CODE_PLACEHOLDERS:
+                raise TemplateError(f"{where}: {{{{{name}}}}} in {path} is no placeholder; the "
+                                    f"placeholders are {', '.join(CODE_PLACEHOLDERS)}")
+    data[CODE_FILES] = files
     return data
 
 
@@ -1226,7 +1308,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
            seen: tuple[str, ...]) -> Template:
     data = raw[name]
     where = data["path"]
-    unknown = set(data) - TEMPLATE_KEYS - {"path"}
+    unknown = set(data) - TEMPLATE_KEYS - {"path", CODE_FILES}
     if unknown:
         raise TemplateError(f"{where}: unknown keys {', '.join(sorted(unknown))}; the template file format "
                         "is scripts/templates.py's docstring")
@@ -1331,7 +1413,8 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         labels=tuple(str(label) for label in applies.get("labels", parent.labels if parent else ())),
         base=base_branch, fallback=bool(applies.get("fallback", False)),
         checker=str(data.get("checker", "")), adapter=adapter,
-        paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message))
+        paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message),
+        code=tuple((str(path), str(text)) for path, text in data.get(CODE_FILES, [])))
 
 
 def _message(message: object, kind: object, fields: list[Field], parent: Template | None,
@@ -2489,8 +2572,13 @@ def _select_file(templates: dict[str, Template], body: str, title: str | None, p
         if template.title_pattern and not re.search(template.title_pattern, title or ""):
             continue
         return Selection(template, tuple(refused))
-    refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
-                           f"template in the front matter, template: <name> (one of {names})"))
+    if all(template.kind == CODE for template in candidates):
+        refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; it "
+                               f"carries no template marker: scaffold it, {SCAFFOLD} <template> --path "
+                               f"{path} --says <one line> (one of {names})"))
+    else:
+        refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
+                               f"template in the front matter, template: <name> (one of {names})"))
     return Selection(None, tuple(refused))
 
 
@@ -3279,6 +3367,9 @@ def fill(template: Template, values: dict[str, object], raw: str, *, title: str 
     input `raw` (`check(raw=)`). `title` fills the title field where the template has one.
     `existing`, the text of the file a file template fills again, keeps its head (front matter and
     page title) and the sections the template does not declare; its fields are the values alone."""
+    if template.kind == CODE:
+        raise TemplateError(f"templates: {template.name} is a code template and has no fields to fill; "
+                            f"its scaffold writes the file: {scaffold_call(template, '<path>')}")
     if template.is_adapter:
         raise TemplateError(f"templates: {template.name} is an adapter and has no fields to fill; the "
                             "command that writes it writes its body")
@@ -3295,6 +3386,81 @@ def fill(template: Template, values: dict[str, object], raw: str, *, title: str 
     named = values.get(title_field) if title_field else None
     document = parse(template, rendered, named if isinstance(named, str) else None)
     return rendered, check(template, document, raw=raw)
+
+
+# Code templates
+
+#: A scaffolded file's name: lower-case letters, digits, dashes and underscores, a letter first.
+CODE_NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
+SCAFFOLD = "templates.py scaffold"
+
+
+def scaffold_call(template: Template, path: object) -> str:
+    """The scaffold command that writes `path` from the code template `template`."""
+    return f"uv run python {ROOT / 'scripts' / 'templates.py'} scaffold {template.name} --path {path} --says <one line>"
+
+
+def code_values(template: Template, name: str, says: str) -> dict[str, str]:
+    """What each placeholder of `template` stands for, for the file or module `name` that `says`."""
+    return {"name": name, "ident": re.sub(r"[^0-9a-z]+", "_", name.lower()).strip("_"),
+            "package": re.sub(r"[^0-9a-z]", "", name.lower()), "says": says,
+            "template": f"{template.repository}/{template.name}", "version": template.version}
+
+
+def scaffold(template: Template, path: Path, says: str, name: str | None = None) -> dict[Path, str]:
+    """The files the code template `template` scaffolds at `path`, each its text with the
+    placeholders filled (the module docstring: Code templates). A template of one file writes the
+    file `path`, named by its stem; one of several writes them into the folder `path`, named by
+    it; `name` names either otherwise. Writes nothing."""
+    if template.kind != CODE:
+        raise TemplateError(f"{SCAFFOLD}: {template.name} is a {template.kind} template; only a code "
+                            "template scaffolds, a document is filled (templates.py fill)")
+    single = len(template.code) == 1
+    name = name or (path.stem if single else path.name)
+    if not CODE_NAME.match(name):
+        raise TemplateError(f"{SCAFFOLD}: {name!r} is no name for a scaffolded file: lower-case "
+                            "letters, digits, dashes and underscores, a letter first")
+    says = " ".join(says.split())
+    if not says or '"""' in says or "`" in says:
+        raise TemplateError(f"{SCAFFOLD}: --says is the one line the file opens with, what it does; "
+                            'give it, without """ or backticks')
+    values = code_values(template, name, says)
+
+    def filled(text: str) -> str:
+        return PLACEHOLDER.sub(lambda match: values[match.group(1)], text)
+
+    if single:
+        return {path: filled(template.code[0][1])}
+    return {path / filled(relative): filled(text) for relative, text in template.code}
+
+
+def _scaffold(templates: dict[str, Template], options: argparse.Namespace) -> int:
+    """`scaffold`: write the files a code template makes at `--path`, each checked first against the
+    template that claims it, or refuse, writing nothing."""
+    template = _template(templates, options.template)
+    root = _root(options.path, options.root)
+    made = scaffold(template, options.path, options.says, options.name)
+    for path, text in made.items():
+        if path.exists():
+            raise TemplateError(f"{SCAFFOLD}: {path} exists; a scaffold writes new files only, so "
+                                "edit the one there")
+        try:
+            relative = path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        chosen = select(templates, FILE_ACTION, text, path=relative)
+        found = [*chosen.findings, *(check(chosen.template, parse(chosen.template, text))
+                                     if chosen.template is not None else ())]
+        refused = [item for item in found if item.severity == REFUSE]
+        if refused:
+            raise TemplateError("\n".join([f"{SCAFFOLD}: {template.name} scaffolds {relative}, which "
+                                            "breaks the template that claims it; fix the template:",
+                                            *_capped(refused)]))
+    for path, text in made.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+        print(f"wrote {path}: {template.name} {template.version}")
+    return 0
 
 
 # Command
@@ -3599,8 +3765,8 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py",
-                                     description="SE's templates: check, draft, schema, list, fill, interfaces")
+    parser = se_script.parser(prog="templates.py",
+                                     description="SE's templates: check, draft, schema, list, fill, scaffold, interfaces")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -3625,6 +3791,18 @@ def main(arguments: list[str] | None = None) -> int:
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
     listing.add_argument("--owned", action="store_true", help="the paths the templates own")
+    scaffolding = commands.add_parser("scaffold", help="write a new script or module from a code template",
+                                      description="Write the files a code template makes, its "
+                                      "placeholders filled and its marker recording the template and "
+                                      "version, each checked against the template that claims it; "
+                                      "an existing file is refused.")
+    scaffolding.add_argument("template", help="the code template, such as python-script")
+    scaffolding.add_argument("--path", type=Path, required=True,
+                             help="the file, or for a template of several files their folder")
+    scaffolding.add_argument("--says", required=True, help="one line: what the script or module does")
+    scaffolding.add_argument("--name", help="its name (default: the file's stem, or the folder's name)")
+    scaffolding.add_argument("--root", type=Path, help="the project: the root of the templates' globs "
+                             "(default: the git checkout holding --path, else the working directory)")
     interfacing = commands.add_parser("interfaces", help="write the generated schema of each "
                                       "interface template beside the code that uses it "
                                       "(scripts/interfaces/), from the working tree's templates/")
@@ -3658,7 +3836,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling):
+    for command in (checking, drafting, schemas, listing, filling, scaffolding):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -3686,6 +3864,8 @@ def main(arguments: list[str] | None = None) -> int:
             return 0
         if options.command == "fill":
             return _fill(templates, options)
+        if options.command == "scaffold":
+            return _scaffold(templates, options)
         if options.command in ("draft", "schema"):
             command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):
@@ -3738,4 +3918,4 @@ def main(arguments: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

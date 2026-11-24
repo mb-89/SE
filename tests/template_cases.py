@@ -28,6 +28,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -396,7 +397,26 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
                        '{"verdict": "pass", "verdict": 1}', "\ufeff{}"):
             bodies.append(f"{review}\n```json\n{broken}\n```\n")
         return [(body, None) for body in bodies]
+    if template.kind == templates.CODE:
+        return [(body, None) for body in _code_bodies(template)]
     return []
+
+
+def _code_bodies(template: templates.Template) -> list[str]:
+    """A code template's bodies: each file it scaffolds as it writes it, then the claimed one
+    without each line its shape needs in turn, with another major version, and a free text."""
+    made = [text for _, text in sorted(templates.scaffold(template, Path("x") / "thing", "Do the thing.",
+                                                           "thing").items())]
+    claimed = [text for text in made if any(re.fullmatch(template.marker_pattern, line.strip())
+                                            for line in text.splitlines())]
+    bodies = list(made)
+    for text in claimed[:1]:
+        lines = text.splitlines(keepends=True)
+        for line in template.adapter.get("lines", []):
+            kept = [item for item in lines if re.fullmatch(line["pattern"], item.strip()) is None]
+            bodies.append("".join(kept))
+        bodies.append(text.replace(f" {template.version}", " 2.0.0", 1))
+    return [*bodies, "Free text.\n", ""]
 
 
 def _set(name: str, loaded: dict[str, templates.Template], source: str, files: dict | None = None,

@@ -39,6 +39,6 @@ def test_the_cases_cover_every_template_kind_rule_and_selection():
             "unnamed-entry", "checker"} <= rules
     kinds = {entry["template"]["kind"] for data in files.values()
              for entry in data.get("templates", {}).values()}
-    assert kinds == {"document", "block", "entry", "interface"}
+    assert kinds == {"document", "block", "entry", "interface", "code"}
     assert files["load-errors.json"]["errors"]
     assert any(case["selected"] for case in files["se-select.json"]["select"])
