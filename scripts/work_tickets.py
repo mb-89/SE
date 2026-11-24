@@ -4395,6 +4395,20 @@ def merged_into(root: Path, remote: str, ancestor: str, descendant: str) -> bool
     return held.returncode == 0
 
 
+def claim_tips(root: Path, repo: str, branch: str) -> tuple[str, str | None, str | None]:
+    """The remote that hosts the issue's repository (`issue_remote`), and there the tips of
+    `branch` and of the integration branch, each None where it is not there; a QueueError where
+    the remote cannot be read."""
+    remote = issue_remote(root, repo)
+    base = f"refs/heads/{integration_branch(root)}"
+    listed = run_git(root, "ls-remote", remote, f"refs/heads/{branch}", base)
+    if listed.returncode != 0:
+        raise QueueError(f"Cannot read branch {branch} on {remote}: {failure_detail(listed)}")
+    tips = {name.strip(): sha.strip() for sha, _, name in
+            (line.partition("\t") for line in listed.stdout.splitlines())}
+    return remote, tips.get(f"refs/heads/{branch}"), tips.get(base)
+
+
 def unused_claim(root: Path, repo: str, branch: str) -> str | None:
     """The tip of `branch` on the remote that hosts the issue's repository (`issue_remote`) where
     it is an unused claim, a branch nobody worked on: it holds no commit beyond the integration
@@ -4402,14 +4416,10 @@ def unused_claim(root: Path, repo: str, branch: str) -> str | None:
     it now (a start's claim is made at the newest main). None where the branch is not there, holds
     a commit of its own, is at the newest main, or either branch cannot be read. Whether its issue
     is in progress is the caller's: only an issue not labelled in-progress has its claim reused."""
-    remote = issue_remote(root, repo)
-    base = f"refs/heads/{integration_branch(root)}"
-    listed = run_git(root, "ls-remote", remote, f"refs/heads/{branch}", base)
-    if listed.returncode != 0:
+    try:
+        remote, tip, newest = claim_tips(root, repo, branch)
+    except QueueError:
         return None
-    tips = {name.strip(): sha.strip() for sha, _, name in
-            (line.partition("\t") for line in listed.stdout.splitlines())}
-    tip, newest = tips.get(f"refs/heads/{branch}"), tips.get(base)
     if not tip or not newest or not merged_into(root, remote, tip, newest):
         return None
     return tip
@@ -4471,6 +4481,46 @@ def take_claim(root: Path, number: int, repo: str, branch: str, commit: str) -> 
 def forget_claim(root: Path, number: int) -> None:
     """Remove the record of this checkout's claim of #`number`, once `start` has taken it."""
     claim_record_path(root, number).unlink(missing_ok=True)
+
+
+UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment
+UNCLAIMED_COMMENT = (UNCLAIMED_MARK + " {started} started no worker; `ready`, `claim` and `start` "
+                     "take its branch `{branch}` again.\n")
+
+
+def unclaim(root: Path, number: int, repo: str) -> str:
+    """Undo work issue #`number`'s claim that no worker took, such as the claims a landing in the
+    cloud made before it started nothing there: its beat line removed, `ready` set where
+    `in-progress` is, and its last `Started:` comment answered with one line saying so, each only
+    where it is still to do. Refused, changing nothing, where its branch on the issue's remote
+    holds a commit beyond the integration branch: that is a worker's. The branch stays, an unused
+    claim `start` takes (`unused_claim`). The line naming what it did."""
+    issue = fetch_issue(root, number, repo)
+    branch, where = str(issue["title"]), repo_arguments(repo)
+    remote, tip, newest = claim_tips(root, repo, branch)
+    if tip and tip != newest and not (newest and merged_into(root, remote, tip, newest)):
+        raise QueueError(f"unclaim: #{number}'s branch {branch} on {remote} holds commits beyond "
+                         f"{integration_branch(root)}, a worker's; its claim is not undone and "
+                         "nothing was changed")
+    done = []
+    body = str(issue["body"])
+    if beat_of(body) is not None:
+        run_gh_with_body(root, ["issue", "edit", str(number), *where], without_beat(body))
+        done.append("beat line removed")
+    if IN_PROGRESS_LABEL in issue_labels(issue):
+        run_gh(root, ["issue", "edit", str(number), "--remove-label", IN_PROGRESS_LABEL,
+                      "--add-label", "ready", *where])
+        done.append("ready again")
+    comments = [comment for comment in issue["comments"] if isinstance(comment, dict)]
+    starts = [index for index, comment in enumerate(comments)
+              if str(comment.get("body") or "").startswith("Started:")]
+    if starts and not any(str(comment.get("body") or "").startswith(UNCLAIMED_MARK)
+                          for comment in comments[starts[-1] + 1:]):
+        started = str(comments[starts[-1]].get("url") or "") or "its Started comment"
+        run_gh_with_body(root, ["issue", "comment", str(number), *where],
+                         UNCLAIMED_COMMENT.format(started=started, branch=branch))
+        done.append("Started comment answered")
+    return f"Unclaimed #{number}: {', '.join(done) if done else 'nothing left to undo'}"
 
 
 def utc_now() -> datetime:
@@ -12326,6 +12376,24 @@ def claimed_issue(root: Path, number: int, repo: str, issue_file: Path | None) -
     return issue
 
 
+@command("unclaim", "undo claims no worker took, such as those a landing in the cloud made: each "
+                    "issue's beat line removed, ready set where in-progress is, its Started "
+                    "comment answered with one line; refused for an issue whose branch holds "
+                    "commits beyond main",
+         WORKTREE,
+         arg("issues", type=int, nargs="+", metavar="issue"),
+         REPO)
+def run_unclaim(root: Path, args: argparse.Namespace) -> int:
+    repo, refused = resolve_repo(root, args.repo), False
+    for number in args.issues:
+        try:
+            print(unclaim(root, number, repo))
+        except QueueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            refused = True
+    return 1 if refused else 0
+
+
 @command("session-title", "print the title of a session a role starts: `SE`, "
                          "`SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` "
                          "(work model, Visible sessions)",
@@ -12914,7 +12982,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "unclaim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
 #: The commands a person waits on that only read: these go through kern where it runs

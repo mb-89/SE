@@ -221,6 +221,56 @@ def test_integrate_lands_and_closes_the_work_issue_over_rest(
     assert in_one_call(rest_gh, out, main_checkout)
 
 
+def test_unclaim_undoes_claims_no_worker_took_and_refuses_a_worker_s_branch_over_rest(
+        main_checkout, rest_gh, capsys):
+    """The claims a landing in the cloud made (SE#1881): #21 labelled ready again by hand, #22 still
+    in progress, each with a beat line and a Started comment; #23's branch holds a worker's commit."""
+    origin = main_checkout.parent / "origin.git"
+    git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
+    older = git_run(main_checkout, "rev-parse", "origin/main~1", check=True).stdout.strip()
+    beat = "<!-- se:fleet -->\n<!-- se:beat 2026-11-24T14:50Z -->\n\n## Goal\n\nWait.\n"
+    started = "Started: worker session on branch `{}`\n"
+    for number, labels in ((21, ["work", "ready"]), (22, ["work", "in-progress"]),
+                           (23, ["work", "in-progress"])):
+        rest_gh.issue(SLUG, number, f"claimed-{number}", beat, labels=[*labels, "repo:repo"],
+                      comments=["Filed.", started.format(f"claimed-{number}")])
+        git_ok("-C", str(main_checkout), "push", "-q", "origin", f"{older}:refs/heads/claimed-{number}")
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "work-23", str(worker), older)
+    git_ok("-C", str(worker), "commit", "-q", "--allow-empty", "-m", "A worker's commit")
+    git_ok("-C", str(worker), "push", "-q", "origin", "HEAD:refs/heads/claimed-23")
+
+    assert run(main_checkout, "unclaim", "21", "22", "23") == 1
+
+    captured = capsys.readouterr()
+    assert "Unclaimed #21: beat line removed, Started comment answered\n" in captured.out
+    assert "Unclaimed #22: beat line removed, ready again, Started comment answered\n" in captured.out
+    assert ("unclaim: #23's branch claimed-23 on origin holds commits beyond main, a worker's; its "
+            "claim is not undone and nothing was changed") in captured.err
+    for number in (21, 22):
+        assert rest_gh.issues[SLUG][number]["body"] == "<!-- se:fleet -->\n\n## Goal\n\nWait.\n"
+        assert sorted(rest_gh.label_names(SLUG, number)) == ["ready", "repo:repo", "work"]
+        answer = rest_gh.comments[(SLUG, number)][-1]["body"]
+        assert answer.startswith("Claim undone: https://git.example/owner/repo/issues/"
+                                 f"{number}#issuecomment-")
+        assert answer.endswith(f" started no worker; `ready`, `claim` and `start` take its branch "
+                               f"`claimed-{number}` again.\n") and answer.count("\n") == 1
+    assert rest_gh.issues[SLUG][23]["body"] == beat
+    assert rest_gh.label_names(SLUG, 23) == ["work", "in-progress", "repo:repo"]
+    assert len(rest_gh.comments[(SLUG, 23)]) == 2
+    assert git_run(origin, "rev-parse", "refs/heads/claimed-21", check=True).stdout.strip() == older
+
+    assert run(main_checkout, "unclaim", "21", "22") == 0  # once undone, nothing is left to do
+    assert capsys.readouterr().out == ("Unclaimed #21: nothing left to undo\n"
+                                       "Unclaimed #22: nothing left to undo\n")
+    assert [len(rest_gh.comments[(SLUG, number)]) for number in (21, 22)] == [3, 3]
+
+    assert run(main_checkout, "ready") == 0  # their branches are unused claims start takes
+    listed = capsys.readouterr().out
+    assert "#21 claimed-21\n" in listed and "#22 claimed-22\n" in listed
+    assert "#23 claimed-23\n" not in listed  # in progress: a claim, never startable
+
+
 def test_turn_start_prints_every_part_of_the_turn_s_start_from_one_call(
         worktree, rest_gh, monkeypatch, capsys):
     (worktree / "se.toml").write_text(OUTSIDE_CONFIG, encoding="utf-8")

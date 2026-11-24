@@ -112,6 +112,13 @@ group = "Integration"
 help = "claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there, unless it is an unused claim (behind main, no commit of its own) of an issue not in progress, which it moves to the newest main; start of the issue in this checkout then takes this claim and changes its labels"
 class = "batch"
 
+[commands."work_tickets.py unclaim"]
+usage = "work_tickets.py unclaim --worktree WORKTREE [--repo REPO] issue [issue ...]"
+summary = "undo claims no worker took, such as those a landing in the cloud ..."
+group = "Integration"
+help = "undo claims no worker took, such as those a landing in the cloud made: each issue's beat line removed, ready set where in-progress is, its Started comment answered with one line; refused for an issue whose branch holds commits beyond main"
+class = "batch"
+
 [commands."work_tickets.py session-title"]
 usage = "work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike}\n                              [project] [topic]"
 summary = "print the title of a session a role starts: `SE`, ..."

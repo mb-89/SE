@@ -819,6 +819,11 @@ below, a positive number of hours, default 12; other keys are refused.
   <file>` judges the `list_issues` answer that `queue`'s plan reads.
   - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
     delete its branch, take off `in-progress` and remove the beat line.
+  - A claim no worker took is undone with `work_tickets.py unclaim <issue>...`: the beat line
+    removed, `ready` set where `in-progress` is, and the `Started:` comment answered with one
+    line. It refuses an issue whose branch holds commits beyond main, a worker's.
+  - Its branch stays as an unused claim, behind main with no commit of its own, which `ready`
+    lists and `claim` and `start` take ([Worktrees](src/skills/work-model/SKILL.md#worktrees)).
 
 #### Commit checks
 
@@ -2179,6 +2184,7 @@ settings checks and the generated docs.
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
 | `work_tickets.py test-seconds` | `work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE] [--slowest N]` | print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing |
 | `work_tickets.py turn-start` | `work_tickets.py turn-start [--worktree WORKTREE] [--repo REPO] [--all-repos]` | what SE reads at each turn's start, in one call: the pause state, the escalations, the delivered pull requests, the capacity, the startable and the claimed work, the outside issues and the fleet's findings, read at once while the checkout syncs; a part whose read fails names its cause. Exit code 1 while the fleet is paused. Without gh it prints the queue's and the fleet check's plans, exit code 2 |
+| `work_tickets.py unclaim` | `work_tickets.py unclaim --worktree WORKTREE [--repo REPO] issue [issue ...]` | undo claims no worker took, such as those a landing in the cloud made: each issue's beat line removed, ready set where in-progress is, its Started comment answered with one line; refused for an issue whose branch holds commits beyond main |
 
 #### Review
 
