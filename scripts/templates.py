@@ -2162,6 +2162,29 @@ def front_version(template: Template, front: str) -> str:
     return found[3]
 
 
+def stamped(template: Template, body: str) -> str:
+    """`body` recording that it derives from `template` (docs/templates.md "The filled template is
+    a type"): its marker line (`marker_line`) where `render` writes it, every other byte kept. That
+    is after the fleet marker, which goes first where the body has none, or for a scoped template
+    after its scope's `after` line, a TemplateError where the body lacks that line. A body whose
+    marker names `template` already, and the text of a template `render` never marks (an adapter,
+    a message, a file's), is given back unchanged."""
+    if template.is_adapter or template.message or template.writes_file:
+        return body
+    if any(match.group(1) == template.name for match in TEMPLATE_MARKER_PATTERN.finditer(body)):
+        return body
+    lines = body.splitlines(keepends=True)
+    after = template.scope.get("after", "") if template.scope else FLEET_MARKER
+    for index, line in enumerate(lines):
+        if line.strip() == after:
+            return "".join([*lines[:index], _end(line), template.marker_line + "\n", *lines[index + 1:]])
+    if template.scope:
+        raise TemplateError(f"templates: the body has no `{after}` line, which the {template.name} "
+                            "template's marker follows")
+    gap = "\n" if body and not body.startswith("\n") else ""
+    return f"{FLEET_MARKER}\n{template.marker_line}\n{gap}{body}"
+
+
 def marked_version(template: Template, body: str) -> str:
     """The version the body's template marker naming `template` records, else ""."""
     for match in TEMPLATE_MARKER_PATTERN.finditer(body):

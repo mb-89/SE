@@ -5721,8 +5721,11 @@ def twin_rule(key: tuple[str, str | None]) -> str:
 
 
 def comment_quote(text: str) -> str:
-    """`text` as a Markdown quote, without the fleet marker, so a comment shows it as data."""
-    lines = text.replace(FLEET_MARKER, "").strip().splitlines()
+    """`text` as a Markdown quote, without the fleet marker and template markers, so a comment
+    shows it as data and names no template it is not filled from."""
+    marker = sibling("templates").TEMPLATE_MARKER_PATTERN
+    lines = "\n".join(line for line in text.replace(FLEET_MARKER, "").splitlines()
+                      if not marker.fullmatch(line)).strip().splitlines()
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
@@ -5939,7 +5942,10 @@ def template_body(root: Path, template: str, command: str, file: Path | None, fi
               read: Callable[[Path], str]) -> tuple[str, str]:
     """The body a filing command files and the body as given (what `--hold` files): from
     `fields` always rendered through the template; from `file` (`read` reads it) as it stands with
-    `[templates] enforce` off, else parsed and rendered again (README "Templates")."""
+    `[templates] enforce` off, else parsed and rendered again (README "Templates"). Every body it
+    gives carries the template's marker: the body as given is stamped with it
+    (`templates.stamped`), so even an unchecked or a held filing names the template it derives
+    from (docs/templates.md "The filled template is a type")."""
     templates = sibling("templates")
     if (file is None) == (fields is None):
         raise QueueError(f"{command} takes exactly one of --body-file and --fields")
@@ -5947,7 +5953,7 @@ def template_body(root: Path, template: str, command: str, file: Path | None, fi
         if fields is not None:
             rendered = templates.render(template_of(template), templates.fields_file(fields, command))
             return rendered, rendered
-        given = read(file)
+        given = templates.stamped(template_of(template), read(file))
         gate = enforcement(root)
         if gate.enforce == templates.OFF:
             return given, given
@@ -5985,10 +5991,12 @@ def template_findings(root: Path, repo: str, chosen, title: str, body: str,
         raise QueueError(str(error)) from error
 
 
-# The routing `routed_body` writes: HANDLED_MARKER on a line of its own, then the Routing heading;
-# a body that names the marker in prose (in a code span, say) is not routed.
+# The routing `routed_body` writes: HANDLED_MARKER on a line of its own, then the routed template's
+# marker where the filing stamped or rendered it (`templates.stamped`, `templates.render`), then the
+# Routing heading; a body that names the marker in prose (in a code span, say) is not routed.
 ROUTED_PATTERN = re.compile(
-    rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
+    rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n(?:[ \t]*<!-- se:template [^\n]*-->[ \t]*\r?\n)?"
+    rf"## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
 
 
 def held_template(number: int, issue: dict[str, object]) -> str:
