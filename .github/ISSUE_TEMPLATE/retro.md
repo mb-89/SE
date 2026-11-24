@@ -50,16 +50,16 @@ None.
    are findings where a command should be made cheaper.
 4. **The standing questions**: the judge fills the matrix of the questions against the chapters
    and answers every standing question.
-5. **Classes and homes**: the judge fills the block's `findings`, `classes` and `went_well`. Each
+5. **Classes and homes**: the judge fills the block's `findings`, `classes` and `went_well`: each
    class has one cause and one fix, its home the first that holds in the order check, refusal,
-   gate, prefill, checklist line, command, setting, sentence; each finding names its class, its
+   gate, prefill, checklist line, command, setting, sentence, and each finding names its class, its
    home (the file it changes) and, where it changes a rule, trades one metric for another, the
    judge is unsure or it recurred, `controversial` with its why.
 6. **The person decides** every open class in the session; the judge records the decisions in step
-   6. The judged draft lands on the integration branch as the retro doc (`docs/retro-...`), then
+   6, the judged draft lands on the integration branch as the retro doc (`docs/retro-...`), and
    `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` checks the judgment,
    posts the report as this issue's closing comment, linking the doc for the facts and the block,
-   and closes it. It files no issue: SE reads the report, bundles the `work` findings into work
+   and closes it, filing no issue: SE reads the report, bundles the `work` findings into work
    issues (each naming `retro #<n> finding <k>`) and puts the `decision` findings on the owner's
    decision list.
 

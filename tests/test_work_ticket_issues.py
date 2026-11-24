@@ -316,7 +316,7 @@ class FakeGh:
 
 IDENTITY = '[project]\nidentity = "mb <mb>"\n'
 # The marker lines a filing stamps onto a body filed as given (templates.stamped).
-_SE_TEMPLATES = work_tickets.sibling("templates").load(work_tickets.SE_ROOT)
+_SE_TEMPLATES = work_tickets.sibling("templates").load(work_tickets.SE_ROOT, tree=True)
 WORK_MARKER, TICKET_MARKER, ROUTED_MARKER = (_SE_TEMPLATES[name].marker_line
                                              for name in ("work", "ticket", "routed"))
 

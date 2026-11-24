@@ -773,7 +773,9 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
     assert ("**Writing work issues**: - an issue that renames an identifier says whether the code emits it or "
             "only documents it; - a docs issue that asks to point instead of restating quotes the text to "
             "replace and names each note by its repository path; - a docs requirement names the test file "
-            "its regression test belongs in; - content a worker needs from another repository (a list, a "
+            "its regression test belongs in; - each requirement is one checkable statement, one sentence "
+            "without a word nobody can check (`templates/requirement.md`); filing refuses one that is not, "
+            "naming it; - content a worker needs from another repository (a list, a "
             "decision, a spec passage) is quoted inline with its source named, because a cloud worker reads "
             "only its own repository: a cross-repository link is never the only copy (`intake` warns on one "
             "with no quoted block next to it).") in rules

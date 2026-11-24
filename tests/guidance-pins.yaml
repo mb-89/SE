@@ -67,6 +67,9 @@ raid-entry:
 raid-register:
   - discover-cheap-load-late
   - guidance-comes-first
+requirement:
+  - discover-cheap-load-late
+  - guidance-comes-first
 retro:
   - discover-cheap-load-late
   - guidance-comes-first
