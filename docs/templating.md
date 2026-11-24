@@ -27,7 +27,7 @@ both.
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
 | `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
-| `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
+| `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, only its release kind. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report, and states its release kind. |
 | `templates/merge-message.md` | A merge into the integration branch: `Integrate <branch>` (a release's `Release v<version>`) and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |

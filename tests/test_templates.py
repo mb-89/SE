@@ -297,7 +297,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
     return {
         "field-report": (f"Refs {ISSUE_URL}\n\n{issue_tests.reported_at(issue_tests.TIP)}", "feat/x"),
         "landing": (work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor"), "feat/x"),
-        "housekeeping": ("Refresh the lock.\n", "Refresh the lock"),
+        "housekeeping": ("Refresh the lock.\n\nRelease-kind: patch\n", "Refresh the lock"),
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
         "pugh": (test_deck.PUGH, None),
@@ -1349,7 +1349,7 @@ def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     assert ("pr.merge: checker work_tickets:merge_release_kind, title "
             "work_tickets:MERGE_SUBJECT_PATTERN:") in lines["merge-message"]
     assert "pr.create, pr.edit: checker none, 4 lines:" in lines["landing"]
-    assert "pr.create, pr.edit: checker none (no field required):" in lines["housekeeping"]
+    assert "pr.create, pr.edit: checker none, 1 lines:" in lines["housekeeping"]
 
 
 def test_every_name_an_adapter_gives_resolves(catalog):
@@ -1479,10 +1479,13 @@ def test_a_work_issue_carrying_the_decision_marker_is_refused(catalog):
 
 
 def test_a_housekeeping_pull_request_needs_no_field_report_and_main_without_the_label_does(catalog):
-    body = "Tidy the README's wording.\n"
+    body = "Tidy the README's wording.\n\nRelease-kind: patch\n"
     template, found = templates.verdict(catalog, "pr.create", body, "Tidy the README", base="main",
                                 labels=["housekeeping"])
     assert template.name == "housekeeping" and found == []
+    template, found = templates.verdict(catalog, "pr.create", "Tidy the README's wording.\n",
+                                        "Tidy the README", base="main", labels=["housekeeping"])
+    assert [finding.rule for finding in found] == ["line"] and "Release-kind:" in found[0].fix
     template, found = templates.verdict(catalog, "pr.create", body, "Tidy the README", base="main")
     assert template.name == "field-report"
     assert [finding.rule for finding in found] == ["checker"]
