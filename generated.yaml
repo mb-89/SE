@@ -2,8 +2,8 @@
 # fresh run is compared (`check`, `held_by` or `unchecked`). scripts/generated.py reads it; the
 # guidance note generated-files-are-marked owns the rule. A program that writes a tracked file is
 # a generator and is declared here, with the marker it writes. `regenerate`, where a merge can rerun
-# it offline, is the command that writes its outputs afresh: integrate's merge runs it, so a merge
-# never stops on its outputs.
+# it offline, is the command that writes its outputs afresh: integrate's merge and the merge's commit
+# hooks run it, so a merge never stops on its outputs (.gitattributes gives them merge=se-generated).
 # The others are left out: se_modules.py sync moves pins over the network, file-seconds measures CI,
 # tests/recorded.py writes only inside its test with SE_RECORD set, and the Go golden needs a build.
 generators:

@@ -1,0 +1,5 @@
+#!/bin/sh
+# A merge's own commit: every generated file a merge can rerun (generated.yaml `regenerate`) is
+# regenerated on the merged tree and staged, so the merge commit holds them fresh; the merge
+# driver se-generated kept our side where both sides changed one (scripts/generated.py "The merge").
+exec "$(dirname "$0")/se-script" generated.py --root . regenerate --merging

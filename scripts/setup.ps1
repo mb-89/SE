@@ -2,8 +2,8 @@
 .SYNOPSIS
 Installs se's git hooks (public-safety check) into a repository: se itself by default, or -Repo,
 such as a project that uses se as a module. Also adds the public check's local list
-(.public-check.local, never checked in) to the repository's .gitignore, and sets the repository's
-commit identity as work_tickets.py sync does, so its first commit already carries it. In se's own
+(.public-check.local, never checked in) to the repository's .gitignore, installs the merge driver
+of generated files (merge.se-generated), and sets the repository's commit identity as work_tickets.py sync does, so its first commit already carries it. In se's own
 checkout it then installs obs's adapter component obs-html where it is missing, which the docs
 and decks build with (`build_docs.py --install-html`).
 
@@ -35,6 +35,13 @@ Invoke-SeScript se_start.py stopped-hooks --repo $target --hooks $hooks
 Invoke-SeScript git_door.py -C $target config core.hooksPath $hooks
 if ($LASTEXITCODE -ne 0) { exit 1 }
 Write-Output "core.hooksPath of $target set to $hooks"
+# The merge driver of the generated files a merge regenerates (.gitattributes merge=se-generated):
+# it keeps our side, and the merge's commit hooks regenerate them (scripts/generated.py "The merge").
+Invoke-SeScript git_door.py -C $target config merge.se-generated.name "a generated file: keep ours, the merge's commit hooks regenerate it"
+if ($LASTEXITCODE -ne 0) { exit 1 }
+Invoke-SeScript git_door.py -C $target config merge.se-generated.driver true
+if ($LASTEXITCODE -ne 0) { exit 1 }
+Write-Output "merge driver se-generated of $target set"
 $localList = '.public-check.local'
 $ignore = Join-Path $target '.gitignore'
 $text = if (Test-Path $ignore) { [IO.File]::ReadAllText($ignore) } else { '' }
