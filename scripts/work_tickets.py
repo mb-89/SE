@@ -2169,13 +2169,62 @@ def outside_issues(cutoffs: dict[str, int], data: dict[str, object],
 
 
 def intake_outside(root: Path) -> list[dict[str, object]]:
-    """The outside issues SE has not handled yet, read in one batched query."""
+    """The outside issues SE has not handled yet, read in one batched query; where gh reaches
+    GitHub over REST alone, in REST reads of the same shape (`outside_over_rest`)."""
     cutoffs = outside_cutoffs(root)
     inside = outside_switch(root)
+    if gh_backend() == REST:
+        return outside_issues(cutoffs, outside_over_rest(root, cutoffs), inside)
     host = next(iter(cutoffs)).split("/")[0]
     query = outside_query(list(cutoffs), inside is not None)
     return outside_issues(cutoffs, json.loads(
         run_gh(root, ["api", "graphql", "--hostname", host, "-f", f"query={query}"])), inside)
+
+
+def outside_over_rest(root: Path, cutoffs: dict[str, int]) -> dict[str, object]:
+    """What `outside_query` answers, read over REST: each repository's newest OUTSIDE_PAGE open
+    issues (pull requests left out), and the last 100 comments of each above its cut-off, all at
+    once. An issue at or below its cut-off is listed without comments, which it is not judged by."""
+    def listing(repo: str) -> list[dict[str, object]]:
+        listed = GitHub(root, repo).api(
+            f"issues?state=open&sort=created&direction=desc&per_page={OUTSIDE_PAGE}")
+        if not isinstance(listed, list):
+            raise QueueError(f"intake --outside: GitHub returned no issues of {repo}; check "
+                             "[outside] in se.toml")
+        return listed
+
+    repos = list(cutoffs)
+    listings = concurrently(*(lambda repo=repo: listing(repo) for repo in repos))
+    wanted = [(repo, int(item["number"]), int(item.get("comments") or 0))
+              for repo, listed in zip(repos, listings) for item in listed
+              if "pull_request" not in item and int(item["number"]) > cutoffs[repo]
+              and item.get("comments")]
+
+    def last_comments(repo: str, number: int, count: int) -> list[dict[str, object]]:
+        page = max(1, -(-count // 100))
+        read = GitHub(root, repo).api(f"issues/{number}/comments?per_page=100&page={page}")
+        if page > 1 and len(read) < 100:  # the last page is short: the 100 before it complete them
+            earlier = GitHub(root, repo).api(f"issues/{number}/comments?per_page=100&page={page - 1}")
+            read = [*earlier, *read][-100:]
+        return read
+
+    read = dict(zip(((repo, number) for repo, number, _ in wanted),
+                    concurrently(*(lambda w=w: last_comments(*w) for w in wanted))))
+    data: dict[str, object] = {}
+    for index, (repo, listed) in enumerate(zip(repos, listings)):
+        nodes = [{
+            "number": item["number"], "title": item.get("title") or "",
+            "url": item.get("html_url", ""), "body": item.get("body") or "",
+            "authorAssociation": item.get("author_association", ""),
+            "labels": {"nodes": [{"name": label["name"] if isinstance(label, dict) else str(label)}
+                                 for label in item.get("labels") or []]},
+            "comments": {"nodes": [{"body": comment.get("body") or "",
+                                    "authorAssociation": comment.get("author_association", "")}
+                                   for comment in read.get((repo, int(item["number"])), [])]},
+        } for item in listed if "pull_request" not in item]
+        data[f"r{index}"] = {"issues": {"pageInfo": {"hasNextPage": len(listed) >= OUTSIDE_PAGE},
+                                        "nodes": nodes}}
+    return {"data": data}
 
 
 def bare_cross_repository_references(body: str, repo: str) -> list[str]:

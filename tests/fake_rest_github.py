@@ -10,7 +10,8 @@ fills it with issues, comments, labels and pull requests (`issue`, `pull`); each
 answered from them and each write changes them, so a command's reads after its writes see them.
 `calls` records every gh call's words, `writes` every write as `(method, path, body)`. A route it
 does not know answers 404, naming it. `signed_in=True` makes `gh auth status` pass, as a signed-in
-gh's; `rest=False` refuses `gh api` too, as a host with no account.
+gh's; `rest=False` refuses `gh api` too, as a host with no account; `host` names the host its page
+addresses carry.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ HOST = "github.com"
 class RestGitHub:
     signed_in: bool = False
     rest: bool = True
+    host: str = HOST
     issues: dict[str, dict[int, dict]] = field(default_factory=dict)
     comments: dict[tuple[str, int], list[dict]] = field(default_factory=dict)
     labels: dict[str, list[dict]] = field(default_factory=dict)
@@ -49,7 +51,7 @@ class RestGitHub:
         item = {
             "id": number * 10, "node_id": f"I_{number}", "number": number, "title": title,
             "body": body, "state": state, "state_reason": None,
-            "html_url": f"https://{HOST}/{slug}/issues/{number}",
+            "html_url": f"https://{self.host}/{slug}/issues/{number}",
             "labels": [self.label(slug, name) for name in labels],
             "assignees": [{"login": login, "type": "User"} for login in assignees],
             "user": {"login": slug.split("/")[0], "type": "User"}, "author_association": "OWNER",
@@ -74,7 +76,7 @@ class RestGitHub:
         item = {
             "id": number * 10, "node_id": f"PR_{number}", "number": number, "title": title,
             "body": body, "state": "open", "draft": False, "merged_at": None,
-            "html_url": f"https://{HOST}/{slug}/pull/{number}",
+            "html_url": f"https://{self.host}/{slug}/pull/{number}",
             "head": {"ref": head, "sha": sha}, "base": {"ref": base}, "labels": [],
             "user": {"login": "worker", "type": "User"}, "assignees": [],
             "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-02T00:00:00Z", **extra,
@@ -88,7 +90,7 @@ class RestGitHub:
                    "user": {"login": data.get("login", slug.split("/")[0]), "type": "User"},
                    "author_association": data.get("author_association", "OWNER"),
                    "created_at": data.get("created_at", "2026-11-03T00:00:00Z"),
-                   "html_url": f"https://{HOST}/{slug}/issues/{number}#issuecomment-{self.next_id}"}
+                   "html_url": f"https://{self.host}/{slug}/issues/{number}#issuecomment-{self.next_id}"}
         self.comments.setdefault((slug, number), []).append(comment)
         if number in self.issues.get(slug, {}):
             self.issues[slug][number]["comments"] += 1
