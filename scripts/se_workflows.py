@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run python
 # se:template se/python-script 1.0.0
-"""SE's workflows and actions in a project, as generated local copies (README "Workflows").
+"""SE's workflows and actions in a project, as generated local copies (docs/running.md "Workflows").
 
 A workflow names a reusable workflow or action by a line the host reads literally, so a call of SE's
 own (`uses: <owner>/<repository>/.github/...@<ref>`) would name SE's home in the project's tracked
@@ -295,7 +295,7 @@ def check(root: Path, plan: Plan) -> list[str]:
     return findings + shard_mismatches(root)
 
 
-# The shards CI runs and the shards se.toml budgets for (README "Test budget").
+# The shards CI runs and the shards se.toml budgets for (docs/tests.md "Test budget").
 
 SUITE_TIME = "./.github/actions/suite-time"
 USES = re.compile(r"^(?P<indent> *)(?:- )?uses: *['\"]?(?P<target>[^'\"\s#]+)")

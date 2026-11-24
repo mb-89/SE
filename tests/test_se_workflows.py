@@ -1,4 +1,4 @@
-"""SE's workflows and actions in a project as generated local copies (scripts/se_workflows.py, README
+"""SE's workflows and actions in a project as generated local copies (scripts/se_workflows.py, docs/running.md
 "Workflows"): no tracked workflow names SE's home, and the copies follow the project's SE pin."""
 
 from __future__ import annotations
@@ -272,7 +272,7 @@ def test_a_project_holding_only_the_batterys_copy_is_named_and_regenerated_with_
     assert se_workflows.plan(project, [BATTERY], ref=before, source=se).paths == (BATTERY,)
 
 
-# The shards CI runs against se.toml's `[tests] shards` (README "Test budget").
+# The shards CI runs against se.toml's `[tests] shards` (docs/tests.md "Test budget").
 
 CHECK = ".github/workflows/check.yml"
 
@@ -331,7 +331,7 @@ def test_a_project_without_suite_time_or_shards_passes_as_before(world, tmp_path
 
 
 def test_ses_own_templates_backstop_is_not_shipped_and_lets_no_event_text_into_a_run_line() -> None:
-    """templates.yml (README "Templates"): SE's own workflow on issue and comment events, with only the
+    """templates.yml (docs/templating.md "Templates"): SE's own workflow on issue and comment events, with only the
     permissions it needs, and no `${{ github.event` expression in any `run:` line, as anyone can
     open an issue."""
     path = ".github/workflows/templates.yml"

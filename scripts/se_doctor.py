@@ -11,7 +11,7 @@ and the instruction files a host may read beside or instead of AGENTS.md (`CLAUD
 `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.github/copilot-instructions.md`) in the project and each
 folder above it up to home, by name, folder and whether git tracks them, never their content.
 Each line is "seen", "silent" (asked, no answer) or "not measured"; the most important finding
-comes first. README "Doctor" owns what it reports.
+comes first. docs/start.md "Doctor" owns what it reports.
 
 Three layers, so the form can change without the checks:
 
@@ -228,7 +228,7 @@ def _declares_door(manifest: dict) -> bool:
 
 def gather_plugins(roots: list[Path], checkout: Path, home: Path) -> list[dict]:
     """Each installed SE plugin: where, its version, and whether its manifest declares the door
-    for Claude Code (se.toml [plugin] claude_mcp, README "The MCP door")."""
+    for Claude Code (se.toml [plugin] claude_mcp, docs/start.md "The MCP door")."""
     found = []
     for root in roots:
         manifest = _json(root / se_start.PLUGIN_MANIFEST) or {}

@@ -1,7 +1,7 @@
 # se:template se/python-module 1.0.0
 """`se new app <name> --path <dir>`: a new application on kern, from kern's template at SE's kern pin.
 
-The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
+The design is docs/go-core.md "A bare application, and `se new app`"; docs/applications.md "New application" owns
 what the command does. The template comes from the clone of kern se.toml [components.kern] pins
 (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. The application pins the kern SE pins:
 its go.mod requires kern at that version as Go spells it (`se_modules.go_version`, `+incompatible`
@@ -196,7 +196,7 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     identity = work_tickets.commit_identity(se_root)
     if identity is None:
         raise NewError(f"no commit identity for the application: set identity = \"Name <email>\" in "
-                       f"[project] of {se_root / 'se.toml'} (README \"Project settings\")")
+                       f"[project] of {se_root / 'se.toml'} (docs/settings.md \"Project settings\")")
     modules = _sibling("se_modules")
     try:
         version, tag = modules.kern_pin(se_root)

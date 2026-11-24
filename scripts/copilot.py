@@ -127,7 +127,7 @@ def version_range(root: Path = ROOT) -> str:
 
 def pin_se(repo: Path, wanted: str, found: se_home.Home | None = None) -> str:
     """`[components.se]` in the repository's se.toml at `wanted`, an existing pin kept; it names no
-    address, as se_modules.py finds SE by its name (README "Modules")."""
+    address, as se_modules.py finds SE by its name (docs/modules.md "Modules")."""
     path = repo / "se.toml"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:

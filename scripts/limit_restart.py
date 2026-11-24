@@ -11,7 +11,7 @@ The fleet check always reports such a session for an in-progress issue whose bra
 names (its title, tags or summary) and that has no delivered pull request; reporting is read-only.
 se.toml `[fleet] restart_after_limit` says what the finding's remedy is: off, the built-in, the
 report is all that happens; on, the integrator resumes the session once the limit lifts and
-comments RESTARTED on the issue, at most once per issue (README "Fleet check").
+comments RESTARTED on the issue, at most once per issue (docs/fleet.md "Fleet check").
 
 Everything here is pure: `findings` takes the sessions, the issues, the delivered branches, each
 issue's comments, the time and the setting, and answers the findings' facts; `work_tickets.py

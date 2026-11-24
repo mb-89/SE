@@ -86,7 +86,7 @@ cat > "$HOME/.local/bin/uv" <<'UV'
 chmod +x "$HOME/.local/bin/uv"
 """
 # A fake uv installer, as astral.sh's: puts uv into ~/.local/bin, or fails while "offline".
-# The binary's release (README "Kern"): served from $HOME/se-release where it exists, else a 404 (22).
+# The binary's release (docs/start.md "Kern"): served from $HOME/se-release where it exists, else a 404 (22).
 FAKE_CURL = f"""#!/bin/sh
 echo "curl $*" >> "$HOME/calls"
 [ -f "$HOME/offline" ] && exit 6
@@ -613,7 +613,7 @@ def test_every_other_start_runs_every_step(machine, source):
 
 @HOOK_STEPS
 def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_it_without_se_toml(machine):
-    """se_hook.sh guards the file tools only where the start left templates-files (README "Templates"):
+    """se_hook.sh guards the file tools only where the start left templates-files (docs/templating.md "Templates"):
     `se_templates.py gate --runtime` writes it where a template claims a path and removes it otherwise
     (tests/test_se_templates.py); a project without se.toml loses a line an earlier start left."""
     home, project, base = machine
@@ -804,7 +804,7 @@ def test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_it
 
 @KERN_STEP
 def test_a_start_outside_a_git_checkout_starts_the_core_for_ses_root(machine):
-    """A session started without sources (README "Cloud sessions"), as the cloud's /home/user: kern is
+    """A session started without sources (docs/install.md "Cloud sessions"), as the cloud's /home/user: kern is
     required, so its core starts for SE's root (docs/boot.md "Required components") and is named
     there; the project gets no binary named, so its later hooks fail open as before. It runs a copy
     of SE's scripts, as the core's files go into SE's root."""
@@ -866,7 +866,7 @@ def test_without_a_pin_kern_failed_names_it(machine):
     assert not any(line.startswith(("curl", "kern ")) for line in calls(home))
 
 
-# The core switch (README "Machine-local `~/.se/local.toml`", scripts/switches/hooks.toml):
+# The core switch (docs/running.md "Machine-local `~/.se/local.toml`", scripts/switches/hooks.toml):
 # SE_HOOK_CORE in the environment, else [hooks] core in ~/.se/local.toml.
 OFF_VALUES = ("off", "OFF", "Off")
 ON_VALUES = ("", " off", "off ", "0", "false", "on")
@@ -1056,7 +1056,7 @@ def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machi
     assert not (root / ".se" / ".runtime" / "runme-se").exists()
 
 
-# kern for the installed SE (scripts/bootstrap.sh kern_place, README "Modules"): an SE that pins kern
+# kern for the installed SE (scripts/bootstrap.sh kern_place, docs/modules.md "Modules"): an SE that pins kern
 # by [components.kern] gets its clone synced before the core starts where it is missing or off the
 # commit se.lock locks; at that commit, no process starts.
 LOCKED = "b" * 40

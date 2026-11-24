@@ -219,7 +219,7 @@ def sources(root: Path) -> list[Source]:
     try:
         found = modules.module_dirs(root, modules.load_local(modules.default_local_config()))
     except modules.ModuleError as error:
-        raise Usage(f"se_guidance.py: {error}; fix se.toml (README \"Modules\")") from error
+        raise Usage(f"se_guidance.py: {error}; fix se.toml (docs/modules.md \"Modules\")") from error
     listed, seen = [], {root.resolve()}
     for name, folder in found:
         if folder.resolve() not in seen:
@@ -852,7 +852,7 @@ def run_project(options: argparse.Namespace) -> int:
     return 0
 
 
-#: se_guidance.py's commands as one kern component (README "Commands as components"); each
+#: se_guidance.py's commands as one kern component (docs/start.md "Commands as components"); each
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "guidance", "Guidance",

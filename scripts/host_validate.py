@@ -4,7 +4,7 @@
 
 SE's own lint (scripts/agent_lint.py, run by the build) stays the first line; this holds the built
 layout to the real hosts, so a manifest key a host strips or a skill a host would skip shows before
-a session meets it (README "Host validators").
+a session meets it (docs/applications.md "Host validators").
 
 The validators are one table of data, `VALIDATORS`: name, host, tool, argument list, the layout
 paths it reads (each a glob relative to the root, one run per match) and the tool version its

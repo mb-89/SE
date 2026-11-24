@@ -105,7 +105,7 @@ MACHINE_DEFAULT = "~/.se/private-terms.txt"
 
 # GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person.
 # The identity gate passes it as committer only while landings are GitHub's squash merges; with
-# se.toml [integrate] landing = "fast-forward" it is foreign (README "Landing on main").
+# se.toml [integrate] landing = "fast-forward" it is foreign (docs/settings.md "Landing on main").
 WEB_FLOW = "GitHub <" + "noreply" + "@github.com>"
 # The author of a commit made on GitHub (a squash merge): the account that made it, by the GitHub
 # noreply address of its login, `<id>+<login>` or `<login>`.
@@ -195,7 +195,7 @@ MESSAGE_ADDRESS = re.compile(
 # Where a co-author line comes from, named with its hit: an editor adds it on commit.
 CO_AUTHOR_SOURCE = (
     "an editor's AI co-author setting writes this line: turn it off (VS Code: "
-    "git.addAICoAuthor off, README 'Install')"
+    "git.addAICoAuthor off, docs/install.md 'Install')"
 )
 # The rules the check enforces, one label each: SE's start counts them (scripts/se_start.py).
 MESSAGE_RULES = ("tracker-reference", "attribution-trailer", "message-address")

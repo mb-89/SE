@@ -32,6 +32,7 @@ import test_retro
 import test_review
 import test_work_ticket_issues as issue_tests
 import work_tickets
+from manual import page
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "work.md"
@@ -1882,6 +1883,15 @@ def beat_edit(catalog, monkeypatch) -> list[Case]:
             for body in (beaten, work_tickets.without_beat(beaten))]
 
 
+def unclaimed(catalog, monkeypatch) -> list[Case]:
+    """What `unclaim` sends: the work issue's own body without its beat line, and its one-line
+    answer to the Started comment."""
+    beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 24, 14, 50, tzinfo=timezone.utc))
+    return [Case("issue.edit", "work", work_tickets.without_beat(beaten), labels=WORK_LABELS),
+            Case("comment.create", FREE, work_tickets.UNCLAIMED_COMMENT.format(
+                started=f"{ISSUE_URL}#issuecomment-1", branch="feature/example"))]
+
+
 def without_beats(plan):
     """`plan` without its beat steps, whose body stands for the issue's own (`beat_edit`)."""
     return work_tickets.Plan(plan.title, tuple(step for step in plan.steps
@@ -1911,6 +1921,7 @@ CONTRACT = {
     "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
     "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:unclaim": ("unclaim", unclaimed),
     "work_tickets:post_started": ("start", comment(
         work_tickets.STARTED_COMMENT.format(branch="feature/example"))),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
@@ -2055,19 +2066,16 @@ def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkey
 
 
 
-def missing_from_readme(readme: str, heading: str = "\n### Templates\n", code: bool = False) -> list[str]:
-    """The files under `templates/` that README's "Templates" section does not name with their `says`;
-    with `code`, the code templates that `heading`'s section (docs/templates.md "Code templates") does
-    not, as README is a landing page that names none of them (the person's rule, #1796)."""
-    start = readme.index(heading)
-    after = re.search(r"\n#{1,3} ", readme[start + 1:])
+def missing_from_readme(readme: str) -> list[str]:
+    """The files under `templates/` that docs/templating.md's "Templates" section does not name
+    with their `says`."""
+    start = readme.index("\n## Templates\n")
+    after = re.search(r"\n#{1,2} ", readme[start + 1:])
     section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
     missing = []
     for path in sorted((ROOT / "templates").iterdir()):
         text = path.read_text(encoding="utf-8")
         data = tomllib.loads(text) if path.suffix == ".toml" else templates.note_data(text, path.name)
-        if (data.get("kind") == templates.CODE) != code:
-            continue
         says = " ".join(data["says"].split())
         if f"`templates/{path.name}`" not in section or says not in section:
             missing.append(path.name)
@@ -2075,19 +2083,13 @@ def missing_from_readme(readme: str, heading: str = "\n### Templates\n", code: b
 
 
 def test_readme_templates_names_every_file_under_templates_with_its_says():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("templating")
     assert missing_from_readme(readme) == []
     assert "No command checks with them yet" not in readme
 
 
-def test_docs_code_templates_names_every_code_template_with_its_says():
-    docs = (ROOT / "docs" / "templates.md").read_text(encoding="utf-8")
-    assert missing_from_readme(docs, "\n## Code templates\n", code=True) == []
-    assert len(CODE_TEMPLATES) == 4
-
-
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("templating")
     start = readme.index("| `templates/retro.md` |")
     end = readme.index("\n| `templates/review.md` |", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]

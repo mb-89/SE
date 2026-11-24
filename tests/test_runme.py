@@ -383,9 +383,10 @@ def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
         assert os.access(ROOT / "RUNME.sh", os.X_OK) and os.access(TEMPLATE / "RUNME.sh", os.X_OK)
 
 
-@pytest.mark.parametrize("readme", [ROOT / "README.md", TEMPLATE / "README.md"], ids=["se", "template"])
-def test_the_readme_opens_with_its_description_then_getting_it_running(readme):
-    text = readme.read_text(encoding="utf-8")
+def test_the_template_readme_opens_with_its_description_then_getting_it_running():
+    """kern's application template; SE's own README is one page, its command first
+    (tests/test_readme.py)."""
+    text = (TEMPLATE / "README.md").read_text(encoding="utf-8")
     first = re.search(r"(?m)^## .*$", text)
     assert first[0] == "## Getting it running"
     above = [line for line in text[:first.start()].splitlines() if line.strip() and not line.startswith("#")]
