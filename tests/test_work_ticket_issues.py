@@ -198,8 +198,6 @@ COMPLETE_REPORT = BEGIN + """
 
 **Commit groupings:** None
 
-**Suite time:** None
-
 ## Not delivered
 
 None

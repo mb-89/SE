@@ -427,7 +427,7 @@ so each cloud session has its own core.
 | first request answered over the bus | 28.4 to 32.8 ms after process start | 967 ms |
 | a Python component attached and answering | 2.3 to 2.8 ms over the bus, 36 to 40 ms with the interpreter's start, 46 to 61 ms through `uv run` | about 900 ms |
 
-The greeting stays `se_start.py status`'s, within its 1 s budget; it reads `get.core.health` with a
+The greeting stays `se_start.py status`'s, within its 10 s budget; it reads `get.core.health` with a
 200 ms wait and says `core: starting` where none answers yet. Nothing waits for Python components:
 their names read as `not provided` until they attach.
 
@@ -558,6 +558,11 @@ one I/O component with three backends, chosen at start; its output `backend` nam
 `auto`, the default, takes them in that order. In a Claude Code cloud session
 (`CLAUDE_CODE_REMOTE=true`) it looks for no token, since the session's `GH_TOKEN` is the proxy's
 stand-in, and takes the proxy where REST answers through it, else the relay.
+
+The `se` binary carries kern's GitHub, clock and session components as kern's packages register
+them, each built from its `Environment()` (kern 3): the zero `Options` reach no token, proxy,
+cloud session or wall clock, so a component SE built itself would take the relay and stand still.
+`components/cmd/se/environment_test.go` holds the binary to kern's.
 
 SE's callers ask the backend (`se_relay.py` `backend`): only on `relay` does a streamed command run
 as one call through kern with its GitHub steps relayed. On `token` and `proxy` it runs directly,

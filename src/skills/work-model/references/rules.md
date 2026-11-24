@@ -695,6 +695,9 @@ a report.
 - **Implementations:**
   - se: `work_tickets.py file`, `backlog file` and `route` are the only paths to the issue-create
     door, which `tests/test_issue_creation.py` checks.
+  - se: the one exception is the integrator's work issue for a red integration branch, filed with
+    `work_tickets.py file`, the person's decision of 24 Nov 2026
+    ([integrator](../../../agents/integrator.md)).
   - se: `review.py file` posts one comment on the reviewed pull request and files no issue
     ([Work commands](../../../../docs/work-commands.md#work-commands)).
   - se: `retro.py file` and `overhaul.py file` post one report on their own issue and close it,
