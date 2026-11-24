@@ -107,6 +107,9 @@ merge or a start.
      `work_tickets.py field-report --check <description file> --issue-body <issue file>`; refuse a
      report it rejects with its messages (`integrate` runs the same check, and refuses a
      description without a report).
+   - The check fills the Branch tip only from the pull request's head branch, in a checkout of
+     it; run without `--worktree`, or with the main checkout, it leaves the saved description and
+     its Branch tip as the worker delivered them.
    - Run `work_tickets.py guard --branch <branch> --pr-description <file> --worktree <its worktree>`.
    - Refuse with reasons when it writes outside its box (files owned by another package, another
      repository), lacks tests for changed behaviour, or claims unverified work.

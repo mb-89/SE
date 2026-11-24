@@ -88,6 +88,8 @@ PROTECTED_QUESTION = "\uE002"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
+#: The field report's Branch, the pull request's head branch: `**Branch:** `<branch>``.
+REPORT_BRANCH_PATTERN = re.compile(r"\*\*Branch:\*\*[ \t]*`([^`\n]+)`")
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
 RELEASE_KIND_PATTERN = re.compile(r"\*\*Release kind:\*\*[ \t]*(\w*)[ \t]*[—–:,-]*[ \t]*([^\n]*)")
 # A breaking change's line under Removed behaviour: one that starts with the marker, as a list item
@@ -5377,22 +5379,30 @@ def body_at_delivery(root: Path, body: str) -> str:
 def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
     """The field report `file` carries between its markers (a worker's draft or a whole pull
     request description), refused where it departs from its template or misses evidence against
-    `issue_body`. In a worktree its Branch tip is first set to the branch's commit and written back,
-    and `integrate`'s guard runs against the checked-out branch, so a delivery shows the refusal
-    the landing would."""
+    `issue_body`. In a checkout of the report's own Branch, the pull request's head branch, its
+    Branch tip is first set to that branch's commit and written back, and `integrate`'s guard runs
+    against it, so a delivery shows the refusal the landing would. Any other checkout (the main
+    checkout an integrator reads a pull request in) leaves the file and its Branch tip as they are."""
     text = read_file(file, "field report")
+    branch = None if root is None else own_branch(root, text)
     if root is not None:
         text = with_branch_tip(root, text)
     report = report_in(text, f"Field report {file.name}")
     problems = field_report_problems(report, issue_body, project_version(root or Path.cwd()))
     if problems:
         raise field_report_error(file.name, problems)
-    if root is not None:
-        branch = current_branch(root)
-        if branch:
-            guard(root, branch, report)
+    if branch is not None:
+        guard(root, branch, report)
         file.write_text(text, encoding="utf-8", newline="\n")
     return report
+
+
+def own_branch(root: Path, body: str) -> str | None:
+    """The branch checked out in `root` where it is the one the field report in `body` names as
+    its Branch, the pull request's head branch; None anywhere else, the main checkout among it."""
+    named = REPORT_BRANCH_PATTERN.search(body)
+    branch = current_branch(root)
+    return branch if named is not None and branch and named[1] == branch else None
 
 
 def check_field_report(
@@ -5454,8 +5464,10 @@ def branch_tip(root: Path) -> str | None:
 
 def with_branch_tip(root: Path, body: str) -> str:
     """`body` with its Branch tip set to the branch's commit in `root`, the one value it records;
-    unchanged where `root` has no commit, and the template check then names an unfilled tip."""
-    tip = branch_tip(root)
+    unchanged where `root` has no commit, and the template check then names an unfilled tip, or
+    where `root` has another branch checked out than the report's Branch (`own_branch`): the tip
+    comes only from the pull request's head branch, never from the main checkout."""
+    tip = branch_tip(root) if own_branch(root, body) is not None else None
     if tip is None:
         return body
     return BRANCH_TIP_FIELD.sub(lambda match: f"{match[1]}`{tip}`", body, count=1)
@@ -10897,8 +10909,10 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
                       "the template, without writing GitHub: its header lines, sections, tables, "
                       "field labels, placeholders and evidence gate, and, in a worktree with a "
                       "comments-read or body-read record, refuse comments after it and a changed "
-                      "body; in a worktree also integrate's guard against its branch; refuses a "
-                      "FILE without the markers"),
+                      "body; in a checkout of the report's Branch, the pull request's head branch, "
+                      "it fills Branch tip from that branch and runs integrate's guard against "
+                      "it; any other checkout, the main checkout among them, leaves FILE and its "
+                      "Branch tip as they are; refuses a FILE without the markers"),
          ), required=True),
          arg("--issue-body", type=Path, metavar="FILE",
              help="with --check: the work issue's body as your GitHub tools read it now, for the "
