@@ -413,6 +413,27 @@ def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypa
                                "hand-off: ") for line in said), said
 
 
+@pytest.mark.parametrize("backend", ["proxy", "token"])
+def test_a_streamed_command_reaches_github_itself_on_kerns_proxy_or_token(
+        tmp_path, monkeypatch, capsys, backend) -> None:
+    """kern serves the checkout with its GitHub component on the proxy or the token backend, where
+    no step goes through the relay: the streamed command runs directly and reaches GitHub itself,
+    and its one line names the backend, not a file-based hand-off."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(se_components.SWITCH, raising=False)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "scripts").mkdir()
+    copy = tmp_path / "scripts" / "work_tickets.py"
+    copy.write_text("", encoding="utf-8")
+    relays = se_components.relay_module()
+    monkeypatch.setattr(relays, "backend", lambda root: backend)
+    assert se_components.routed(copy, ["fleet-check"], [], False, True) is None
+    said = capsys.readouterr().err.splitlines()
+    assert said == [f"se: work_tickets.py fleet-check reaches GitHub itself: kern's GitHub "
+                    f"component serves {tmp_path} on the {backend} backend, which runs no relay "
+                    "step"], said
+
+
 MEET_SCRIPT = '''
 import os
 import subprocess

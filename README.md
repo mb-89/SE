@@ -950,8 +950,8 @@ status` fails), no command hands off and the relay is not used: each reads and w
 in one call (the work model's [Without gh](src/skills/work-model/SKILL.md#without-gh) owns the
 order of the paths). The relay is the path where REST does not answer either.
 
-Where kern serves the checkout with its GitHub component on the relay backend (a cloud session,
-no token), the hand-off needs neither a retyped file nor a second run
+Where kern serves the checkout with its GitHub component on the relay backend (a cloud session
+without REST), the hand-off needs neither a retyped file nor a second run
 ([docs/go-core.md "GitHub in the cloud"](docs/go-core.md#github-in-the-cloud)):
 
 - **Reads.** `intake`, `field-report --check`, `deliver` and `integrate` read the issue, its
@@ -993,9 +993,10 @@ no token), the hand-off needs neither a retyped file nor a second run
     process's answer no time limit, where NATS's default of two minutes refused the answer of any
     longer step, such as a landing's suite, release and push. An answer the bus refuses all the
     same fails the step at once, naming why, instead of waiting out `StepWait`.
-- **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
-  file-based hand-off above. A call kern refuses before it says anything runs directly; one that
-  fails on the way is reported and never run twice, as it writes.
+- **The fallback.** On the token or the proxy a command runs directly (`se: <command> reaches
+  GitHub itself`); without kern or with `SE_KERN=off` it keeps its file-based hand-off above. A
+  call kern refuses before it says anything runs directly; one that fails on the way is reported
+  and never run twice.
   - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
     file-based hand-off: <why>`.
 - **Rehearsing a relay landing.** `work_tickets.py rehearse` runs a whole landing through the

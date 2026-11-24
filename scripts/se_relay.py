@@ -11,8 +11,10 @@ session saved, and names the exact tool call to run where no snapshot stands or 
 older than `MAX_AGE_SECONDS`. The session runs that tool, its answer reaches kern through the
 PostToolUse hook, and the command runs again.
 
-Where kern does not serve the checkout, or runs its GitHub component on a token, or `SE_KERN=off`,
-`relay` answers None and every command keeps its file-based hand-off. Standard library only; kern's
+Where kern runs its GitHub component on a token or through the cloud's proxy (`backend`), no step
+goes through the relay: `relay` answers None and a command reaches GitHub itself. Where kern does
+not serve the checkout, or `SE_KERN=off`, `relay` answers None too and every command keeps its
+file-based hand-off. Standard library only; kern's
 Python SDK and `se_components` are imported where they are needed.
 """
 
@@ -176,9 +178,9 @@ class Relay:
         return path
 
 
-def relay(root: Path, now: Callable[[], datetime] | None = None) -> Relay | None:
-    """kern's relay where kern serves `root` with the GitHub component on the relay backend and
-    SE_KERN is not off; else None, and the command keeps its file-based hand-off."""
+def _getter(root: Path) -> Callable[[str], Any] | None:
+    """A reader of the names of the GitHub instance kern runs for `root`, or None where SE_KERN is
+    off or no core serves the checkout."""
     if os.environ.get(se_components.SWITCH, "").lower() == "off":
         return None
     served = se_components.kern_root(root.resolve())
@@ -200,12 +202,34 @@ def relay(root: Path, now: Callable[[], datetime] | None = None) -> Relay | None
             peer.close()
         return answer.get("value") if answer.get("provided") else None
 
+    return get
+
+
+def backend(root: Path) -> str | None:
+    """The backend kern's GitHub component runs on for `root`, as its output `backend` reads it
+    (`token`, `proxy` or `relay`, kern's components/github/README.md "The backends"); None where
+    SE_KERN is off, no core serves the checkout or it names none."""
+    get = _getter(root)
+    if get is None:
+        return None
+    se_components.sdk()
+    from kern.nats import NatsError
+
     try:
-        if get(f"{GITHUB}/{'backend'}") != RELAY:
-            return None
+        found = get(f"{GITHUB}/backend")
     except (NatsError, OSError, RelayError, KeyError, TypeError, ValueError):
         return None
-    return Relay(root, get, now)
+    return found if isinstance(found, str) and found else None
+
+
+def relay(root: Path, now: Callable[[], datetime] | None = None) -> Relay | None:
+    """kern's relay where kern serves `root` with the GitHub component on the relay backend and
+    SE_KERN is not off; else None, and the command reaches GitHub itself (on `token` or `proxy`)
+    or keeps its file-based hand-off."""
+    if backend(root) != RELAY:
+        return None
+    get = _getter(root)
+    return Relay(root, get, now) if get is not None else None
 
 
 #: The words that open the relay's block in what kern tells the agent (kern's github Outbox).
