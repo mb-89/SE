@@ -1223,3 +1223,5 @@ def test_releases_follow_the_work_in_the_work_model_se_and_the_integrator():
     assert "never a release, which [follows the work](#roles-and-flow)" in steps
     assert "never ask the person whether to release" in normalized(AGENTS / "se.md")
     assert "never waiting for the person" in normalized(AGENTS / "integrator.md")
+    dec_011 = normalized(RULE_BOOK).split("### dec-011", 1)[1].split("### dec-012", 1)[0]
+    assert "the person's decision of 24 Nov 2026" in dec_011
