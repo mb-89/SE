@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Manage the Markdown-backed worker ticket queue, its work issues and the field reports in pull requests."""
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ import git_door
 import process_door
 import shell_door
 import se_home
+import se_script
 
 STATES = ("todo", "held", "done")
 DIRECTORIES = (*STATES, "notes")
@@ -5859,8 +5861,11 @@ def twin_rule(key: tuple[str, str | None]) -> str:
 
 
 def comment_quote(text: str) -> str:
-    """`text` as a Markdown quote, without the fleet marker, so a comment shows it as data."""
-    lines = text.replace(FLEET_MARKER, "").strip().splitlines()
+    """`text` as a Markdown quote, without the fleet marker and template markers, so a comment
+    shows it as data and names no template it is not filled from."""
+    marker = sibling("templates").TEMPLATE_MARKER_PATTERN
+    lines = "\n".join(line for line in text.replace(FLEET_MARKER, "").splitlines()
+                      if not marker.fullmatch(line)).strip().splitlines()
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
@@ -6077,7 +6082,10 @@ def template_body(root: Path, template: str, command: str, file: Path | None, fi
               read: Callable[[Path], str]) -> tuple[str, str]:
     """The body a filing command files and the body as given (what `--hold` files): from
     `fields` always rendered through the template; from `file` (`read` reads it) as it stands with
-    `[templates] enforce` off, else parsed and rendered again (docs/templating.md "Templates")."""
+    `[templates] enforce` off, else parsed and rendered again (docs/templating.md "Templates"). Every
+    body it gives carries the template's marker: the body as given is stamped with it
+    (`templates.stamped`), so even an unchecked or a held filing names the template it derives
+    from (docs/templates.md "The filled template is a type")."""
     templates = sibling("templates")
     if (file is None) == (fields is None):
         raise QueueError(f"{command} takes exactly one of --body-file and --fields")
@@ -6085,7 +6093,7 @@ def template_body(root: Path, template: str, command: str, file: Path | None, fi
         if fields is not None:
             rendered = templates.render(template_of(template), templates.fields_file(fields, command))
             return rendered, rendered
-        given = read(file)
+        given = templates.stamped(template_of(template), read(file))
         gate = enforcement(root)
         if gate.enforce == templates.OFF:
             return given, given
@@ -6123,10 +6131,71 @@ def template_findings(root: Path, repo: str, chosen, title: str, body: str,
         raise QueueError(str(error)) from error
 
 
-# The routing `routed_body` writes: HANDLED_MARKER on a line of its own, then the Routing heading;
-# a body that names the marker in prose (in a code span, say) is not routed.
+def stamp(root: Path, number: int, repo: str | None, template: str | None,
+          issue_file: Path | None) -> str:
+    """Stamp issue `number`, whose body names no template, with the marker of the template it
+    derives from (docs/templates.md "Stamp an issue filed without a marker"): `template`, else the
+    one a new issue with its labels would take (`templates.select`), which the template gate's
+    refusal names. It writes only
+    where the stamped body passes that template's check with the checks a filing runs (the name
+    rule, the private terms, the template's own), whatever `[templates] enforce` says, and changes
+    nothing but the marker line (`templates.stamped`). Without gh, the issue is `issue_file` as
+    the GitHub tools read it and the edit is printed as a plan. Gives the line naming the result."""
+    repo = resolve_repo(root, repo)
+    handing_off = hand_off()
+    if not handing_off:
+        issue = issue_api(root, repo, f"issues/{number}")
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"stamp: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if int(issue.get("number") or 0) != number:
+        raise QueueError(f"stamp: the issue read is not #{number}: give issue_read's answer of it")
+    templates = sibling("templates")
+    title, body = str(issue.get("title") or ""), str(issue.get("body") or "")
+    named = templates.TEMPLATE_MARKER_PATTERN.search(body)
+    if named:
+        return f"#{number} names its template already, nothing stamped: {named.group(0).strip()}"
+    if template is None:
+        chosen = templates.select(templates.load(SE_ROOT), "issue.edit", body, title,
+                                  labels=sorted(issue_labels(issue))).template
+        if chosen is None:
+            raise QueueError(f"stamp: no template takes #{number}: name the one it derives from "
+                             "with --template")
+    else:
+        chosen = template_of(template)
+    if "issue.edit" not in chosen.actions or chosen.is_adapter:
+        raise QueueError(f"stamp: the {chosen.name} template does not shape an issue's body "
+                         "with its marker; name the template the issue derives from with --template")
+    try:
+        stamped = templates.stamped(chosen, body)
+    except templates.TemplateError as error:
+        raise QueueError(f"stamp: #{number}: {error}") from error
+    checked_name("stamp", title)
+    _, found = template_findings(root, repo, chosen, title, stamped)
+    if any(finding.severity == templates.REFUSE for finding in found):
+        raise QueueError(templates.report(f"stamp #{number}", chosen, found, refused=True)
+                         + f"\nNothing was stamped: fix the issue's body until it passes, then stamp it")
+    marker = chosen.marker_line
+    step = Step("stamp", "issue_write", {**owner_repo(repo), "method": "update",
+                                         "issue_number": number, "body": stamped},
+                note="the body as it stands with the template's marker line added; nothing else changes")
+    if handing_off:
+        print(Plan(f"stamp #{number}", (step,), f"#{number} is stamped: {marker}").text())
+        return f"Run the GitHub plan above to stamp #{number}"
+    run_gh_with_body(root, ["issue", "edit", str(number), *repo_arguments(repo)], stamped)
+    return f"Stamped #{number} {web_url(issue) or issue_url(repo, number)}: {marker}"
+
+
+# The routing `routed_body` writes: HANDLED_MARKER on a line of its own, then the routed template's
+# marker where the filing stamped or rendered it (`templates.stamped`, `templates.render`), then the
+# Routing heading; a body that names the marker in prose (in a code span, say) is not routed.
 ROUTED_PATTERN = re.compile(
-    rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
+    rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n(?:[ \t]*<!-- se:template [^\n]*-->[ \t]*\r?\n)?"
+    rf"## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
 
 
 def held_template(number: int, issue: dict[str, object]) -> str:
@@ -12437,6 +12506,21 @@ def run_block(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+@command("stamp", "for SE: give an unmarked issue its template's marker, where it passes that "
+                  "template's check",
+         WORKTREE,
+         arg("--template", metavar="NAME",
+             help="the template the issue derives from (default: by its labels, ticket for a "
+                  "backlog issue, routed or work for a work issue)"),
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh: the issue as your GitHub tools' issue_read (method get) answered "
+                  "it; stamp then prints the edit as a step for them"),
+         REPO, arg("issue", type=int))
+def run_stamp(root: Path, args: argparse.Namespace) -> int:
+    print(stamp(root, args.issue, args.repo, args.template, args.issue_body))
+    return 0
+
+
 @command("unhold", "for SE: check an issue filed with --hold against its template again and, where "
                    "it passes, remove off-template and give a work issue ready back",
          WORKTREE,
@@ -12995,7 +13079,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "Work issues and their comments as a role reads and files them: intake, refresh, escalation, "
      "filing, routing, the backlog, blockers and the fleet's pause.",
      ("intake", "refresh", "comments-read", "body-read", "escalate", "file", "route",
-      "backlog file", "backlog list", "block", "unhold", "paused")),
+      "backlog file", "backlog list", "block", "stamp", "unhold", "paused")),
     ("delivery", "Delivery",
      "A worker's delivery: the field report and its guard, sync and identity, the gated push and "
      "the pull request, the Stop hook's check and the claim's beat.",
@@ -13168,7 +13252,7 @@ def build_parser(parser: argparse.ArgumentParser, command_: Command) -> argparse
 
 
 def make_parser() -> argparse.ArgumentParser:
-    return build_parser(argparse.ArgumentParser(prog=COMMANDS.name, description=COMMANDS.help),
+    return build_parser(se_script.parser(prog=COMMANDS.name, description=COMMANDS.help),
                         COMMANDS)
 
 
@@ -13250,4 +13334,4 @@ def said(error: BaseException) -> str:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(se_script.run(main))

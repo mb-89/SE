@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Session cost: what sessions spend in tokens, read from their transcripts and weighed per model.
 It writes nothing, draws no conclusions and is called by nothing.
 
@@ -35,6 +37,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+import se_script
 
 
 def sibling(name: str):
@@ -390,7 +393,7 @@ def _subagent_session(path: Path) -> str | None:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("paths", nargs="+", help="transcript files or directories of them")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
     parser.add_argument("--prices", help="a TOML file of [[price]] rows that replaces the table")
@@ -431,4 +434,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -31,13 +31,13 @@ read-only = true
 mcp = "Checks a text or a fields object against a template as SE's filing commands would: its first line is passes or refused, then every finding or, with --render, the Markdown to file. Use it before filing; it files nothing."
 
 [commands."se_templates.py fill"]
-usage = "se_templates.py fill [--prompt PROMPT] [--input INPUT | --input-text INPUT_TEXT]\n                     [--fields FIELDS | --fields-json FIELDS_JSON] [--title TITLE]\n                     [--repo OWNER/REPO] [--number NUMBER] [--label LABEL]\n                     [--worktree WORKTREE] [--templates TEMPLATES] [--tree]\n                     [--session SESSION] [--page PAGE]\n                     template"
+usage = "se_templates.py fill [--prompt PROMPT] [--input INPUT | --input-text INPUT_TEXT]\n                     [--fields FIELDS | --fields-json FIELDS_JSON | --body-file BODY_FILE]\n                     [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL]\n                     [--worktree WORKTREE] [--templates TEMPLATES] [--tree]\n                     [--session SESSION] [--page PAGE]\n                     template"
 summary = "fill a template from the raw input: the instructions, or the checked ..."
 group = "Templates"
 help = "fill a template from the raw input: the instructions, or the checked document"
 class = "interactive"
 writes = true
-mcp = "Fills a template from the raw input: without fields it gives the template's guidance first, once per session (--session) and in pages, then its instructions and empty draft; with fields and the raw input its first line is passes, then the document, or refused, then every finding. With --repo it files the document it checked through kern's GitHub component: an issue, or with --number a comment, and answers its link. Use it to write any text a template shapes, and to file an issue or a comment."
+mcp = "Fills a template from the raw input: without fields it gives the template's guidance first, once per session (--session) and in pages, then its instructions and empty draft; with fields (or the whole document as --body-file) and the raw input its first line is passes, then the document, or refused, then every finding with its fix and why; trivial deviations are corrected and listed. With --repo it files the document it checked through kern's GitHub component: an issue, or with --number a comment, and answers its link. Use it to write any text a template shapes, and to file an issue or a comment."
 
 [commands."se_templates.py gate"]
 usage = "se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT]\n                     [--runtime ROOT]"

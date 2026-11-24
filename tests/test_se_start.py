@@ -1204,7 +1204,9 @@ def repos(tmp_path, isolated_git, fake_processes):
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "git_door.py", "process_door.py", "se_modules.py", "se_home.py",
                              "public_check.py", "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py",
-                             "agent_lint.py", "generated.py", "public-check-terms.toml")}
+                             "agent_lint.py", "generated.py", "interfaces.py", "public-check-terms.toml")}
+    scripts.update({f"scripts/interfaces/{path.name}": path.read_text(encoding="utf-8")
+                    for path in (ROOT / "scripts" / "interfaces").glob("*.json")})
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")

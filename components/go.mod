@@ -1,3 +1,4 @@
+// se:template se/go-module 1.0.0
 module se/components
 
 go 1.25.14

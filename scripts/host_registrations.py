@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Where each agent host reads SE from, and what each place says: pure rows for se_doctor.py --probe.
 
 The places are host facts, the `[registrations.<surface>]` section of scripts/host-limits.toml,

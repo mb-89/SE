@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Retro commands: the mechanical half of a retro, the facts the judging agent starts from.
 
 `retro.py collect <retro issue>` reads the window from GitHub: every work issue closed since the
@@ -63,8 +65,9 @@ Off by default, three additions leave that draft as it is without them:
   the classes that carry one (`class_patterns`). A block without them is scored and filed as
   before.
 
-`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing, a
-draft whose steps break the retro template (a step or a standing question left open;
+`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment (`judgment_problems`,
+called through the adapter template `templates/retro-judgment.md`, JUDGMENT_TEMPLATE), writing
+nothing, a draft whose steps break the retro template (a step or a standing question left open;
 `steps_problems`) and a draft the integration branch does not hold as it stands; it files no issue
 (wrk-007). It posts the report proper, a document of the retro template (`report`): the draft's
 steps, the judgment in step 5, each class with its home and its state against the tree and each
@@ -72,7 +75,11 @@ finding with its proposed fix and its kind (`work`, which SE bundles into work i
 `decision`, for the owner's decision list), and the person's decisions and what follows in step 6,
 as the retro issue's closing comment, and closes the issue. The facts and the block stay in the committed
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
-reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
+reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut, each ending
+in its label, the message `templates/retro-part.md` (PART_TEMPLATE).
+
+`retro.py due` prints the retro's and the overhaul's countdowns, one line each, the snippet
+`templates/retro-due.md` (DUE_TEMPLATE, `countdown_lines`), or with `--json` their data.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -98,6 +105,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import se_script
 
 
 def sibling(name: str):
@@ -120,16 +128,24 @@ metrics = work_tickets.metrics
 
 BLOCK_MARKER = "<!-- se:retro-yaml -->"
 REPORT_MARKER = "<!-- se:retro-report -->"
-# The report's link to the committed retro doc that holds its facts and block, at a commit.
-DOC_MARKER = "<!-- se:retro-doc {sha} {path} -->"
+# The report's link to the committed retro doc that holds its facts and block, at a commit: the
+# message DOC_TEMPLATE (templates/retro-doc.md), written through its generated schema (`doc_marker`).
+# DOC_PATTERN reads it back, stricter than the message: a full commit.
+DOC_TEMPLATE = "retro-doc"
+DOC_MARKER = sibling("interfaces").generated(DOC_TEMPLATE)["message"]
 DOC_PATTERN = re.compile(r"<!-- se:retro-doc ([0-9a-f]{40}) (\S+) -->")
 # GitHub's limit on an issue comment's body, in characters; a part's label needs at most
 # PART_ROOM of them.
 COMMENT_LIMIT = 65536
 PART_ROOM = 100
+# The label each part ends in (templates/retro-part.md).
+PART_TEMPLATE = "retro-part"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->"
-# A work issue names each retro finding it takes as `retro #<n> finding <k>`.
+# A work issue names each retro finding it takes as `retro #<n> finding <k>`, the message
+# FINDING_TEMPLATE (templates/finding-ref.md) the reports write (`finding_reference`); finding one
+# stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
+FINDING_TEMPLATE = "finding-ref"
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
 # A class: one cause and one fix, the fix's home (the file it changes) and the kind of home it is,
 # one of HOMES.
@@ -147,6 +163,9 @@ FIXED, PAST, OPEN = "fixed", "past", "open"
 CHAPTER_HOURS = 6
 # The retro document template: the six steps, the standing questions nested in step 4.
 TEMPLATE_NAME = "retro"
+# The adapter template the judged block is checked through (templates/retro-judgment.md), whose
+# checker is judgment_problems.
+JUDGMENT_TEMPLATE = "retro-judgment"
 # The field report's answers that say whether a machine could do a step (step 3).
 MECHANIZE = ("machine_scripts", "shell_command")
 # The author associations `--refusals` counts as inside the fleet (outside_text.inside).
@@ -1730,6 +1749,22 @@ def judgment_problems(block: dict) -> list[str]:
     return problems
 
 
+def is_object(value: object) -> bool:
+    """Whether a judged block's data is an object, the only data the judgment adapters check
+    (templates/retro-judgment.md, templates/overhaul-judgment.md)."""
+    return isinstance(value, dict)
+
+
+def adapter_problems(name: str, text: str) -> list[str]:
+    """What SE's adapter template `name` refuses in `text`, each without the `<name>: ` every
+    adapter's finding opens with."""
+    engine = templates()
+    template = engine.own(name)
+    return [finding.fix.removeprefix(f"{template.name}: ")
+            for finding in engine.check(template, engine.parse(template, text))
+            if finding.severity == engine.REFUSE]
+
+
 def judged(text: str, number: int, filed: bool = False) -> dict:
     """The block of the draft `text`, its judgment checked, unless `filed` (a retro doc already
     filed, whose judgment was checked when it was, read back by the next collect); every refusal
@@ -1741,7 +1776,7 @@ def judged(text: str, number: int, filed: bool = False) -> dict:
     retro = (block.get("window") or {}).get("retro")
     if retro != number:
         raise QueueError(f"The draft is retro #{retro}'s, not #{number}'s")
-    problems = [] if filed else judgment_problems(block)
+    problems = [] if filed else adapter_problems(JUDGMENT_TEMPLATE, text)
     if problems:
         raise QueueError(f"The judgment of retro #{number} is not complete, so nothing was "
                          "written: " + "; ".join(problems))
@@ -1845,11 +1880,12 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
     decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
     still = [row["name"] for row in classes if row["tree"] == OPEN]
+    reference = finding_reference("retro", number)
     decided = [str(drafted.get("decisions") or "").strip(),
                "Open classes: " + (", ".join(still) or "none") + ".",
                f"This retro filed no issue. SE files what the person accepted: it bundles the "
                f"{WORK} findings ({', '.join(map(str, work)) or 'none'}) into as few work issues "
-               f"as the work needs, each naming `retro #{number} finding <k>` for every finding "
+               f"as the work needs, each naming `{reference}` for every finding "
                f"it takes, so the next retro scores it; the {DECISION} findings "
                f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list."]
     fields = {
@@ -1866,7 +1902,19 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     }
     body = templates().render(template, fields)
     return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n\n"
-            f"{DOC_MARKER.format(sha=sha, path=doc)}\n")
+            f"{doc_marker(sha, doc)}\n")
+
+
+def finding_reference(kind: str, number: int, finding: str = "<k>") -> str:
+    """How a work issue names finding `finding` of retro or overhaul `number` (`kind`), the message
+    FINDING_TEMPLATE; the reports give `<k>` for the finding SE fills in."""
+    return sibling("interfaces").write(FINDING_TEMPLATE, {"kind": kind, "number": str(number),
+                                                          "finding": str(finding)})
+
+
+def doc_marker(sha: str, path: str) -> str:
+    """The line that links the retro doc at `path` in commit `sha`, the message DOC_TEMPLATE."""
+    return sibling("interfaces").write(DOC_TEMPLATE, {"sha": sha, "path": path})
 
 
 def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
@@ -1889,8 +1937,10 @@ def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
             room = size - len(chunks[-1])
             chunks[-1], line = chunks[-1] + line[:room], line[room:]
     total = len(chunks)
-    return [f"{chunk.rstrip(chr(10))}\n\n_Part {index} of {total} of the report of retro "
-            f"#{number}._\n" for index, chunk in enumerate(chunks, 1)]
+    labels = [sibling("interfaces").write(PART_TEMPLATE, {"index": str(index), "total": str(total),
+                                                          "number": str(number)})
+              for index in range(1, total + 1)]
+    return [f"{chunk.rstrip(chr(10))}\n\n{label}\n" for chunk, label in zip(chunks, labels)]
 
 
 def committed_doc(root: Path, draft: Path, text: str, ref: str) -> tuple[str, str]:
@@ -2062,19 +2112,25 @@ def file_new(root: Path, repo: str | None) -> str:
     return sibling("overhaul").file_run(root, repo, TEMPLATE, RETRO_LABEL, DUE_SCOPE)
 
 
+# The snippet `retro due` prints, one line per countdown (templates/retro-due.md).
+DUE_TEMPLATE = "retro-due"
+
+
 def countdown_lines(found: dict[str, Countdown]) -> list[str]:
-    """One line per countdown: what it counted since where it starts, and whether it is due or a
-    run of its kind is open."""
-    lines = []
+    """One line per countdown, the snippet DUE_TEMPLATE: what it counted since where it starts,
+    and whether it is due or a run of its kind is open."""
+    retro_item = found["retro"]
+    values = {"retro_landed": str(retro_item.landed), "retro_failed": str(retro_item.failed)}
     for kind in ("retro", "overhaul"):
         item = found[kind]
-        start = f"since #{item.since_run} started {item.since}" if item.since_run else "in the whole history"
-        counted = (f"{item.count} ({item.landed} landed, {item.failed} failed)"
-                   if kind == "retro" else f"{item.count} retros closed")
-        state = (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
-                 else f"due: {item.reason}" if item.due else "not due")
-        lines.append(f"{kind}: {counted} {start}, {item.elapsed_days} days; {state}")
-    return lines
+        values |= {
+            f"{kind}_count": str(item.count),
+            f"{kind}_start": (f"since #{item.since_run} started {item.since}" if item.since_run
+                              else "in the whole history"),
+            f"{kind}_days": str(item.elapsed_days),
+            f"{kind}_state": (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
+                              else f"due: {item.reason}" if item.due else "not due")}
+    return sibling("interfaces").write(DUE_TEMPLATE, values).split("\n")
 
 
 def run_due(args: argparse.Namespace) -> int:
@@ -2118,7 +2174,7 @@ INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="retro.py", description=__doc__.split("\n\n")[0])
+    top = se_script.parser(prog="retro.py", description=__doc__.split("\n\n")[0])
     commands = top.add_subparsers(dest="command", required=True)
     collect_command = commands.add_parser(
         "collect", help="read a retro's window from GitHub and write its draft",
@@ -2212,4 +2268,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

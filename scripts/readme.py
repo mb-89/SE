@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """The one-page README: the shape every README of a project SE serves has (the guidance note
 readme-is-one-page, SE#1796), checked, and its one command printed for CI to run.
 
@@ -34,6 +35,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+import se_script
 
 MAX_LINES = 60
 MAX_CHARACTERS = 3_500
@@ -168,7 +170,7 @@ def showcase(text: str, url: str | None = None, branch: str | None = None) -> st
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="readme.py", description="The one-page README: its check, "
+    parser = se_script.parser(prog="readme.py", description="The one-page README: its check, "
                                      "and its one command for CI (the guidance note readme-is-one-page).")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="refuse a README that is not one page with its command "
@@ -202,4 +204,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

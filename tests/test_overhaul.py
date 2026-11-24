@@ -13,6 +13,7 @@ import pytest
 
 import git_door
 import overhaul
+import retro
 import templates
 import fake_git
 import time_bound
@@ -574,6 +575,18 @@ def test_file_refuses_an_incomplete_judgment_and_writes_nothing(checkout, tmp_pa
         overhaul.judged(draft.read_text(encoding="utf-8"), THIS)
     assert "The judgment of overhaul #50 is not complete, so nothing was written" in str(raised.value)
     assert refusal in str(raised.value)
+
+
+def test_the_judged_block_s_adapter_finds_what_judgment_problems_finds(checkout):
+    """templates/overhaul-judgment.md checks the block through judgment_problems: on the drafts
+    of the refusal test, and on the complete judgment, its problems are the same."""
+    test = test_file_refuses_an_incomplete_judgment_and_writes_nothing
+    drafts = [judged_draft(checkout, **case[0]) for mark in test.pytestmark
+              if mark.name == "parametrize" for case in mark.args[1]] + [judged_draft(checkout)]
+    for draft in drafts:
+        assert retro.adapter_problems(overhaul.JUDGMENT_TEMPLATE, draft) == overhaul.judgment_problems(
+            overhaul.read_block(draft))
+    assert retro.adapter_problems(overhaul.JUDGMENT_TEMPLATE, drafts[-1]) == []
 
 
 def test_file_refuses_another_overhauls_draft_and_a_draft_without_its_block(checkout):

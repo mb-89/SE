@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Look at a built page as its reader will: each chapter at phone and desktop width, light and dark.
 
 Reader: the agent that built a decision deck (scripts/deck.py build) or any other page for the person,
@@ -38,6 +40,7 @@ import sys
 from pathlib import Path
 
 import process_door
+import se_script
 
 HARNESS = Path(__file__).resolve().with_name("deck_look.js")
 # Where the page is looked at: a phone and a desktop, each in both themes.
@@ -195,7 +198,7 @@ def look(page: Path, declared: list[str], shots: Path | None, browser=_browser) 
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="deck_look.py", description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(prog="deck_look.py", description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     looked = commands.add_parser("look", help="render a built page's chapters and report what the reader would miss")
     looked.add_argument("page", type=Path)
@@ -212,4 +215,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

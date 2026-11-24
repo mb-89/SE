@@ -1,0 +1,35 @@
+{
+  "template": "se/finding-ref",
+  "version": "1.0.0",
+  "says": "A finding's reference in a work issue: the run's kind and number and the finding's number in its report.",
+  "message": "{kind} #{number} finding {finding}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "retro",
+          "overhaul",
+          "Not in input"
+        ],
+        "description": "retro or overhaul: the run whose report holds the finding."
+      },
+      "number": {
+        "type": "string",
+        "description": "The run's issue number, digits alone."
+      },
+      "finding": {
+        "type": "string",
+        "description": "The finding's number in the run's report, digits alone."
+      }
+    },
+    "required": [
+      "kind",
+      "number",
+      "finding"
+    ],
+    "additionalProperties": false
+  }
+}

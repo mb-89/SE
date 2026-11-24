@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Feedback within a second: the time budgets of the `work_tickets.py` and `se_start.py` commands,
 declared once here, and what keeps a slow command from reading as hung (docs/running.md "Feedback budgets").
 

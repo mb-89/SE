@@ -1,0 +1,48 @@
+{
+  "template": "se/skills-page",
+  "version": "1.0.0",
+  "says": "The page `docs/skills.md`.",
+  "message": "<!-- {notice} -->\n\n# Skills\n\nThe {count} skills SE loads, each by its name and when it is used; each guidance note is a skill too, listed with the rules.\n\n| Skill | When it is used |\n|---|---|\n{rows}",
+  "rows": {
+    "rows": "| `{name}` | {text} |"
+  },
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "notice": {
+        "type": "string",
+        "description": "The words of the page's generated-file marker, as the generated-marker template writes them, inside its HTML comment."
+      },
+      "count": {
+        "type": "string",
+        "description": "How many skills the layout loads, guidance notes aside."
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "description": "The skills, each its name and its description, as its front matter states them. A `|` in a cell is written `\\|`."
+      }
+    },
+    "required": [
+      "notice",
+      "count"
+    ],
+    "additionalProperties": false
+  }
+}

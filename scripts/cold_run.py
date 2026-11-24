@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """The cold run's reader: what a filled `docs/copilot-cold-run.toml` says, in a few lines.
 
 `report(text)` is pure: it takes the record's text and returns the report, reading no file,
@@ -19,6 +21,7 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
+import se_script
 
 AS_EXPECTED = "as expected"
 DIFFERS = "differs"
@@ -176,7 +179,7 @@ def report(text: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser = se_script.parser(description=__doc__.split("\n\n", 1)[0])
     commands = parser.add_subparsers(dest="command", required=True)
     read = commands.add_parser("report", help="report what a filled cold-run record says")
     read.add_argument("record", help="the record, e.g. docs/copilot-cold-run.toml")
@@ -192,4 +195,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

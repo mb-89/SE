@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """The upgrade guides (docs/upgrading.md "How the guide is kept"): one owner for their shape.
 
 A guide is `docs/upgrading.md` in a repository: one section per breaking release, headed
@@ -23,6 +24,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+import se_script
 
 #: Where a repository keeps its guide, relative to its root.
 GUIDE = Path("docs") / "upgrading.md"
@@ -99,7 +101,7 @@ def missing(root: Path, name: str, version: Version) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     show = commands.add_parser("show", help="print the sections of a guide between two versions, "
                                             "oldest first, to follow in that order")
@@ -127,4 +129,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(se_script.run(main))
