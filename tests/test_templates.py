@@ -2044,8 +2044,8 @@ def test_every_whole_document_a_fill_makes_carries_its_templates_marker(catalog)
     assert {"work", "ticket", "routed", "handover"} <= set(filled)
     for name in filled:
         template = catalog[name]
-        rendered, _ = templates.fill(template, dict(template.example["fields"]), "raw input",
-                                     title=template.example.get("title"))
+        rendered, _, _ = templates.fill(template, dict(template.example["fields"]), "raw input",
+                                        title=template.example.get("title"))
         assert template.marker_line in rendered.splitlines(), name
 
 
