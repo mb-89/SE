@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """CI's issue rule: a pull request into the integration branch names an open work issue it does.
 
 The rule is the work model's (src/skills/work-model/SKILL.md "Integration branch"); this script
@@ -44,6 +46,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
+import se_script
 
 WORK_LABEL = "work"
 HOUSEKEEPING_LABEL = "housekeeping"
@@ -197,7 +200,7 @@ def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
 
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--repo", type=Path, default=Path("."),
                         help="the checkout whose se.toml names the integration branch")
     parser.add_argument("--work-issue", type=Path, metavar="FILE",
@@ -235,4 +238,4 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

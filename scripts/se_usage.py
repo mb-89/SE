@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The use log, `usage/adhoc` (docs/go-core.md "Scripts are ad hoc, components are long-term"): the
 ad hoc components' calls and the ad hoc scripts' runs.
 

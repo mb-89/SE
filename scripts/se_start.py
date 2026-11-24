@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's start: the greeting, whether everything SE uses is up to date, and the one refresh.
 
 `status` answers from what is on disk and the cached update check, never from the network, and
@@ -27,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
+import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 ROOT_NAME = "SE root"  # the hook's context names SE_ROOT under this name
@@ -2099,7 +2102,7 @@ def find_project(given: Path | None) -> Path | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="se_start.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="se_start.py", description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, help="the project; default: $CLAUDE_PROJECT_DIR or the nearest "
                         "ancestor with se.toml")
     parser.add_argument("--local", type=Path, help="machine-local configuration; default: ~/.se/local.toml")
@@ -2229,4 +2232,4 @@ def run(args: argparse.Namespace, world: World | None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

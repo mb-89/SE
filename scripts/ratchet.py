@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """A count that may only shrink: found counts per path against a baseline, in a mode.
 
 `compare(found, baseline, mode)` returns `(new, gone)`, two sorted lists of paths:

@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Pull a repository's components in, found by name and pinned to commits or semantic version ranges.
 
 The format and the commands are described once in docs/modules.md "Modules"; how a component is
@@ -24,6 +26,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import generated
 import git_door
 import se_home
+import se_script
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 # The generator se.lock's marker names (scripts/generated.py); `update` writes it the same way.
@@ -1563,7 +1566,7 @@ def select(modules: list[Module], names: list[str]) -> list[Module]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = se_script.parser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, help=f"repository with {MANIFEST}; default: nearest ancestor of the current directory")
     parser.add_argument("--local", type=Path, help="machine-local configuration; default: ~/.se/local.toml")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1658,4 +1661,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Component versions assigned at the landing (docs/settings.md "Component versions").
 
 A work branch that changes the `se` binary states its release kind in its field report,
