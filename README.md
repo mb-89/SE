@@ -49,9 +49,9 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 | --- | --- | --- | --- |
 | Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:retro`, `se:reviewer` and `se:worker` |
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:retro`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:fill-templates`, `se:update`, `se:work-model` |
-| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/<owner>/<repository>`, open it, and install the plugin from the clone: **Chat: Install Plugin from Source** with the clone's folder (agent plugins, `chat.plugins.enabled`); VS Code reads the plugin through `.claude-plugin/plugin.json`, its agents from `agents/` and its skills from `skills/`, and the checkout's `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `retro`, `reviewer` and `worker`, each once: both hosts read the one `agents/<name>.md` ([VS Code](docs/copilot.md#vs-code)), and **Configure Skills** `catch-up`, `decision`, `fill-templates`, `update` and `work-model`; the first answer opens with the start report, its first line `SE <version> started`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
+| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/<owner>/<repository>`, open it, and install the plugin from the clone: **Chat: Install Plugin from Source** with the clone's folder (agent plugins, `chat.plugins.enabled`); VS Code reads the plugin through `.claude-plugin/plugin.json`, its agents from `agents/` and its skills from `skills/`, and the checkout's `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `retro`, `reviewer` and `worker`, each once: both hosts read the one `agents/<name>.md` ([VS Code](docs/copilot.md#vs-code)), and **Configure Skills** `catch-up`, `decision`, `update` and `work-model`; the first answer opens with the start report, its first line `SE <version> started`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
 | GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), which VS Code reads through `.claude-plugin/plugin.json`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
-| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision`, `fill-templates`, `update` and `work-model` from the plugin's `skills/`, which its manifest `.github/plugin/plugin.json` names with the one `agents/`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
+| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision`, `update` and `work-model` from the plugin's `skills/`, which its manifest `.github/plugin/plugin.json` names with the one `agents/`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
 | GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/hooks/se.json`; it reads agents only from the repository's own `.github` folder, where SE ships none, so it offers no `se` agent; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task whose first line is `Act as the se agent defined in agents/se.md.` | its `sessionStart` hook hands the session SE's greeting, as above |
 
 Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
@@ -2579,9 +2579,9 @@ prints at most ten findings and exits 1 where one refuses; `templates.py draft <
 template and `templates.py list` names every template with its actions. They read `templates/` at `origin/main`
 where it holds them, else the working tree (`--tree` always).
 
-`draft --json` also gives each field's shape and the template's JSON Schema, which a model's
-strict tool use takes as it stands; `templates.py schema <template>` prints that schema alone,
-generated from the template.
+`draft --json` also gives each field's shape (its kind, heading, whether it is required, its
+choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
+`templates.py schema <template>` prints that schema alone, generated from the template.
 
 The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`) shape the
 texts SE shows and its sessions pass to each other. `templates.py interfaces` writes each one's
@@ -2597,8 +2597,12 @@ A `file.write` template claims files by its `applies.paths` globs, such as a mil
 `templates.py check --path <file>` checks one against the template its front matter's
 `derived_from` names or the conditions pick, refuses one none picks and leaves unclaimed files free.
 
-A document is checked against the template version it records
-([docs/templates.md "The document"](docs/templates.md#the-document)).
+The front matter and `#` title stay as they are, but for the `derived_from` and `overlay` lines the
+front matter records its template by.
+
+A document is checked against the template version its marker or front matter records: another
+minor or patch version warns, another major version refuses, naming both versions and the fill
+that writes it again ([docs/templates.md "The document"](docs/templates.md#the-document)).
 
 `--templates <folder>` reads the templates from another folder.
 
@@ -2648,11 +2652,6 @@ it takes the template, the prompt, the raw input and the agent's fields.
 - Before each fill, `templates.py fill` brings every template a `templates/imports.yaml` imports up
   to date from its source tool, then the overlay applies (`scripts/template_import.py`; its
   `refresh` does the same alone).
-
-[fill-templates](src/skills/fill-templates/SKILL.md) fills templates from raw material into a new
-repository: "write me a label spec, the template is label-spec, my raw data is in `notes/`" is one
-request; [pump-x](examples/fill-templates/pump-x/README.md) is its worked example
-([docs](docs/templates.md#filling-templates-from-material)).
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
