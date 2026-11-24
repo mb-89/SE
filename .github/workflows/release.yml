@@ -1,5 +1,5 @@
 # Tags each release: v<version> of every se.toml [project] version on the integration branch, and
-# moves v<major> of the current version to that major's newest release (README "Release tags").
+# moves v<major> of the current version to that major's newest release (docs/settings.md "Release tags").
 # Reusable: a repository calls it with the short file that section shows, as se does in
 # release-tag.yml.
 name: release

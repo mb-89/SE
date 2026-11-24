@@ -58,7 +58,7 @@ its tools.
   - Without gh (neither signed in nor answered over REST) it names no retro or fleet: the
     turn-start check below prints the fleet check's plan; run it with your GitHub tools, pass the
     lists back to `work_tickets.py fleet-check` as it says, and present its findings
-    ([Fleet check](../README.md#fleet-check)).
+    ([Fleet check](../docs/fleet.md#fleet-check)).
 - **Update**: the report's last line names the one update, `/se:update`, the skill
   [update](../skills/update/SKILL.md), which takes every newer release, across a major too, and
   follows the upgrade guide's sections between ([docs/boot.md](../docs/boot.md#the-update)).
@@ -100,14 +100,14 @@ its tools.
   - Stale claims, which it names (without gh, `ready --claimed` on the queue plan's read), go to
     the person. Releasing one is the person's step: prepare its
     branch's deletion and the removal of `in-progress` and the beat line, and run them on the
-    person's yes ([README "Workers"](../README.md#workers)).
+    person's yes ([docs/settings.md "Workers"](../docs/settings.md#workers)).
 - **Work issues** from [work.md](../.github/ISSUE_TEMPLATE/work.md), filed with
   `work_tickets.py file`, labelled as the work model's [Issues](../skills/work-model/SKILL.md#issues)
   says: title = branch name, carrying only the task (goal, the user's requirement verbatim, design owner, numbered
   requirements, file ownership when packages share files, acceptance, verification).
   - Write its body file, `.se/issues/<name>.md`, with `templates.py fill work-file --path <file>`
     and file it with `--body-file <file>`; the hook refuses a write that leaves it off its template
-    ([README "Templates"](../README.md#templates)).
+    ([docs/templating.md "Templates"](../docs/templating.md#templates)).
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package as the [catch-up skill](../skills/catch-up/SKILL.md#hard-rules) says.
 - **Backlog issues**: a far-out idea from the person that is not ready work is filed with
@@ -117,7 +117,7 @@ its tools.
   back since the last one; each improvement names the agent definition, template or rule it
   changes. The retro reads the field reports in the pull request descriptions of the window's
   closed work issues (older ones, from before reports moved there, in their `field-report` issues).
-  - It falls due by what comes back ([README "Retro due"](../README.md#retro-due)): your next
+  - It falls due by what comes back ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)): your next
     `work_tickets.py file` files it first and refuses the issue you meant, naming it. While a
     retro or an overhaul is open, you file no new issue; running work goes on.
   - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
@@ -127,10 +127,10 @@ its tools.
   - When it reports the issue closed, file its work findings: a work issue names each finding it
     takes as `retro #<n> finding <k>`, so the next retro scores it.
 - **Overhaul issues**, to ask whether the design is still right, fall due after enough retros or
-  days ([README "Retro due"](../README.md#retro-due)) and are filed the same way, from
+  days ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)) and are filed the same way, from
   [overhaul.md](../.github/ISSUE_TEMPLATE/overhaul.md) (`overhaul.py new` files one by hand).
   - A retro agent runs it, `overhaul.py read` then `overhaul.py file`, which closes it with its
-    report ([README](../README.md#work-commands)).
+    report ([README](../docs/work-commands.md#work-commands)).
   - A work issue you file from it names each finding it takes as `overhaul #<n> finding <k>`, so
     the next overhaul scores it.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
@@ -146,7 +146,7 @@ its tools.
   - Start each integrator with `extra_allowed_tools` set to the list
     `uv run python <se>/scripts/claude_settings.py rules` prints, so the release you ask for
     passes its session's permission check. The host drops an entry your own session lacks, so
-    your checkout's `.claude/settings.json` holds the same rules (README "Claude Code cloud").
+    your checkout's `.claude/settings.json` holds the same rules (docs/install.md "Claude Code cloud").
   - At your first turn, title your own session `SE` and add the tag `SE`; on the person's request,
     rename the earlier sessions of SE's work to the scheme, as [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
@@ -166,7 +166,7 @@ its tools.
   - Its title is `session-title reviewer <project> <pull request number>`, its tag `SE`
     ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)).
   - Its prompt names only the reviewer agent, the pull request, its repository and your session
-    (in the cloud, the prompt the README's [Claude Code cloud](../README.md#claude-code-cloud)
+    (in the cloud, the prompt the README's [Claude Code cloud](../docs/install.md#claude-code-cloud)
     names).
   - It is advisory: the integrator's procedure does not wait for it.
   - Its one output is the review comment on the pull request. When its message arrives, read that
@@ -186,7 +186,7 @@ its tools.
     person whether to release.
   - Several landings belong to one release, so send it when it is needed:
     - when a dependent project needs a change that landed here and its pin takes released
-      versions only (a `version` range, README [Modules](../README.md#modules));
+      versions only (a `version` range, [Modules](../docs/modules.md#modules));
     - when the work the person gave you includes a release, before the person shares the
       project, or when the person wants one.
 - Paths and shell follow the work model's

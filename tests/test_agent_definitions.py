@@ -1,8 +1,10 @@
 """The role agent definitions exist, point to the work-model skill and are linked from the skills."""
 from pathlib import Path
 import re
+import tomllib
 
 import pytest
+from manual import DOCS_PAGES
 
 ROOT = Path(__file__).resolve().parents[1]
 GITHUB = ROOT / ".github"
@@ -95,16 +97,17 @@ def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_de
             assert asks not in text, asks
 
 
-# #1567's decision: "'dispatcher' then names only the scheduled work check" (README "Dispatcher").
-DISPATCHER_OWNER = ("#dispatcher", 'readme "dispatcher"')
+# #1567's decision: "'dispatcher' then names only the scheduled work check" (docs/fleet.md "Dispatcher").
+DISPATCHER_OWNER = ("#dispatcher", 'docs/fleet.md "dispatcher"')
 BLOCK_START = re.compile(r"^\s*(?:[-*]|\d+\.)\s|^#")
 
 
 def dispatcher_misnamed(text: str) -> list[str]:
     """The paragraphs and list items of `text` that say "dispatcher" without naming the
-    scheduled work check's owner (a link to README "Dispatcher", or that name), outside
-    README's own "### Dispatcher" section: there "dispatcher" could name the person's session."""
-    text = re.sub(r"^### Dispatcher\n.*?(?=^#)", "", text, flags=re.MULTILINE | re.DOTALL)
+    scheduled work check's owner (a link to docs/fleet.md "Dispatcher", or that name), outside
+    docs/fleet.md's own "## Dispatcher" section: there "dispatcher" could name the person's
+    session."""
+    text = re.sub(r"^#{2,3} Dispatcher\n.*?(?=^#)", "", text, flags=re.MULTILINE | re.DOTALL)
     blocks: list[list[str]] = [[]]
     for line in text.splitlines():
         if not line.strip() or BLOCK_START.match(line):
@@ -120,7 +123,7 @@ def dispatcher_misnamed(text: str) -> list[str]:
     ("SE, the dispatcher, talks to the person.\n", True),
     ("- Ask the dispatcher.\n- See [README](README.md#dispatcher).\n", True),
     ("The [dispatcher](README.md#dispatcher) fires the integrator.\n", False),
-    ("the dispatcher (README \"Dispatcher\") lists work\n", False),
+    ("the dispatcher (docs/fleet.md \"Dispatcher\") lists work\n", False),
     ("### Dispatcher\n\nThe dispatcher runs.\n\n### Next\n", False),
 ])
 def test_dispatcher_may_name_only_the_scheduled_work_check(text, misnamed):
@@ -128,7 +131,7 @@ def test_dispatcher_may_name_only_the_scheduled_work_check(text, misnamed):
 
 
 def test_no_instruction_calls_the_session_the_person_talks_to_the_dispatcher():
-    instructions = [*SOURCE.rglob("*.md"), ROOT / "README.md", ROOT / "AGENTS.md"]
+    instructions = [*SOURCE.rglob("*.md"), ROOT / "README.md", ROOT / "AGENTS.md", *DOCS_PAGES]
     named = {path.relative_to(ROOT).as_posix(): found for path in instructions
              if (found := dispatcher_misnamed(path.read_text(encoding="utf-8")))}
     assert named == {}
@@ -543,7 +546,7 @@ def test_the_work_model_owns_without_gh_and_lists_the_commands_that_still_run():
     line = next(line for line in section.split("\n- ") if line.startswith("**Commands that still run**"))
     listed = set(re.findall(r"`([a-z-]+)`", line.split("Every other command")[0]))
     # push and verified reach gh only for the integrator's status where se.toml sets ci = false,
-    # and without gh accept none (README "Landing without CI"): they still run, so they are listed.
+    # and without gh accept none (docs/tests.md "Landing without CI"): they still run, so they are listed.
     assert listed == commands_that_need_no_gh() | {"push", "verified"}
     assert "the host's GitHub tools" in section
     assert "naming itself, the missing `gh` and this section" in " ".join(section.split())
@@ -1133,9 +1136,9 @@ def test_the_worked_example_draws_its_current_situation_as_a_diagram():
 
 # The guidance the person settled on 22 Nov (SE#1672): each pair keeps one text, its winner, in one
 # owner, and none of its losing texts. The search covers the authored prose, the guidance notes,
-# the template notes and the README.
+# the template notes, the README and the pages its manual moved to.
 SETTLED = sorted([*PROSE, *(ROOT / "guidance").rglob("*.md"), *(ROOT / "templates").glob("*.md"),
-                  ROOT / "README.md"])
+                  ROOT / "README.md", *DOCS_PAGES])
 
 
 @pytest.mark.parametrize(("winner", "owner", "losers"), [

@@ -6,7 +6,7 @@ is signed in also counts the work landed since the last retro and runs the fleet
 moves every module that is due within its range, and SE itself, into place; `start-refresh` moves
 an installed SE that is a git checkout to its latest release at the session's start;
 `start-components` resolves the project's components there, stopping the start where a required one
-is missing. What each command does and where SE runs it is the README section "Start and refresh".
+is missing. What each command does and where SE runs it is docs/start.md "Start and refresh".
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ MAX_AGE = 3600  # seconds a cached update check stays fresh
 RUNNING_FOR = 120  # seconds a started background check counts as running
 PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
 CLOUD_ENV = "CLAUDE_CODE_REMOTE"  # "true" in a Claude Code cloud session
-CLOUD_PLUGINS = "README \"Claude Code cloud\""
+CLOUD_PLUGINS = "docs/install.md \"Claude Code cloud\""
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
 START_TIMEOUT = 15  # seconds each network read of the refresh at start may take
 COMPONENTS_TIMEOUT = 60  # seconds the project's component listing may take
@@ -674,7 +674,7 @@ def _plugin_name(root: Path) -> str | None:
 def stale_plugin_lines(se_root: Path, root: Path | None) -> list[str]:
     """One line where the project is a checkout of the SE that runs (its plugin manifest names the
     same plugin) at a newer version: the session runs an older SE than the checkout it works on,
-    as a cloud container restored from a cached snapshot does (README "Cloud sessions")."""
+    as a cloud container restored from a cached snapshot does (docs/install.md "Cloud sessions")."""
     if root is None or root.resolve() == se_root.resolve():
         return []
     name = _plugin_name(se_root)
@@ -686,7 +686,7 @@ def stale_plugin_lines(se_root: Path, root: Path | None) -> list[str]:
         return []
     return [f"SE {_v(running)} runs, older than this checkout's SE {_v(checkout)}: in the cloud, a "
             "container restored from a cached snapshot, which the environment rebuilds only when "
-            "its setup script changes (README \"Cloud sessions\")"]
+            "its setup script changes (docs/install.md \"Cloud sessions\")"]
 
 
 def skill_lines(local: Local) -> list[str]:
@@ -799,7 +799,7 @@ def take_outside(state: State, root: Path | None, se_root: Path) -> str:
     upgrade guide between its major and the newer one."""
     item, outside = state.item, state.outside
     if item.kind == "se":
-        return (f"to take it, install SE {_v(outside)} again as README \"Install\" says, "
+        return (f"to take it, install SE {_v(outside)} again as docs/install.md \"Install\" says, "
                 + upgrade_sections(item.version[0], outside[0]))
     where = (root / se_modules.MANIFEST).as_posix() if root else se_modules.MANIFEST
     remedy = (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [components.{item.name}] of {where}, "
@@ -877,7 +877,7 @@ def kern_status(binary: Path, root: Path) -> dict | None:
 
 @dataclass
 class Kern:
-    """What bootstrap.sh said of kern at the session's start (README "Kern"): the binary it started,
+    """What bootstrap.sh said of kern at the session's start (docs/start.md "Kern"): the binary it started,
     why it failed, or why the machine switched the core off."""
 
     binary: Path | None = None
@@ -2001,7 +2001,7 @@ def root_line(se_root: Path) -> str:
     return f"{ROOT_NAME}: {se_root}"
 
 
-#: The environment variable that names the agent a session starts as (README "Claude Code cloud").
+#: The environment variable that names the agent a session starts as (docs/install.md "Claude Code cloud").
 DEFAULT_AGENT_ENV = "SE_DEFAULT_AGENT"
 #: The one agent it may name: the one a person talks to.
 DEFAULT_AGENT = "se"
@@ -2094,7 +2094,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
     boot_parser = commands.add_parser("boot", help="SE's boot: bring the checkout to the newest tip of its "
                                       "branch, then list SE and every pin of the component tree with its "
-                                      "pinned, locked and newest version (README \"Boot\")")
+                                      "pinned, locked and newest version (docs/start.md \"Boot\")")
     boot_parser.add_argument("--upgrade", action="store_true", help="also move SE to its newest release "
                              "and every lock to the newest release its pin admits; a release beyond a pin "
                              "is never taken")

@@ -8,7 +8,7 @@ description: 'Where SE''s Timeline is and what it shows: the published page of t
 
 The Timeline already exists. SE's docs workflow builds it and publishes it beside the
 documentation as `timeline.html`, hourly and on each issue event
-([README "Documentation"](../../README.md#documentation)). When it opens, the page asks GitHub
+([Documentation](../../docs/documentation.md)). When it opens, the page asks GitHub
 itself for what changed since, so it is current without anyone rebuilding it.
 
 ## Give the link

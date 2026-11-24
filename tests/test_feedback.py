@@ -130,6 +130,26 @@ def test_every_long_command_announces_its_phases():
 # Requirement 2: a read of GitHub or a remote is announced before it is made.
 
 
+def test_over_rest_a_porcelain_call_is_announced_as_its_rest_read(tmp_path, monkeypatch, capsys):
+    """It chooses REST as an earlier test that leaves the choice behind would, into the module's
+    cache itself: the suite's fixture `fresh_gh_backend` keeps it from the test after this one."""
+    seen: list[str] = []
+
+    def run(arguments, **kwargs):
+        seen.append(capsys.readouterr().err)
+        return subprocess.CompletedProcess(arguments, 0, "[]", "")
+
+    work_tickets._gh_backend["gh"] = work_tickets.REST
+    monkeypatch.setattr(work_tickets, "gh_executable", lambda: "gh")
+    monkeypatch.setattr(work_tickets.process_door, "run", run)
+    work_tickets.run_gh(tmp_path, ["issue", "list", "--label", "escalated", "--json",
+                                   "number,title", "--limit", "200", "--repo", "owner/repo"])
+    assert len(seen) == 1 and seen[0].startswith("Reading GitHub: gh api -X GET repos/owner/repo/issues?")
+
+
+# The test after the one above, in its file's worker (--dist loadfile): it runs on the backend it
+# expects, whatever an earlier test chose.
+
 def test_a_github_call_is_announced_before_it_is_made(tmp_path, monkeypatch, capsys):
     seen: list[str] = []
 

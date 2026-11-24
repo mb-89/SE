@@ -1,5 +1,5 @@
 # Copy this file and set branches to your integration branch: uses calls the copy of se's
-# release.yml that se writes into your repository at its pin (se's README "Release tags").
+# release.yml that se writes into your repository at its pin (se's docs/settings.md "Release tags").
 name: release-tag
 
 on:

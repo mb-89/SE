@@ -166,7 +166,7 @@ module and its contract.
 - **Prevents:** a change that breaks a far part of the system; a framework that depends on an
   application.
 - **Implementations:**
-  - se: projects use se and obs as pinned modules ([README "Modules"](../../../../README.md#modules));
+  - se: projects use se and obs as pinned modules ([docs/modules.md "Modules"](../../../../docs/modules.md#modules));
     framework and application repositories are kept apart
     ([Rules for all roles](../SKILL.md#rules-for-all-roles)).
   - Go line (frozen): v5's index and modules registering with a small core.
@@ -425,7 +425,7 @@ is committed.
     application), which kern's own `go test ./...` runs over its tree (kern's README "Forbid
     lists").
   - se: a project runs its forbid scan before each commit as a commit check, `se.toml`
-    `[commit_checks]` ([Commit checks](../../../../README.md#commit-checks)); SE's own tree, once
+    `[commit_checks]` ([Commit checks](../../../../docs/settings.md#commit-checks)); SE's own tree, once
     SE pins a kern with forbid lists (kern 1.3.0) and names its scan there.
 - **Related:** des-004, des-017, tst-001, tst-004
 
@@ -480,7 +480,7 @@ within one second.
 - **Prevents:** a slow regression nobody notices; a command that leaves a person waiting with no
   feedback.
 - **Implementations:**
-  - se: the suite's budget in `se.toml` `[tests]` ([Test budget](../../../../README.md#test-budget)),
+  - se: the suite's budget in `se.toml` `[tests]` ([Test budget](../../../../docs/tests.md#test-budget)),
     enforced by `integrate`, and `work_tickets.py suite --compare`; feedback within a second, by
     judgment.
   - Go line (frozen): `spec/budgets.yaml`, interactive and batch command classes, and answers from
@@ -696,10 +696,10 @@ a report.
   - se: `work_tickets.py file`, `backlog file` and `route` are the only paths to the issue-create
     door, which `tests/test_issue_creation.py` checks.
   - se: `review.py file` posts one comment on the reviewed pull request and files no issue
-    (README [Work commands](../../../../README.md#work-commands)).
+    ([Work commands](../../../../docs/work-commands.md#work-commands)).
   - se: `retro.py file` and `overhaul.py file` post one report on their own issue and close it,
     filing no issue; an overhaul's rule changes are marked for the owner's decision list
-    (README [Work commands](../../../../README.md#work-commands)).
+    ([Work commands](../../../../docs/work-commands.md#work-commands)).
   - se: SE, reading a report, bundles related findings into one work issue and sends rule or
     principle changes to the owner's decision list, never as separate issues
     ([Issues](../SKILL.md#issues)).
@@ -910,7 +910,7 @@ role's procedure has a step that needs the person in its session.
 - **Why:** the person talks to one session, and a host counts an approval only in the session it
   was given; a step another role needs approved must therefore run in SE's session. The retro
   agent is SE's for this rule: it runs a retro or an overhaul with the person in a session SE
-  starts for that (README "Retro due").
+  starts for that (docs/fleet.md "Retro due").
 - **Without it:** the person is sent into integrator and worker sessions they do not monitor, and
   a step waits there for a yes, or runs under a relayed one.
 - **Prevents:** a person asked outside SE's session; a one-way step stuck on an approval no one

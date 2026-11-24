@@ -570,6 +570,28 @@ def test_guard_ignores_a_sentence_whose_links_only_point_elsewhere(worktree: Pat
     assert work_tickets.prose_key("See [it](a.md#x) and [that](<b c.md>).") == "See [it]() and [that](<b c.md>)."
 
 
+def test_guard_keeps_a_sentence_moved_to_a_file_outside_the_authored_content(worktree: Path) -> None:
+    """A page the branch adds is no authored file of the integration branch's se.toml; a sentence
+    moved there keeps its words, while one reworded or dropped is still named (SE#1796)."""
+    repository, guide = authored_repository(
+        worktree.parent / "moved-across-files-case", "move-across-files",
+        "This sentence moves to the manual.\nThis sentence is reworded.\nThis sentence is dropped.\n"
+        "See [the rules](rules.md#use) first.\n",
+    )
+    guide.write_text("# Guide\n", encoding="utf-8", newline="\n")
+    (repository / "manual").mkdir()
+    (repository / "manual" / "install.md").write_text(
+        "This sentence moves to the manual.\nThis sentence was reworded.\n"
+        "See [the rules](../docs/rules.md#use) first.\n",
+        encoding="utf-8", newline="\n")
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "move prose to the manual").returncode == 0
+    assert work_tickets.deleted_authored_sentences(repository, "move-across-files") == [
+        "docs/guide.md: This sentence is reworded.",
+        "docs/guide.md: This sentence is dropped.",
+    ]
+
+
 MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
 
 
@@ -1410,16 +1432,17 @@ def test_se_is_ignored_in_full(tmp_path: Path) -> None:
     assert git(repository, "check-ignore", "-q", ".se/work/notes/private.txt").returncode == 0
 
 
-def test_readme_command_reference_is_what_docs_writes():
+def test_the_command_reference_is_what_docs_writes():
     assert work_tickets.main(["docs", "--check"]) == 0
 
 
 def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, monkeypatch, capsys):
-    readme = tmp_path / "README.md"
+    readme = tmp_path / work_tickets.REFERENCE_PAGE
+    readme.parent.mkdir()
     stale = (f"# Title\n\nProse stays.\n\n{work_tickets.REFERENCE_BEGIN}\nOUTDATED REFERENCE\n"
              f"{work_tickets.REFERENCE_END}\n\nMore prose.\n")
     readme.write_text(stale, encoding="utf-8", newline="\n")
-    monkeypatch.setattr(work_tickets, "README", readme)
+    monkeypatch.setattr(work_tickets, "CHECKOUT", tmp_path)
 
     assert work_tickets.main(["docs", "--check"]) == 1
     assert readme.read_text(encoding="utf-8") == stale
@@ -1438,7 +1461,7 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
 def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_nothing(
         tmp_path, capsys):
     """format writes what se_plugin.py check, templates.py interfaces --check and docs --check
-    refuse: the generated layouts, the interfaces' schemas and the README's command reference, in
+    refuse: the generated layouts, the interfaces' schemas and the command reference, in
     a misformatted copy of the checkout."""
     root = tmp_path / "se"
     shutil.copytree(PROJECT / "src", root / "src")
@@ -1449,7 +1472,7 @@ def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_n
     stale.write_text("edited by hand\n", encoding="utf-8", newline="\n")
     (root / "agents" / "worker.md").unlink()
     (root / "skills" / "orphan.md").write_text("no source\n", encoding="utf-8", newline="\n")
-    (root / "README.md").write_text(
+    (root / "docs" / "work-commands.md").write_text(
         f"# Title\n\n{work_tickets.REFERENCE_BEGIN}\nstale\n{work_tickets.REFERENCE_END}\n",
         encoding="utf-8", newline="\n")
     assert len(se_plugin.differences(root)) == 3
@@ -1462,9 +1485,9 @@ def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_n
     output = capsys.readouterr().out
     assert "wrote skills/work-model/SKILL.md" in output
     assert "wrote scripts/interfaces/escalation.json" in output
-    assert "wrote README.md" in output
+    assert "wrote docs/work-commands.md" in output
     assert se_plugin.differences(root) == []
-    readme = (root / "README.md").read_text(encoding="utf-8")
+    readme = (root / "docs" / "work-commands.md").read_text(encoding="utf-8")
     assert readme == work_tickets.with_command_reference(readme)
 
     assert work_tickets.main(["format", "--root", str(root)]) == 0
@@ -2190,7 +2213,7 @@ def test_stop_check_without_gh_judges_by_the_recorded_pull_request_and_else_fail
     assert "the Stop hook passes" in capsys.readouterr().out
     assert stop_hook(root, monkeypatch, capsys) == {}
     assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()  # a pass resets the count
-    # README "Late push": the delivery without gh records its Branch tip as deliver does
+    # docs/fleet.md "Late push": the delivery without gh records its Branch tip as deliver does
     recorded = work_tickets.sibling("late_push").load(root / ".se" / "work")
     assert recorded is not None and recorded["branch"] == work_tickets.current_branch(root)
     assert recorded["tip"] == work_tickets.BRANCH_TIP_PATTERN.search(delivered_description(root))[1]
@@ -2354,7 +2377,7 @@ def test_stop_check_falls_back_to_the_cwd_and_says_why_it_cannot_judge_a_worker_
         "systemMessage"]
 
 
-# Metrics (README "Metrics")
+# Metrics (docs/running.md "Metrics")
 
 
 class FakeClock:
@@ -3206,7 +3229,7 @@ def test_a_relay_landing_skips_cis_suite_time_and_says_so_once(worktree, monkeyp
 
 
 # Stop-check and push refuse a changed file a template claims that breaks it, wherever a template claims
-# a path (README "Templates", scripts/se_templates.py check-files).
+# a path (docs/templating.md "Templates", scripts/se_templates.py check-files).
 
 NOTE_TEMPLATE = '''---
 name: note
