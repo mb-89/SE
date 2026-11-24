@@ -14,7 +14,11 @@ one check keeps that true (the guidance note `generated-files-are-marked`, which
   source and the tracked paths it writes (`outputs`, globs: `*` within a folder, `**` across), and
   how a fresh run is compared: `check`, a command that fails where a fresh run does not reproduce
   its outputs byte for byte; `held_by`, the test or workflow that reruns it; or `unchecked`, why no
-  fresh run can be compared. Exactly one of the three.
+  fresh run can be compared. Exactly one of the three. `regenerate`, where a merge can run it, is
+  the command that writes its outputs afresh in the checkout, offline.
+- **The merge** (`regenerate`, `regenerable`): a merge never stops on a generated file:
+  `integrate`'s merge runs every `regenerate` and stages what it rewrote (scripts/work_tickets.py
+  `regenerate_merge`).
 - **The lock files** (`LOCKS`): third-party lock files, by name, with the tool that writes them,
   are exempt from the marker; a single line a program edits in a hand-written file (a release's
   version line) is no generated file and is declared nowhere.
@@ -109,6 +113,15 @@ class Generator:
     check: tuple[str, ...] = ()
     held_by: str = ""
     unchecked: str = ""
+    regenerate: tuple[str, ...] = ()
+
+
+class RegenerateError(Exception):
+    """A `regenerate` failed: `what` names it and its command, `output` what it said."""
+
+    def __init__(self, what: str, output: str) -> None:
+        super().__init__(f"{what} failed:\n{output}")
+        self.what, self.output = what, output
 
 
 # The marker.
@@ -225,7 +238,8 @@ def load(root: Path) -> list[Generator]:
         where = f"{DECLARATIONS}: generator {number}"
         if not isinstance(entry, dict):
             raise DeclarationError(f"{where} is no mapping")
-        unknown = set(entry) - {"generator", "source", "outputs", "check", "held_by", "unchecked"}
+        unknown = set(entry) - {"generator", "source", "outputs", "check", "held_by", "unchecked",
+                                "regenerate"}
         if unknown:
             raise DeclarationError(f"{where}: unknown keys {sorted(unknown)}")
         name, source, outputs = entry.get("generator"), entry.get("source"), entry.get("outputs")
@@ -239,12 +253,15 @@ def load(root: Path) -> list[Generator]:
         check = entry.get("check", [])
         if not isinstance(check, list) or not all(isinstance(word, str) for word in check):
             raise DeclarationError(f"{where} ({name}): `check` is a command, a list of words")
+        regenerate = entry.get("regenerate", [])
+        if not isinstance(regenerate, list) or not all(isinstance(word, str) and word for word in regenerate):
+            raise DeclarationError(f"{where} ({name}): `regenerate` is a command, a list of words")
         ways = [key for key in ("check", "held_by", "unchecked") if entry.get(key)]
         if len(ways) != 1:
             raise DeclarationError(f"{where} ({name}): name exactly one of `check`, `held_by` and "
                                    "`unchecked`, how a fresh run is compared")
         found.append(Generator(name, source, tuple(outputs), tuple(check), str(entry.get("held_by", "")),
-                               str(entry.get("unchecked", ""))))
+                               str(entry.get("unchecked", "")), tuple(regenerate)))
     return found
 
 
@@ -410,6 +427,76 @@ def findings(root: Path, rerun: bool = True, files: list[str] | None = None, run
     if rerun:
         found += rerun_findings(root, generators, runner)
     return found
+
+
+# The merge.
+
+
+def regenerable(root: Path) -> list[Generator]:
+    """The generators under `root` a merge reruns: those `generated.yaml` gives a `regenerate`;
+    none where it cannot be read, as a merge that conflicts in it has nothing to rerun by."""
+    try:
+        return [generator for generator in load(root) if generator.regenerate]
+    except DeclarationError:
+        return []
+
+
+def regenerated_by(generators: list[Generator], path: str) -> Generator | None:
+    """The generator of `generators` whose outputs hold `path`, if any."""
+    return next((generator for generator in generators
+                 if any(glob(output).match(path) for output in generator.outputs)), None)
+
+
+def unstaged(root: Path) -> set[str]:
+    """The paths whose working-tree file differs from the index, untracked ones included."""
+    import git_door
+
+    status = git_door.run("status", "--porcelain=v1", "-z", "--untracked-files=all", root=root)
+    if status.returncode != 0:
+        raise RegenerateError(f"git status in {root}", status.stderr.strip())
+    entries, paths, index = status.stdout.split("\0"), set(), 0
+    while index < len(entries):
+        entry = entries[index]
+        if entry and (entry[:2] == "??" or entry[1] != " "):
+            paths.add(entry[3:])
+        if entry[:1] in ("R", "C"):
+            index += 1  # a rename's or copy's source follows it
+        index += 1
+    return paths
+
+
+def regenerate(root: Path, commands: list[tuple[str, tuple[str, ...]]]) -> list[tuple[str, list[str]]]:
+    """Run each `(label, command)` in `root`, through the process door, and stage what it rewrote:
+    the files it left differing from the index that differed from it before (an edit the checkout
+    held already stays out). Each label with the paths it staged; RegenerateError, naming the
+    command and its output, where one fails."""
+    import git_door
+    import process_door
+
+    done = []
+    for label, command in commands:
+        before = unstaged(root)
+        try:
+            result = process_door.run(list(command), cwd=root, capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", check=False,
+                                      timeout=RERUN_SECONDS)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RegenerateError(f"{label} ({' '.join(command)})", f"did not run: {error}") from None
+        if result.returncode != 0:
+            output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+            raise RegenerateError(f"{label} ({' '.join(command)})", output)
+        paths = sorted(unstaged(root) - before)
+        if paths:
+            added = git_door.run("add", "--", *paths, root=root)
+            if added.returncode != 0:
+                raise RegenerateError(f"git add in {root}", added.stderr.strip())
+        done.append((label, paths))
+    return done
+
+
+def declared_commands(root: Path) -> list[tuple[str, tuple[str, ...]]]:
+    """Each regenerable generator's name and its `regenerate`, in declaration order."""
+    return [(generator.generator, generator.regenerate) for generator in regenerable(root)]
 
 
 # The notice.

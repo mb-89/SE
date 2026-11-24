@@ -201,7 +201,9 @@ def run_script(invocation: Invocation) -> Answer:
     path = invocation.script
     if path is None:
         pytest.fail(f"{OWNER}: run_script answers `python <script>.py` only, not `{invocation.text()}`", pytrace=False)
-    return run_main(lambda _arguments: runpy.run_path(str(path), run_name="__main__"), invocation, path.name)
+    def main(_arguments: list[str]) -> None:  # one that runs to its end exits 0, as under the interpreter
+        runpy.run_path(str(path), run_name="__main__")
+    return run_main(main, invocation, path.name)
 
 
 def se_script(invocation: Invocation) -> Answer:

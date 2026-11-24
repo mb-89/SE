@@ -1063,6 +1063,7 @@ metrics = sibling("metrics")
 trust = sibling("ci_trust")
 feedback = sibling("feedback")
 component_versions = sibling("component_versions")
+generated_files = sibling("generated")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -9374,10 +9375,16 @@ def integrate(
     if merged.returncode != 0:
         conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
         conflicted = [line for line in conflicts.stdout.splitlines() if line.strip()]
+        regenerable = generated_files.regenerable(root)
+        def regenerated(path: str) -> bool:
+            return generated_files.regenerated_by(regenerable, path) is not None
         if not component_versions.merge_past_claims(root, conflicted, base, branch_head(root, branch),
-                                                    landing, f"Integrate {branch}"):
+                                                    landing, f"Integrate {branch}", regenerated):
             abandon_landing(root, target, landing)
             raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
+        taken = [path for path in conflicted if regenerated(path)]
+        if taken:
+            print(f"Merge: {', '.join(taken)} conflicted; took {target}'s, which the merge regenerates")
     component_tags = assign_component_versions(root, target, landing, base, branch, report)
     regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
@@ -9589,25 +9596,25 @@ def assign_component_versions(root: Path, target: str, landing: str, base: str, 
 
 
 def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None:
-    """Run `project.release_build` on the merge on `landing` and stage what it rewrites, so the
-    merge already holds the generated files the suite's build writes (a plugin manifest carrying
-    the project version): a branch never goes stale by them, and the suite's verdict is recorded
-    on the merge's tree. A failing build abandons the landing with its output."""
+    """Run `project.release_build` and every generator `generated.yaml` gives a `regenerate` on
+    the merge on `landing`, and stage what each rewrites, so the merge already holds the generated
+    files the suite's build writes (a plugin manifest carrying the project version) and fresh
+    generated files where both sides changed their source (scripts/generated.py "The merge"): a
+    branch never goes stale by them, and the suite's verdict is recorded on the merge's tree. A
+    failing run abandons the landing with its output."""
     command = release_build(root)
-    if command is None:
-        return
-    before = changed_paths(root)
-    result = process_door.run(command, cwd=root, shell=False, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False)
-    if result.returncode != 0:
+    commands = [("project.release_build", tuple(command))] if command is not None else []
+    commands += [(name, regenerate) for name, regenerate in generated_files.declared_commands(root)
+                 if list(regenerate) != command]
+    try:
+        done = generated_files.regenerate(root, commands)
+    except generated_files.RegenerateError as error:
         abandon_landing(root, target, landing)
-        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
-        raise QueueError(f"Cannot merge {branch}: project.release_build ({' '.join(command)}) "
-                         f"failed on the merge; nothing was merged:\n{output}")
-    paths = sorted(changed_paths(root) - before)
-    if paths:
-        checked_git(root, "add", "--", *paths)
-        print(f"Merge: release_build regenerated {', '.join(paths)}")
+        raise QueueError(f"Cannot merge {branch}: {error.what} failed on the merge; nothing was "
+                         f"merged:\n{error.output}") from None
+    for label, paths in done:
+        if paths:
+            print(f"Merge: {label.removeprefix('project.')} regenerated {', '.join(paths)}")
 
 
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
