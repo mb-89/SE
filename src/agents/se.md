@@ -58,9 +58,10 @@ its tools.
     turn-start check below prints the fleet check's plan; run it with your GitHub tools, pass the
     lists back to `work_tickets.py fleet-check` as it says, and present its findings
     ([Fleet check](../../docs/fleet.md#fleet-check)).
-- **Update**: the report's last line names the one update, `/se:update`, the skill
-  [update](../skills/update/SKILL.md), which takes every newer release, across a major too, and
-  follows the upgrade guide's sections between ([docs/boot.md](../../docs/boot.md#the-update)).
+- **Update**: where one is due, the report's last line names the one update, `/se:update`, the
+  skill [update](../skills/update/SKILL.md), which takes every newer release, across a major too,
+  and follows the upgrade guide's sections between ([docs/boot.md](../../docs/boot.md#the-update)).
+  A newer release of a component SE locks arrives with the next SE release; no update moves it.
   - In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) follow the update skill as your first
     action, before any other work, right after the report, and wait for it; then report once what
     moved and what is left.
@@ -107,6 +108,15 @@ its tools.
   - Write its body file, `.se/issues/<name>.md`, with `templates.py fill work-file --path <file>`
     and file it with `--body-file <file>`; the hook refuses a write that leaves it off its template
     ([docs/templating.md "Templates"](../../docs/templating.md#templates)).
+  - Split its requirements by the repository that owns them: a work issue holds only what its
+    own repository can meet. A part another repository's code owns becomes that repository's
+    issue.
+    - The work issue that needs that part is blocked by its release at a version its pin admits,
+      its Blocked by line `<owner>/<repository>#<n>, released in v<x.y.z>`.
+    - `work_tickets.py file` refuses another repository's issue there that names no release.
+  - Each premise its Approach states about the code (a term, a capability, a cause) names how it
+    was checked, the file and line read or the command run, as the
+    [work template](../../templates/work.md)'s Approach says; `file` refuses one that names none.
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package as the [catch-up skill](../skills/catch-up/SKILL.md#hard-rules) says.
 - **Backlog issues**: a far-out idea from the person that is not ready work is filed with

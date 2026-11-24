@@ -1342,7 +1342,8 @@ def se_hooks_path() -> str:
 
 def first_setup(kind: str, repo: Path,
                 state: fake_git.StateFile) -> subprocess.CompletedProcess[str]:
-    """Run setup of `kind` on the fresh `repo`: it sets core.hooksPath alone of the config and
+    """Run setup of `kind` on the fresh `repo`: of the config it sets core.hooksPath and the merge
+    driver of generated files (merge.se-generated, scripts/generated.py "The merge") alone, and it
     changes no file but .gitignore, the state `hooked` gives a hook test without running it."""
     before = repository_config(state, repo)
     files = repository_files(repo)
@@ -1352,7 +1353,8 @@ def first_setup(kind: str, repo: Path,
     changed = {key: value for key, value in after.items() if before.get(key) != value}
     assert not set(before) - set(after), "setup removed config"
     assert not any(str(repo.parent) in value for value in changed.values()), changed
-    assert list(changed) == ["core.hookspath"], changed
+    assert sorted(changed) == ["core.hookspath", "merge.se-generated.driver", "merge.se-generated.name"], changed
+    assert changed["merge.se-generated.driver"] == "true"
     if kind == "sh":
         assert changed["core.hookspath"] == se_hooks_path()
     now = repository_files(repo)

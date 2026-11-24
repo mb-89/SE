@@ -6751,6 +6751,48 @@ def test_an_issue_body_creating_a_command_and_another_repositorys_scripts_pass(
     assert "`scripts/build.py` names a file" in capsys.readouterr().err
 
 
+def test_file_refuses_a_blocker_of_another_repository_without_its_release_naming_the_line(
+        worktree, gh, capsys):
+    body = worktree / "body.md"
+    body.write_text("## Blocked by\n\n#4 the parser\nowner/kern#12 the door\n", encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/blocked-20261124", "--body-file", str(body)) == 1
+    error = capsys.readouterr().err
+    assert "file: the work issue is not ready to file" in error
+    assert "Blocked by: owner/kern#12 the door: another repository's issue" in error
+    assert "#4 the parser" not in error
+    assert not [call for call in gh.calls if call[:2] == ["issue", "create"]]
+
+    body.write_text("## Blocked by\n\nhttps://git.example/owner/kern/issues/12 the door\n",
+                    encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/linked-20261124", "--body-file", str(body)) == 1
+    assert "Blocked by: https://git.example/owner/kern/issues/12 the door" in capsys.readouterr().err
+
+    body.write_text("## Blocked by\n\nowner/kern#12 the door, released in kern v2.3.0\n"
+                    "owner/repo#4 the parser, this repository's own\n", encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/released-20261124", "--body-file", str(body)) == 0
+    assert "Filed work issue" in capsys.readouterr().out
+
+
+def test_file_refuses_a_premise_in_the_approach_that_names_no_check(worktree, gh, capsys):
+    body = worktree / "body.md"
+    body.write_text("## Approach\n\nRead the title once.\n"
+                    "Premise: `file` reads the title before the body.\n"
+                    "Premise: the door retries once (checked: scripts/gh_door.py:40 read).\n"
+                    "Premise: no test spawns git (checked: `uv run python scripts/hygiene.py` run).\n"
+                    "Not picked: reading it twice, as it costs a call.\n", encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/premise-20261124", "--body-file", str(body)) == 1
+    error = capsys.readouterr().err
+    assert ("Approach: Premise: `file` reads the title before the body.: name how the premise "
+            "was checked") in error
+    assert "the door retries once" not in error and "no test spawns git" not in error
+    assert not [call for call in gh.calls if call[:2] == ["issue", "create"]]
+
+    body.write_text("## Approach\n\nRead the title once.\n"
+                    "Premise: `file` reads the title first (checked: scripts/work_tickets.py:1 read).\n"
+                    "Not picked: reading it twice, as it costs a call.\n", encoding="utf-8")
+    assert run(worktree, "file", "--title", "feat/checked-20261124", "--body-file", str(body)) == 0
+
+
 def test_filing_checks_the_body_with_the_one_reference_function(worktree, gh, monkeypatch):
     references = work_tickets.sibling("references")
     seen = []

@@ -1,0 +1,8 @@
+#!/bin/sh
+# After a merge: every generated file a merge can rerun (generated.yaml `regenerate`) is regenerated
+# on the merged tree and committed as its own commit, where one changed; the merge driver
+# se-generated kept our side where both sides changed one (scripts/generated.py "The merge"). git
+# runs it once the merge is committed, as a merge commit's tree is written before any hook could
+# stage into it. A squash merge ($1 = 1) has committed nothing and is left alone.
+[ "${1:-0}" = 1 ] && exit 0
+exec "$(dirname "$0")/se-script" generated.py --root . regenerate --warn --commit

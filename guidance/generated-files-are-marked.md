@@ -48,11 +48,27 @@ that reruns it; or `unchecked`, why no fresh run can be compared.
   version line `work_tickets.py release` moves in `se.toml`, does not make it a generated file, and
   neither does a marked region inside one, such as the command reference in `docs/work-commands.md`.
 
+## The merge
+
+A merge never stops on a generated file: it regenerates it. A generator a merge can rerun offline
+has `regenerate` in `generated.yaml`, the command that writes its outputs afresh.
+
+- **On the landing.** `integrate`'s merge runs every `regenerate` and stages what it rewrote; a
+  conflict only in such files takes the integration branch's side, which the run then replaces.
+- **On a worker's merge.** `.gitattributes` gives each such output `merge=se-generated`, the merge
+  driver SE's setup installs, which keeps our side. The hook `post-merge` then regenerates and
+  commits what changed; `pre-commit` regenerates into a merge that stopped on another conflict.
+- **What a hook cannot run.** A generator that fails in a hook is a warning, and the merge goes
+  on with our side, which the check names stale; `integrate` stops instead.
+- **Not rerun.** A generator that needs the network, a measurement or a build has no `regenerate`,
+  and its outputs merge like any file.
+
 ## The check
 
 `uv run python <se>/scripts/generated.py check` fails, naming the file and the remedy, where a
 declared output lacks the marker or names another generator, a marked file is not declared by the
-generator it names, a declaration matches no tracked file, or a fresh run differs.
+generator it names, a declaration matches no tracked file, a fresh run differs, or an output of a
+generator with `regenerate` lacks the merge driver in `.gitattributes`.
 
 - **Where it runs.** In CI as a step of `<se>/scripts/hygiene.py`, with the fresh runs; at commit,
   as `se.toml` `[commit_checks]`, without them.

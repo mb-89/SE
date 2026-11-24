@@ -378,6 +378,10 @@ On main, released as 16.0.0 at the next release.
 - **Steps:** follow the component section [kern 3](#kern-3).
 - **Check:** `uv run python <se>/scripts/se_modules.py sync 2>&1 | grep -c 'admits both'` prints `0`.
 
+## SE 17
+
+On main, released as 17.0.0 at the next release.
+
 ### Every pull request into the integration branch states its release kind
 
 - **Change:** CI's release-kind gate refuses a pull request into the integration branch whose
@@ -387,12 +391,16 @@ On main, released as 16.0.0 at the next release.
   - SE ships the gate as the action `release-kind`, which every project holds:
     `se_workflows.py check` fails while a project holding SE's copies lacks it.
   - SE's hook refuses a merge call whose message, or the description GitHub takes, states none.
-- **Steps:** run `uv run python <se>/scripts/se_workflows.py write`, then add to the project's
-  required check job, after its checkout, a step that runs on pull requests
-  (`if: github.event_name == 'pull_request'`) with `uses: ./.github/actions/release-kind`; write a
-  `Release-kind: <kind>` line into each open housekeeping pull request's description.
-- **Check:** `uv run python <se>/scripts/se_workflows.py check` passes, and
-  `grep -n 'uses: ./.github/actions/release-kind' .github/workflows/*.yml` names the check job.
+- **Steps:**
+  - Run `uv run python <se>/scripts/se_workflows.py write`, which adds the action's copy.
+  - Add to the project's required check job, after its checkout, a step that runs on pull
+    requests (`if: github.event_name == 'pull_request'`) with `uses: ./.github/actions/release-kind`.
+  - State the kind in every pull request into the integration branch: a worker's field report
+    already does; write a `Release-kind: <kind>` line into every other open one, housekeeping
+    included.
+- **Check:** `uv run python <se>/scripts/se_workflows.py check` passes,
+  `grep -n 'uses: ./.github/actions/release-kind' .github/workflows/*.yml` names the check job, and
+  each open pull request's `check` run passes its step "The pull request states its release kind".
 
 ### A major landing writes its upgrade section
 

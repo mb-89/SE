@@ -128,6 +128,8 @@ ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review"
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
 NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
+#: The documents a deck is built from (deck.build): the retro's and the overhaul's one report.
+DECKS = ("retro-deck",)
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover",
               "rules-page", "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc",
@@ -138,7 +140,7 @@ FILES = ("work-file",)
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
 #: scaffold writes, each claiming the scripts or modules it shapes.
 CODE_TEMPLATES = ("python-script", "python-module", "python-component", "go-module")
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES, *CODE_TEMPLATES)
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *DECKS, *INTERFACES, *FILES, *CODE_TEMPLATES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
@@ -266,13 +268,22 @@ def test_the_marker_names_the_repository_the_template_its_version_and_its_digest
     digest = hashlib.sha256("".join(text + "\0" for text in texts).encode("utf-8")).hexdigest()
     requirement = hashlib.sha256((ROOT / "templates" / "requirement.md").read_bytes() + b"\0").hexdigest()
     nested = hashlib.sha256(f"sha256:{digest}\0sha256:{requirement}\0".encode("utf-8")).hexdigest()
-    assert work.marker_line == f"<!-- se:template se/work 1.1.0 sha256:{nested} -->"
+    assert work.marker_line == f"<!-- se:template se/work 1.2.0 sha256:{nested} -->"
     assert templates.render(work, work_fields(catalog)).splitlines()[1] == work.marker_line
     assert templates.TEMPLATE_MARKER_PATTERN.findall(work.marker_line) == ["work"]
     assert templates.TEMPLATE_MARKER_PATTERN.findall("<!-- se:template work -->\n<!-- se:form work -->") == []
     shutil.copytree(ROOT / "templates", tmp_path / "templates")
     own = templates.load(tmp_path, tree=True)["work"]
-    assert own.marker_line == f"<!-- se:template project/work 1.1.0 sha256:{nested} -->"
+    assert own.marker_line == f"<!-- se:template project/work 1.2.0 sha256:{nested} -->"
+
+
+def test_the_work_templates_approach_asks_each_premise_to_name_its_check(catalog):
+    for name in ("work", "work-file"):
+        approach = catalog[name].field("approach")
+        assert approach.required and approach.not_picked and approach.max_words == 160
+        assert "`Premise: <what holds> (checked: <file>:<line> read)`" in approach.says
+        assert "`work_tickets.py file` refuses one that names no check" in approach.says
+    assert "Premise:" not in catalog["ticket"].field("approach").says
 
 
 def test_render_writes_the_markers_once_and_keeps_unknown_and_verbatim_bytes(catalog):
@@ -362,7 +373,7 @@ def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike
 
 def test_a_note_s_skeleton_gives_each_field_its_heading_and_its_instruction(catalog):
     work = catalog["work"]
-    assert (work.version, work.kind, work.tags) == ("1.1.0", "document", ("issue", "work"))
+    assert (work.version, work.kind, work.tags) == ("1.2.0", "document", ("issue", "work"))
     assert catalog["routed"].kind == "block" and catalog["merge-message"].kind == "interface"
     goal = work.field("goal")
     assert goal.heading == "Goal" and goal.says.startswith("What is true once this is done")
@@ -1198,7 +1209,7 @@ def test_render_records_derived_from_and_overlay_in_place_and_selection_reads_th
 def test_render_brings_an_issue_s_marker_up_to_the_template_s_version(catalog):
     work = catalog["work"]
     rendered = templates.render(work, work_fields(catalog))
-    old = rendered.replace(work.marker_line, work.marker_line.replace(" 1.1.0 ", " 0.9.0 "))
+    old = rendered.replace(work.marker_line, work.marker_line.replace(f" {work.version} ", " 0.9.0 "))
     assert old != rendered
     assert templates.render(work, templates.parse(work, old)) == rendered
 

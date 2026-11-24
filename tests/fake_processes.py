@@ -10,8 +10,9 @@ handler that matches it, and none starts a process:
 - a script of SE (`python <se>/scripts/<name>.py ...`, also through `uv run ... python`) by its
   `main(argv)`, imported and called in this process with the call's working directory,
   environment, standard input and output (`run_main`), on by default;
-- se's git hooks (`.githooks/pre-commit`, `commit-msg`, `pre-push`), which the fake git runs on a
-  commit or push, by their logic in-process (`HOOKS`): the shell around se's scripts, written out;
+- se's git hooks (`.githooks/pre-commit`, `post-merge`, `commit-msg`, `pre-push`), which the
+  fake git runs on a commit or push, by their logic in-process (`HOOKS`): the shell around se's
+  scripts, written out;
 - anything else by what the test hands `on(<program>, <handler>)`: `gh` by its answers, a suite
   command by a function. A handler takes the `Invocation` and answers an `Answer`, a
   `CompletedProcess`, an exit code or the standard output.
@@ -201,7 +202,9 @@ def run_script(invocation: Invocation) -> Answer:
     path = invocation.script
     if path is None:
         pytest.fail(f"{OWNER}: run_script answers `python <script>.py` only, not `{invocation.text()}`", pytrace=False)
-    return run_main(lambda _arguments: runpy.run_path(str(path), run_name="__main__"), invocation, path.name)
+    def main(_arguments: list[str]) -> None:  # one that runs to its end exits 0, as under the interpreter
+        runpy.run_path(str(path), run_name="__main__")
+    return run_main(main, invocation, path.name)
 
 
 def se_script(invocation: Invocation) -> Answer:
@@ -223,10 +226,19 @@ def joined(*answers: Answer) -> Answer:
 
 
 def pre_commit(invocation: Invocation) -> Answer:
+    regenerated = hook_script("generated.py", ["--root", ".", "regenerate", "--merging", "--warn"], invocation)
+    if regenerated.returncode:
+        return regenerated
     check = hook_script("public_check.py", ["--staged"], invocation)
     if check.returncode:
-        return check
-    return joined(check, hook_script("commit_checks.py", [], invocation))
+        return joined(regenerated, check)
+    return joined(regenerated, check, hook_script("commit_checks.py", [], invocation))
+
+
+def post_merge(invocation: Invocation) -> Answer:
+    if invocation.arguments[:1] == ["1"]:
+        return Answer()
+    return hook_script("generated.py", ["--root", ".", "regenerate", "--warn", "--commit"], invocation)
 
 
 def commit_msg(invocation: Invocation) -> Answer:
@@ -260,7 +272,8 @@ def pre_push(invocation: Invocation) -> Answer:
     return result
 
 
-HOOKS: dict[str, Handler] = {"pre-commit": pre_commit, "commit-msg": commit_msg, "pre-push": pre_push}
+HOOKS: dict[str, Handler] = {"pre-commit": pre_commit, "post-merge": post_merge,
+                             "commit-msg": commit_msg, "pre-push": pre_push}
 
 
 def se_hook(invocation: Invocation) -> Path | None:
