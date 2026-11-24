@@ -20,6 +20,11 @@ The person's principle of 22 Nov, for every type, not only templates:
   value, and never accepts a text and checks it after the fact.
 - **A refusal names the constructor.** Where a target refuses a value of another type, it says which
   constructor makes the one it takes.
+- **A refusal says why.** The constructor names each thing that fails, why its rule holds and the
+  fix, so the caller fixes the cause, not the symptom.
+- **Trivial deviations are corrected, never guessed.** The constructor may correct what cannot change
+  the value's meaning, such as whitespace or a word's case, and reports each correction; anything
+  else it refuses.
 
 The filled template is the first such type: SE's design of its templates, `docs/templates.md`,
 its section "The filled template is a type".

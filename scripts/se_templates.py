@@ -37,7 +37,8 @@ model. `gate` is the hook's and not the door's; it writes only its count of refu
     finds them, where the template's own check named none.
 
 - `se_templates.py fill <template> [--prompt TEXT] [--input FILE | --input-text TEXT] [--fields FILE |
-  --fields-json TEXT] [--title TEXT] [--worktree DIR] [--session ID] [--page N] [--templates DIR] [--tree]`
+  --fields-json TEXT | --body-file FILE] [--title TEXT] [--worktree DIR] [--session ID] [--page N]
+  [--templates DIR] [--tree]`
   is the tool's
   action `fill` (docs/templates.md "Fill"), `templates.py fill` with `check`'s findings:
   - without fields it prints the guidance first (Guidance first, above), then on the last page
@@ -45,7 +46,9 @@ model. `gate` is the hook's and not the door's; it writes only its count of refu
   - with fields it needs the raw input and answers as `check --render` answers, `refused: <n>
     findings` or `passes` then the document (`templates.fill`): `check`'s findings for the title
     and the rendered text, and the `quote` findings against the raw input (`templates.quoted`); a
-    refusal's last line names `se_templates.py fill <template>`.
+    refusal's last line names `se_templates.py fill <template>`. `--body-file` gives the whole
+    document instead of the fields, as `templates.fill(body=)` takes it; every correction the fill
+    made follows the findings, on stderr where it passes (templates.py "Corrections").
   - With `--repo OWNER/REPO` it files what passed instead of printing it (`filing`,
     `file_document`): an issue, `--label` its labels, or with `--number N` a comment on N, where
     the template serves that action and is a whole document (`kern_problems`). It asks the
@@ -737,8 +740,9 @@ READ_ONLY_COMMANDS = {
 WRITING_COMMANDS = {
     "fill": "Fills a template from the raw input: without fields it gives the template's guidance "
             "first, once per session (--session) and in pages, then its instructions and empty "
-            "draft; with fields and the raw input its first line is passes, then the document, or "
-            "refused, then every finding. With --repo it files the document it checked through "
+            "draft; with fields (or the whole document as --body-file) and the raw input its first "
+            "line is passes, then the document, or refused, then every finding with its fix and why; "
+            "trivial deviations are corrected and listed. With --repo it files the document it checked through "
             "kern's GitHub component: an issue, or with --number a comment, and answers its link. "
             "Use it to write any text a template shapes, and to file an issue or a comment.",
 }
@@ -821,6 +825,8 @@ def make_parser() -> argparse.ArgumentParser:
     values = filling.add_mutually_exclusive_group()
     values.add_argument("--fields", type=Path, help="the field values as a JSON file")
     values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
+    values.add_argument("--body-file", type=Path, help="the whole document as a file, in place of the "
+                        "fields: corrected, then read into them")
     filling.add_argument("--title", help="the title it would be filed with")
     filling.add_argument("--repo", metavar="OWNER/REPO",
                          help="file the document there through kern's GitHub component: an issue, "
@@ -1095,7 +1101,7 @@ def run_fill(options: argparse.Namespace) -> int:
     template = named(loaded(options), options.template, FILL_COMMAND)
     root = options.worktree.resolve()
     action = filing(template, options)
-    if options.fields is None and options.fields_json is None:
+    if options.fields is None and options.fields_json is None and options.body_file is None:
         answer = templates.instructions(template, options.prompt or "", root)
         answer["guidance"] = [{key: note[key] for key in ("name", "path")}
                               for note in answer["guidance"]]
@@ -1112,9 +1118,18 @@ def run_fill(options: argparse.Namespace) -> int:
         else:
             raise Usage(f"{FILL_COMMAND}: give the raw input the fields come from: --input FILE or "
                         "--input-text TEXT")
-        values = (templates.fields_data(options.fields_json, "--fields-json", FILL_COMMAND)
+        body = None
+        if options.body_file is not None:
+            try:
+                body = options.body_file.read_text(encoding="utf-8")
+            except OSError as error:
+                raise Usage(f"{FILL_COMMAND}: cannot read --body-file {options.body_file} ({error})") from error
+        values = ({} if body is not None else
+                  templates.fields_data(options.fields_json, "--fields-json", FILL_COMMAND)
                   if options.fields is None else templates.fields_file(options.fields, FILL_COMMAND))
-        rendered, own = templates.fill(template, values, raw, title=options.title)
+        rendered, own, corrections = templates.fill(template, values, raw, title=options.title, body=body)
+        if body is not None:
+            values = dict(templates.parse(template, rendered).read)
     except templates.TemplateError as error:
         raise Usage(str(error)) from error
     _, title = filed(template, None, values, options.title)
@@ -1123,12 +1138,14 @@ def run_fill(options: argparse.Namespace) -> int:
     found.sort(key=lambda item: item.severity != templates.REFUSE)
     refused = sum(item.severity == templates.REFUSE for item in found)
     if refused:
-        print("\n".join([f"refused: {refused} findings", *refusal(template, found, FILL_COMMAND)]))
+        print("\n".join([f"refused: {refused} findings", *refusal(template, found, FILL_COMMAND),
+                         *map(str, corrections)]))
         return 0
-    if found:
-        print("\n".join(str(item) for item in found[:templates.REFUSAL_LINES]), file=sys.stderr)
+    if found or corrections:
+        print("\n".join([*(str(item) for item in found[:templates.REFUSAL_LINES]),
+                         *map(str, corrections)]), file=sys.stderr)
     if action is not None:
-        return file_document(template, action, values, raw, title, options, root)
+        return file_document(template, action, values, raw, title, options, root, body)
     print(PASSES)
     print(rendered, end="")
     return 0
@@ -1163,10 +1180,11 @@ def filing(template, options: argparse.Namespace) -> str | None:
 
 
 def file_document(template, action: str, values: dict, raw: str, title: str | None,
-                  options: argparse.Namespace, root: Path) -> int:
+                  options: argparse.Namespace, root: Path, body: str | None = None) -> int:
     """File the checked fill through kern (docs/templates.md "Fill"): ask the request port
-    FILL_PORT, SE's template component's verb `fill`, for the filled template of `values`, `raw`
-    and `title`, then the request port of `action` (FILE_PORTS) with it, never a body, and answer
+    FILL_PORT, SE's template component's verb `fill`, for the filled template of `values` (or of the
+    whole document `body`, which the verb corrects and reads into them), `raw` and `title`, then the
+    request port of `action` (FILE_PORTS) with it, never a body, and answer
     `passes` and the link. A refusal of either files nothing and is answered like a finding. Run
     directly, with no kern to ask (`se_components.requests`), it files nothing and names where it
     runs."""
@@ -1176,7 +1194,8 @@ def file_document(template, action: str, values: dict, raw: str, title: str | No
         raise Usage(f"{FILL_COMMAND}: nothing was filed: a fill files through kern's GitHub component, "
                     f"and no kern runs this call; run it where kern serves {root} (SE's start, "
                     "scripts/bootstrap.sh, starts kern), or through the door's tool templates_write")
-    fill: dict[str, object] = {"template": template.name, "fields": values, "raw": raw}
+    fill: dict[str, object] = ({"template": template.name, "body": body, "raw": raw} if body is not None
+                               else {"template": template.name, "fields": values, "raw": raw})
     if title is not None:
         fill["title"] = title
     owner, _, name = options.repo.partition("/")

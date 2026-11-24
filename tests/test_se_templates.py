@@ -1036,7 +1036,8 @@ def test_a_direct_write_of_a_work_issue_body_file_passes_where_it_parses_and_els
     assert broken.splitlines() == [
         f"Edit of {relative}: the file it leaves breaks the template that claims its path:",
         f"  {relative} (work-file): Requirements: missing: write `## Requirements`: Numbered, checkable "
-        "requirements, in the order to do them. (or `Not in input` where the input does not say)",
+        "requirements, in the order to do them. (or `Not in input` where the input does not say) "
+        f"(why: {templates.REASONS['required']})",
         fill,
         "Fix the write so the file parses, or fill it: without --fields the fill answers the template's "
         "instructions; with --fields and --input it writes the file"]
