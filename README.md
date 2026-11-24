@@ -125,14 +125,10 @@ first message with it. A session whose permission mode asks before commands, and
 watches, needs SE's scripts and files allowed in the repository's `.claude/settings.json`:
 `"permissions": {"allow": ["Bash(uv run python:*)", "Read(~/.claude/skills/se/**)"]}`.
 
-A release runs in such a session too, the integrator's on SE's message, never asked of the person
-([Roles and flow](src/skills/work-model/SKILL.md#roles-and-flow)). So that a cloud integrator's
-auto-mode permission check passes it, run this once per repository and commit
-`.claude/settings.json`: `uv run python <se>/scripts/claude_settings.py allow --repo <repo>`.
-
-It merges the rules for `work_tickets.py release` and its `--read-back`, keeping every other key;
-[scripts/claude_settings.py](scripts/claude_settings.py) owns the rules and says why no setup step
-runs it. SE also starts each integrator with them (`claude_settings.py rules`, se.md "Sessions").
+A release runs in such a session too, on SE's message alone: run
+`uv run python <se>/scripts/claude_settings.py allow --repo <repo>` once per repository and commit
+`.claude/settings.json`. [scripts/claude_settings.py](scripts/claude_settings.py) owns the rules,
+why no setup step runs it, and the rules SE starts each integrator with.
 
 ### Cloud sessions
 

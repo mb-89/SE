@@ -140,7 +140,7 @@ its tools.
   - Start each integrator with `extra_allowed_tools` set to the list
     `uv run python <se>/scripts/claude_settings.py rules` prints, so the release you ask for
     passes its session's permission check. The host drops an entry your own session lacks, so
-    your checkout's `.claude/settings.json` holds the same rules (README "Cloud sessions").
+    your checkout's `.claude/settings.json` holds the same rules (README "Claude Code cloud").
   - At your first turn, title your own session `SE` and add the tag `SE`; on the person's request,
     rename the earlier sessions of SE's work to the scheme, as [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
