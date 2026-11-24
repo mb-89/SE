@@ -41,4 +41,5 @@ def test_the_cases_cover_every_template_kind_rule_and_selection():
              for entry in data.get("templates", {}).values()}
     assert kinds == {"document", "block", "entry", "interface", "code"}
     assert files["load-errors.json"]["errors"]
-    assert any(case["selected"] for case in files["se-select.json"]["select"])
+    assert any(case["selected"] for name, data in files.items() if name.startswith("se-select-")
+               for case in data["select"])

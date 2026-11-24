@@ -51,6 +51,7 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 | `work_tickets.py paused` | `work_tickets.py paused [--worktree WORKTREE] [--repo REPO]` | whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2 |
 | `work_tickets.py refresh` | `work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]` | re-read the work issue and its comments and report changes; each new or edited comment with its author, marked as intake marks it (--json: byOwner) |
 | `work_tickets.py route` | `work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE] (--routing-file ROUTING_FILE \| --fields FILE) [--hold] [--issue-title ISSUE_TITLE] [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION] [--repo REPO] issue` | for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label it work, ready and repo:<name>, and append the routing section with the handled record to its body |
+| `work_tickets.py stamp` | `work_tickets.py stamp --worktree WORKTREE [--template NAME] [--issue-body FILE] [--repo REPO] issue` | for SE: give an unmarked issue its template's marker, where it passes that template's check |
 | `work_tickets.py unhold` | `work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue` | for SE: check an issue filed with --hold against its template again and, where it passes, remove off-template and give a work issue ready back |
 
 #### Delivery
@@ -176,7 +177,7 @@ document.
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON \| --body-file BODY_FILE] [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
@@ -355,7 +356,7 @@ numbered, each with its home and its kind:
 
 Then what went well, and in step 6 the person's decisions, the classes still open and what
 follows. The facts and the block stay in the retro doc, which the report links at the integration
-branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+branch's commit (the message `templates/retro-doc.md`), where the next collect and overhaul read
 them.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and

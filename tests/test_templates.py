@@ -123,12 +123,14 @@ uv run pytest
 
 
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
-ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh")
+ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh",
+            "retro-judgment", "overhaul-judgment")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
 NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
+              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref")
 #: The templates that claim files (`file.write`): the work issue's body file.
 FILES = ("work-file",)
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
@@ -301,8 +303,18 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
         "pugh": (test_deck.PUGH, None),
+        "retro-judgment": (judged_block(retro.BLOCK_MARKER, {"findings": [], "classes": [],
+                                                             "went_well": ["The fakes held."]}), None),
+        "overhaul-judgment": (judged_block(overhaul.BLOCK_MARKER, {
+            "verdicts": [], "looked_at": dict.fromkeys(overhaul.LOOKED_AT, "Nothing to change."),
+            "findings": [], "went_well": ["The fakes held."]}), None),
         **{name: (code_example(name), None) for name in CODE_TEMPLATES},
     }
+
+
+def judged_block(marker: str, block: dict) -> str:
+    """A draft's judged block as retro.py and overhaul.py write it: the marker, then its JSON."""
+    return f"{marker}\n{review.fenced(json.dumps(block, indent=2), 'yaml')}\n"
 
 
 def code_example(name: str) -> str:
@@ -1761,6 +1773,14 @@ def routed_issue(catalog, monkeypatch) -> list[Case]:
         OUTSIDE, "Proposal: make it work", ROUTING), "feat/make-it-work-20261116")]
 
 
+def stamped_issue(catalog, monkeypatch) -> list[Case]:
+    """A work issue filed without its marker, as `stamp` writes it back with the marker."""
+    work = catalog["work"]
+    bare = templates.render(work, dict(work.example["fields"])).replace(work.marker_line + "\n", "")
+    return [Case("issue.edit", "work", templates.stamped(work, bare), work.example["title"],
+                 labels=("work",))]
+
+
 def comment(text: str):
     return lambda catalog, monkeypatch: [Case("comment.create", FREE, text)]
 
@@ -1901,6 +1921,7 @@ def without_beats(plan):
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
     "work_tickets:work_issue_filing": ("file", work_issue),
+    "work_tickets:stamp": ("stamp", stamped_issue),
     "work_tickets:filing_plan": ("file, backlog file and route", filing),
     "work_tickets:filed_once.create": ("file and backlog file",
                                        lambda c, m: work_issue(c, m) + backlog_issue(c, m)),
@@ -2024,6 +2045,39 @@ def test_filled_keeps_a_body_with_enforce_off_and_renders_it_otherwise(catalog):
     assert "## Odd section\n\nKept.\n" in again
     fields = dict(work.example["fields"])
     assert templates.filled(work, fields=fields, enforce="off") == templates.render(work, fields)
+
+
+def test_every_whole_document_a_fill_makes_carries_its_templates_marker(catalog):
+    """A filled issue or comment names the template it derives from (docs/templates.md "The filled
+    template is a type"), whichever of SE's templates filled it."""
+    filled = [name for name, template in catalog.items()
+              if template.example and set(template.actions) & {"issue.create", "comment.create"}
+              and not (template.is_adapter or template.message or template.writes_file)]
+    assert {"work", "ticket", "routed", "handover"} <= set(filled)
+    for name in filled:
+        template = catalog[name]
+        rendered, _, _ = templates.fill(template, dict(template.example["fields"]), "raw input",
+                                        title=template.example.get("title"))
+        assert template.marker_line in rendered.splitlines(), name
+
+
+def test_stamped_writes_the_marker_where_render_writes_it_and_keeps_every_other_byte(catalog):
+    work, routed, review_template = catalog["work"], catalog["routed"], catalog["review"]
+    fleet = templates.FLEET_MARKER
+    body = f"{fleet}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n"
+    assert templates.stamped(work, body) == (
+        f"{fleet}\n{work.marker_line}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n")
+    assert templates.stamped(work, "## Goal\n\nG.\n") == f"{fleet}\n{work.marker_line}\n\n## Goal\n\nG.\n"
+    again = templates.stamped(work, body)
+    assert templates.stamped(work, again) == again  # stamped once
+    routing = "Please.\n\n<!-- se:handled -->\n## Routing\n\nRouted from: x\n"
+    assert templates.stamped(routed, routing) == (
+        f"Please.\n\n<!-- se:handled -->\n{routed.marker_line}\n## Routing\n\nRouted from: x\n")
+    assert work_tickets.ROUTED_PATTERN.search(templates.stamped(routed, routing))
+    with pytest.raises(templates.TemplateError, match="no `<!-- se:handled -->` line"):
+        templates.stamped(routed, "Please.\n")
+    assert templates.stamped(review_template, "A review.\n") == "A review.\n"  # an adapter's own text
+    assert templates.parse(work, again).fields == templates.parse(work, body).fields
 
 
 def test_private_findings_name_the_field_and_the_list_never_the_term(catalog, tmp_path):
@@ -2250,7 +2304,7 @@ def test_a_section_node_is_checked_by_its_template_under_its_field(tmp_path):
     bad = templates.render(whole, {"intro": "Why.", "part": "Nobody."})
     assert [str(finding) for finding in templates.check(whole, templates.parse(whole, bad))] == [
         "refuse: part [required]: part: Owner is missing: write a `Owner:` line: Who owns it. "
-        "(or `Not in input` where the input does not say)"]
+        f"(or `Not in input` where the input does not say) (why: {templates.REASONS['required']})"]
 
 
 def test_a_document_s_digest_covers_its_nodes_templates(tmp_path):
@@ -3024,6 +3078,158 @@ def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, ob
     built = parsed.read_text(encoding="utf-8")
     assert '"derived-from"' in built and '"guidance"' not in built and "{{slot}}" not in built
 
+
+
+# Reasons and corrections (SE#1852): every rule says why it holds, and a fill corrects what cannot
+# change the document's meaning, reports it and records it.
+
+
+def brief() -> templates.Template:
+    return templates._loaded([(templates.PROJECT_REPOSITORY, {"brief.md": template_cases.BRIEF_TEMPLATE},
+                               lambda file: f"{templates.TEMPLATES}/{file}")])["brief"]
+
+
+def brief_document() -> str:
+    template = brief()
+    return templates.fill(template, dict(template.example["fields"]), template_cases.RAW)[0]
+
+
+#: A brief that deviates from its template only in what the correction pass corrects.
+TRIVIAL = {"## Goal\n": "## goal\n", "## Blocked by\n\nNone": "### blocked by:\n\nnone.",
+           "Every brief says what it is for.": "Every brief says what it is for.   ",
+           "- It runs long.": "* It runs long.\n+ It costs time.  ", "1. Write it.": "1) Write it.",
+           "Kept short.": ">Kept short."}
+
+
+def trivially(text: str) -> str:
+    for before, after in TRIVIAL.items():
+        text = text.replace(before, after)
+    return text
+
+
+def content_words(text: str) -> list[str]:
+    return re.findall(r"\w+", text.casefold())
+
+
+def test_every_rule_carries_its_reason_once_and_every_finding_and_refusal_line_names_it():
+    import se_templates
+    rules = {*templates.REFUSE_RULES, *templates.WARN_RULES, *templates.ADAPTER_RULES, templates.NODE_RULE,
+             templates.VERSION_RULE, templates.QUOTE_RULE, templates.SLOT_RULE, templates.PRIVATE_RULE,
+             se_templates.NAME_RULE, se_templates.DANGLING_RULE}
+    assert set(templates.REASONS) == rules
+    assert all(reason and not reason.endswith(".") for reason in templates.REASONS.values())
+    finding = templates.Finding("goal", "required", templates.REFUSE, "Goal is empty: write `## Goal`")
+    assert finding.why == templates.REASONS["required"]
+    assert str(finding) == f"refuse: goal [required]: Goal is empty: write `## Goal` (why: {finding.why})"
+    line = templates.report("x", brief(), [finding], refused=True).splitlines()[1]
+    assert line == f"  Goal: empty: write `## Goal` (why: {finding.why})"
+
+
+def test_a_fill_with_only_trivial_deviations_parses_lists_each_correction_and_is_the_corrected_document():
+    template = brief()
+    base = brief_document()
+    document, found, corrections = templates.fill(template, {}, template_cases.RAW, body=trivially(base))
+    assert [item for item in found if item.severity == templates.REFUSE] == []
+    assert [(fix.field, fix.kinds) for fix in corrections] == [
+        ("blocked_by", ("heading",)), ("goal", ("heading",)), ("goal", ("whitespace",)),
+        ("steps", ("list-marker",)), ("risks", ("list-marker",)), ("risks", ("whitespace", "list-marker")),
+        ("notes", ("quote-marker",)), ("blocked_by", ("none",))]
+    assert ("goal", "## goal", "## Goal") in [(fix.field, fix.before, fix.after) for fix in corrections]
+    corrected = base.replace("- It runs long.", "- It runs long.\n- It costs time.").replace(
+        "Kept short.", "> Kept short.").replace("## Blocked by\n\nNone", "## Blocked by\n\nNone.")
+    assert document == corrected.replace(
+        template.marker_line, template.marker_line + "\n<!-- se:corrected whitespace heading list-marker "
+                                                     "quote-marker none -->")
+    assert templates.parse(template, document).fields["blocked_by"] == ["None."]
+    windows, _, more = templates.fill(template, {}, template_cases.RAW, body=trivially(base).replace("\n", "\r\n"))
+    assert windows == document.replace("corrected whitespace", "corrected line-ending whitespace")
+    assert more[0] == templates.Correction("body", ("line-ending",), "\r\n", "\n")
+
+
+def test_a_fill_with_a_substantive_error_refuses_makes_nothing_and_names_field_failure_reason_and_fix(
+        tmp_path, capsys):
+    template = brief()
+    body = brief_document().replace("Every brief says what it is for.", template_cases.LONG_GOAL).replace(
+        "## Steps\n\n1. Write it.\n2. Check it.\n\n", "")
+    _, found, _ = templates.fill(template, {}, template_cases.RAW, body=body)
+    assert [(item.field, item.rule, item.severity) for item in found] == [
+        ("steps", "required", templates.REFUSE), ("goal", "first-sentence", templates.WARN)]
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    (folder / "brief.md").write_text(template_cases.BRIEF_TEMPLATE, encoding="utf-8")
+    (tmp_path / "brief.md").write_text(body, encoding="utf-8")
+    out = tmp_path / "out.md"
+    code = templates.main(["fill", "brief", "--templates", str(folder), "--body-file", str(tmp_path / "brief.md"),
+                           "--input-text", template_cases.RAW, "--out", str(out)])
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 1 and not out.exists()
+    assert lines[0] == (f"refuse: steps [required]: Steps is missing: write `## Steps`: The steps in order. "
+                        f"(or `Not in input` where the input does not say) (why: {templates.REASONS['required']})")
+    assert lines[1].startswith("warn: goal [first-sentence]: Goal's first sentence has 79 characters; keep it "
+                               "to 60") and lines[1].endswith(f"(why: {templates.REASONS['first-sentence']})")
+    assert lines[-1] == "templates.py fill: nothing was written; fix every finding and fill again"
+
+
+def test_a_fill_by_its_fields_corrects_them_and_reports_each_on_stderr(tmp_path, capsys):
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    (folder / "brief.md").write_text(template_cases.BRIEF_TEMPLATE, encoding="utf-8")
+    values = {**brief().example["fields"], "blocked_by": ["none."], "notes": "* One.  "}
+    code = templates.main(["fill", "brief", "--templates", str(folder), "--fields-json", json.dumps(values),
+                           "--input-text", template_cases.RAW])
+    out = capsys.readouterr()
+    assert code == 0 and "<!-- se:corrected whitespace list-marker none -->\n" in out.out
+    assert out.err.splitlines() == ["corrected: blocked_by [none]: 'none.' -> 'None.'",
+                                    "corrected: notes [whitespace, list-marker]: '* One.  ' -> '- One.'"]
+
+
+def test_no_correction_changes_a_word_of_content():
+    template = brief()
+    texts = ["Line.  \r\nNext.\r\n\n", "* One.\n+ Two.\n1) Three.", ">Quoted.", "none.", "NONE",
+             "not  in input.", "  An entry.  "]
+    values = {"notes": texts[0], "risks": texts[1:3] + texts[6:], "blocked_by": [texts[3]],
+              "done": [{"done": False, "text": texts[4]}], "meta": {"Size": texts[5]}}
+    _, _, by_fields = templates.fill(template, {**template.example["fields"], **values}, template_cases.RAW)
+    _, _, by_body = templates.fill(template, {}, template_cases.RAW,
+                                   body=trivially(brief_document()).replace("\n", "\r\n"))
+    corrections = by_fields + by_body
+    assert {kind for fix in corrections for kind in fix.kinds} == set(templates.CORRECTIONS)
+    for fix in corrections:
+        assert content_words(fix.before) == content_words(fix.after), fix
+
+
+def test_the_pass_keeps_code_fences_verbatim_fields_comments_and_titles_as_they_stand():
+    template = brief()
+    kept = {"said": "> keep it short  \n*  as said", "run": "echo ok  \n* x",
+            "notes": "```\n* code  \n```\nnone <!-- a comment -->"}
+    values, corrections = templates.correct(template, {**template.example["fields"], **kept})
+    assert corrections == [] and {key: values[key] for key in kept} == kept
+    work = templates.own("work")
+    assert templates.correct(work, {"title": "a-title  "}) == ({"title": "a-title  "}, [])
+    assert templates.corrected_text("* * *") == ("* * *", ())
+
+
+def test_a_refused_fill_of_a_template_manifest_makes_nothing(tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    out = tmp_path / "document" / "manifest.md"
+    filled = {key: value for key, value in MANIFEST_FILLED.items() if key != "purpose"}
+    code, printed, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(filled), "--input-text", BRIEF,
+                                      "--out", str(out))
+    assert code == 1 and not out.exists()
+    assert f"(why: {templates.REASONS['required']})" in printed
+
+
+def test_a_file_records_its_corrections_in_its_front_matter_and_a_refill_drops_the_record(tmp_path):
+    template, _, _ = fill_project(tmp_path)
+    values = {**FILLED, "seen": FILLED["seen"] + "  ", "impact": ["Exports are incomplete.  "]}
+    corrected, found, corrections = templates.fill(template, values, RAW)
+    assert len(corrections) == 2 and found == []
+    front = templates.FRONT_MATTER.match(corrected).group(0)
+    assert front.splitlines()[-2] == 'corrected: ["whitespace"]'
+    assert corrected == templates.render(template, FILLED).replace(
+        "\n---\n", '\ncorrected: ["whitespace"]\n---\n', 1)
+    again, _, none = templates.fill(template, FILLED, RAW, existing=corrected)
+    assert none == [] and "corrected:" not in again
 
 
 # Filling templates from material (docs/templates.md "Filling templates from material"): the worked

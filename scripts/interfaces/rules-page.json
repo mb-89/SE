@@ -1,0 +1,58 @@
+{
+  "template": "se/rules-page",
+  "version": "1.0.0",
+  "says": "The page `docs/rules.md`.",
+  "message": "<!-- {notice} -->\n\n# Rules\n\nThe {count} rules in force: the rule book's {book} and {notes} guidance notes, the notes after the book.\n\n| Rule | What it says |\n|---|---|\n{rows}",
+  "rows": {
+    "rows": "| `{name}` | {text} |"
+  },
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "notice": {
+        "type": "string",
+        "description": "The words of the page's generated-file marker, as the generated-marker template writes them, inside its HTML comment."
+      },
+      "count": {
+        "type": "string",
+        "description": "How many rules are in force: the rule book's and every guidance note."
+      },
+      "book": {
+        "type": "string",
+        "description": "How many rules the rule book holds."
+      },
+      "notes": {
+        "type": "string",
+        "description": "How many guidance notes the layout loads."
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "description": "The rules, the rule book's first, each its id and its name, then each guidance note, its name and its description. A `|` in a cell is written `\\|`."
+      }
+    },
+    "required": [
+      "notice",
+      "count",
+      "book",
+      "notes"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,7 +1,7 @@
 ---
 # A retro's report, its closing comment, and the draft it is filed from: the six steps, the
 # standing questions nested in step 4. retro.py lays the draft out from this note and checks it
-# before it files the report; its judged block stays retro.py's own (judgment_problems). The
+# before it files the report; its judged block is the adapter templates/retro-judgment.md. The
 # person's decision of 22 Nov (SE#1678). scripts/templates.py's docstring owns this note's format.
 name: retro
 version: 2.0.0

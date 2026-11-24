@@ -21,7 +21,8 @@ it (`question_problems`), writing nothing; it files no issue (wrk-007). It posts
 document of the overhaul template (`report`): the verdicts, what was looked at, the answers to both
 question blocks, each finding with its kind (`work`, which SE bundles, or `decision`, for the
 owner's decision list; a rule change is always a decision), then the facts and the block, which
-`judgment_problems` checks, as the overhaul issue's closing comment, and closes the issue.
+`judgment_problems` checks through the adapter template `templates/overhaul-judgment.md`
+(JUDGMENT_TEMPLATE), as the overhaul issue's closing comment, and closes the issue.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -560,10 +561,14 @@ REPORT_MARKER = "<!-- se:overhaul-report -->"
 # The overhaul's document template, and its fields the draft asks the judge to answer: the
 # standing questions, which the retro and every field report ask too, and the overhaul's own.
 TEMPLATE_NAME = "overhaul"
+# The adapter template the judged block is checked through (templates/overhaul-judgment.md),
+# whose checker is judgment_problems.
+JUDGMENT_TEMPLATE = "overhaul-judgment"
 QUESTION_FIELDS = ("questions", "overhaul_questions")
 JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
 BLOCK_VERSION = 1
-# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`.
+# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`, the message
+# retro.py's FINDING_TEMPLATE the report writes; finding one stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\boverhaul #(\d+) finding (\d+)\b", re.IGNORECASE)
 # What checks a rule, read from its live implementations.
 CHECKED_BY = ("test", "check", "judgment")
@@ -1036,7 +1041,8 @@ def judged(text: str, number: int) -> dict:
     if block.get("overhaul") != number:
         raise work_tickets.QueueError(f"The draft is overhaul #{block.get('overhaul')}'s, not "
                                       f"#{number}'s")
-    problems = judgment_problems(block) + question_problems(text)
+    problems = (sibling("retro").adapter_problems(JUDGMENT_TEMPLATE, text)
+                + question_problems(text))
     if problems:
         raise work_tickets.QueueError(f"The judgment of overhaul #{number} is not complete, so "
                                       "nothing was written: " + "; ".join(problems))
@@ -1085,9 +1091,10 @@ def report(text: str, block: dict, number: int) -> str:
         r"^## (?:" + "|".join(map(re.escape, headings)) + r")[ \t]*\n.*?(?=^## |^"
         + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
         flags=re.MULTILINE | re.DOTALL)
+    reference = sibling("retro").finding_reference("overhaul", number)
     follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
                f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-               f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
+               f"needs, each naming `{reference}` for every finding it takes, "
                f"so the next overhaul scores it; the {DECISION} findings "
                f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
                "on the owner's decision list.")

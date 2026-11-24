@@ -26,14 +26,15 @@ type Filled struct {
 }
 
 type filledContent struct {
-	Template   string    `json:"template"`
-	Repository string    `json:"repository"`
-	Version    string    `json:"version"`
-	Digest     string    `json:"digest"`
-	Title      *string   `json:"title"`
-	Fields     Object    `json:"fields"`
-	Document   string    `json:"document"`
-	Warnings   []Finding `json:"warnings"`
+	Template    string       `json:"template"`
+	Repository  string       `json:"repository"`
+	Version     string       `json:"version"`
+	Digest      string       `json:"digest"`
+	Title       *string      `json:"title"`
+	Fields      Object       `json:"fields"`
+	Document    string       `json:"document"`
+	Warnings    []Finding    `json:"warnings"`
+	Corrections []Correction `json:"corrections"`
 }
 
 // The key a Filled's seal is made with: drawn once per process, never written anywhere.
@@ -93,6 +94,10 @@ func (f Filled) Document() string { return f.content.Document }
 // Warnings are the findings of the fill that warn and never refuse.
 func (f Filled) Warnings() []Finding { return append([]Finding{}, f.content.Warnings...) }
 
+// Corrections are what the fill's correction pass changed, each its field, kinds, before and after;
+// the document records their kinds (RecordCorrections).
+func (f Filled) Corrections() []Correction { return append([]Correction{}, f.content.Corrections...) }
+
 // Valid reports whether the value is one Fill made: the zero value, and any value whose seal does
 // not hold, is none.
 func (f Filled) Valid() bool {
@@ -131,10 +136,12 @@ func orUnnamed(name string) string {
 	return name
 }
 
-// Refusal is a fill that something refuses: every finding, and nothing made.
+// Refusal is a fill that something refuses: every finding, each with its fix and its reason, the
+// corrections the fill made before it checked, and nothing made.
 type Refusal struct {
-	Template string
-	Findings []Finding
+	Template    string
+	Findings    []Finding
+	Corrections []Correction
 }
 
 func (r *Refusal) Error() string {
@@ -144,28 +151,41 @@ func (r *Refusal) Error() string {
 			lines = append(lines, f.String())
 		}
 	}
+	for _, c := range r.Corrections {
+		lines = append(lines, c.String())
+	}
 	return fmt.Sprintf("templates fill %s: refused, nothing was made; fix every finding and fill again:\n%s", r.Template, strings.Join(lines, "\n"))
 }
 
-// Fill is the one constructor of a Filled: it fills the template from the fields, checks the
-// document against the template and the raw input, and makes the value only where nothing refuses;
-// otherwise it answers a *Refusal naming every finding.
+// Fill is the one constructor of a Filled: it fills the template from the fields, corrects them,
+// checks the document against the template and the raw input, and makes the value only where nothing
+// refuses; otherwise it answers a *Refusal naming every finding.
 func Fill(t *Template, values Object, raw string, title *string, existing string) (Filled, error) {
-	document, found, err := FillDocument(t, values, raw, title, existing)
+	f, err := fill(t, values, raw, title, existing, nil)
+	return made(t, f, title, err)
+}
+
+// FillBody is Fill of a whole document the agent wrote in place of its fields (FillBodyDocument).
+func FillBody(t *Template, body, raw string, title *string) (Filled, error) {
+	f, err := fill(t, nil, raw, title, "", &body)
+	return made(t, f, title, err)
+}
+
+func made(t *Template, f filling, title *string, err error) (Filled, error) {
 	if err != nil {
 		return Filled{}, err
 	}
-	if Refused(found) {
-		return Filled{}, &Refusal{t.Name, found}
+	if Refused(f.found) {
+		return Filled{}, &Refusal{t.Name, f.found, f.corrections}
 	}
 	var warnings []Finding
-	for _, f := range found {
-		if f.Severity != Refuse {
-			warnings = append(warnings, f)
+	for _, finding := range f.found {
+		if finding.Severity != Refuse {
+			warnings = append(warnings, finding)
 		}
 	}
 	content := filledContent{Template: t.Name, Repository: t.Repository, Version: t.Version, Digest: t.Digest,
-		Fields: Answer(t, values), Document: document, Warnings: warnings}
+		Fields: f.values, Document: f.document, Warnings: warnings, Corrections: f.corrections}
 	if title != nil {
 		named := *title
 		content.Title = &named

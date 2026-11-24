@@ -122,14 +122,14 @@ its tools.
     session. It asks the person for the field feedback first, runs the template's `retro.py
     collect` and `retro.py file`, has the person decide every finding, and closes the issue.
   - When it reports the issue closed, file its work findings: a work issue names each finding it
-    takes as `retro #<n> finding <k>`, so the next retro scores it.
+    takes as the message `templates/finding-ref.md` writes it, so the next retro scores it.
 - **Overhaul issues**, to ask whether the design is still right, fall due after enough retros or
   days ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due)) and are filed the same way, from
   [overhaul.md](../../.github/ISSUE_TEMPLATE/overhaul.md) (`overhaul.py new` files one by hand).
   - A retro agent runs it, `overhaul.py read` then `overhaul.py file`, which closes it with its
     report ([README](../../docs/work-commands.md#work-commands)).
-  - A work issue you file from it names each finding it takes as `overhaul #<n> finding <k>`, so
-    the next overhaul scores it.
+  - A work issue you file from it names each finding it takes the same way, so the next overhaul
+    scores it.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
   model's [Worktrees](../skills/work-model/SKILL.md#worktrees)), started as an independent session
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.

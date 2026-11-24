@@ -25,10 +25,29 @@ FIELDS = dict(WORK.example["fields"])
 pytestmark = pytest.mark.usefixtures("fake_git_door")
 
 
+class DocumentGh(FakeGh):
+    """FakeGh that also answers the REST reads of the documents the gate's edits leave behind
+    (`gh api repos/<owner>/<repo>/issues/<n>`, `.../issues/comments/<id>`), from `documents`:
+    issue #7 a good work issue labelled work, unless a test changes it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.documents: dict[str, dict] = {"issues/7": {"number": 7, "title": TITLE, "body": GOOD_WORK,
+                                                        "labels": [{"name": "work"}]}}
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        path = arguments[1].removeprefix(f"repos/{OWNER}/{REPO_NAME}/") if arguments[:1] == ["api"] else ""
+        if path in self.documents:
+            self.calls.append(arguments)
+            return json.dumps(self.documents[path])
+        return super().__call__(root, arguments)
+
+
 @pytest.fixture
-def gh(monkeypatch) -> FakeGh:
-    """GitHub as test_work_ticket_issues fakes it, on the work_tickets se_templates.py imports."""
-    fake = FakeGh()
+def gh(monkeypatch) -> DocumentGh:
+    """GitHub as test_work_ticket_issues fakes it, on the work_tickets se_templates.py imports,
+    with the documents an edit reads (DocumentGh)."""
+    fake = DocumentGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -246,6 +265,7 @@ def test_file_reads_the_version_the_body_as_given_records(recorded, filed_code, 
 
 # The gate (se_templates.py gate): SE's PreToolUse hook's judge of a write through the GitHub tools.
 
+import datetime  # noqa: E402
 import io  # noqa: E402
 import shlex  # noqa: E402
 import subprocess  # noqa: E402
@@ -429,6 +449,107 @@ def test_an_issue_edit_without_labels_is_checked_against_its_bodys_template(
     body = WORK_MARKER + "\n" + THIN
     text = payload("mcp__github__issue_write", project, method="update", issue_number=7, body=body)
     assert "the work template refuses" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+
+
+def unmarked(body: str) -> str:
+    """`body` without its template marker lines: a document filed over raw REST."""
+    return "".join(line for line in body.splitlines(keepends=True)
+                   if not templates.TEMPLATE_MARKER_PATTERN.fullmatch(line.rstrip("\n")))
+
+
+def edit(project: Path, **given) -> str:
+    return payload("mcp__github__issue_write", project, method="update", issue_number=7, **given)
+
+
+def test_an_edit_without_labels_is_judged_by_the_template_its_issue_names(capsys, monkeypatch,
+                                                                          project, gh):
+    """The issue edited is a work issue whose body carries the work marker: an edit that names no
+    labels is the work template's, whatever the guess by labels and order would take (ticket)."""
+    changed = templates.render(WORK, {**FIELDS, "goal": "Every title names its change."})
+    assert gate(capsys, monkeypatch, edit(project, body=changed), "--gate", "refuse") == ""
+    assert ["api", f"repos/{OWNER}/{REPO_NAME}/issues/7"] in gh.calls
+    reason = denial(gate(capsys, monkeypatch, edit(project, body=unmarked(changed)), "--gate", "refuse"))
+    assert "the work template refuses" in reason and "ticket" not in reason
+    assert f"drops the line that names its template (work); keep `{WORK_MARKER}`" in reason
+    thin = denial(gate(capsys, monkeypatch, edit(project, body=WORK_MARKER + "\n" + THIN), "--gate", "refuse"))
+    assert "the work template refuses" in thin and "Problem: missing" in thin
+
+
+def test_an_edit_of_an_issue_that_names_no_template_is_refused_naming_the_stamp(
+        capsys, monkeypatch, project, gh):
+    gh.documents["issues/7"]["body"] = unmarked(GOOD_WORK)
+    found = []
+    monkeypatch.setattr(se_templates, "judged", lambda *given: found.append(given) or "")
+    reason = denial(gate(capsys, monkeypatch, edit(project, body=unmarked(GOOD_WORK)), "--gate", "refuse"))
+    assert reason.startswith(f"issue.edit in {OWNER}/{REPO_NAME}: #7 names no template")
+    assert f"work_tickets.py stamp 7 --worktree {project} --repo {OWNER}/{REPO_NAME} --template work" in reason
+    assert "work_tickets.py file" in reason and "template refuses" not in reason
+    assert found == []  # judged against no template at all
+    labels_only = denial(gate(capsys, monkeypatch, edit(project, labels=["work", "in-progress"]),
+                              "--gate", "refuse"))
+    assert "#7 names no template" in labels_only
+    body = body_file(project, unmarked(GOOD_WORK))  # the edit SE made over raw REST
+    shell = shell_payload(f"gh api -X PATCH repos/{OWNER}/{REPO_NAME}/issues/7 -F body=@{body}", project)
+    assert "#7 names no template" in denial(gate(capsys, monkeypatch, shell, "--gate", "refuse"))
+    warned = json.loads(gate(capsys, monkeypatch, edit(project, body=THIN), "--gate", "warn"))
+    assert "#7 names no template" in warned["hookSpecificOutput"]["additionalContext"]
+    assert gh.documents["issues/7"]["body"] == unmarked(GOOD_WORK)  # the gate writes nothing
+
+
+def test_a_label_only_edit_is_judged_by_the_document_it_leaves(capsys, monkeypatch, project, gh):
+    assert gate(capsys, monkeypatch, edit(project, labels=["work", "in-progress"]), "--gate", "refuse") == ""
+    reason = denial(gate(capsys, monkeypatch, edit(project, labels=["ready"]), "--gate", "refuse"))
+    assert "the work template refuses" in reason and "it needs the labels work" in reason
+    shell = shell_payload(f"gh issue edit 7 -R {OWNER}/{REPO_NAME} --remove-label work", project)
+    assert "it needs the labels work" in denial(gate(capsys, monkeypatch, shell, "--gate", "refuse"))
+    shell = shell_payload(f"gh issue edit 7 -R {OWNER}/{REPO_NAME} --add-label in-progress", project)
+    assert gate(capsys, monkeypatch, shell, "--gate", "refuse") == ""
+    gh.documents["issues/7"]["body"] = WORK_MARKER + "\n" + THIN  # its body breaks its template
+    reason = denial(gate(capsys, monkeypatch, edit(project, labels=["work", "in-progress"]), "--gate", "refuse"))
+    assert "the work template refuses" in reason and "Problem: missing" in reason
+    closing = edit(project, state="closed")
+    assert gate(capsys, monkeypatch, closing, "--gate", "refuse") == ""  # the document stays as it is
+
+
+def test_a_comment_edit_keeps_its_comments_template_and_an_unmarked_comment_stays_free(
+        capsys, monkeypatch, project, gh):
+    gh.documents["issues/comments/9"] = {"id": 9, "body": GOOD_REVIEW}
+    text = payload("mcp__github__update_issue_comment", project, comment_id=9, body="Looks fine.\n")
+    reason = denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+    assert "the review template refuses" in reason and "keep `<!-- se:review -->`" in reason
+    gh.documents["issues/comments/9"]["body"] = "A plain comment.\n"
+    assert gate(capsys, monkeypatch, text, "--gate", "refuse") == ""
+
+
+def test_an_edit_whose_document_cannot_be_read_is_judged_by_its_body_alone(capsys, monkeypatch,
+                                                                            project, gh):
+    gh.documents.clear()
+    assert gate(capsys, monkeypatch, edit(project, body=unmarked(GOOD_WORK)), "--gate", "refuse") == ""
+    log = (project / ".se" / ".runtime" / "templates-gate.log").read_text(encoding="utf-8").splitlines()
+    assert len(log) == 1 and "issue.edit in owner/repo: the document it edits cannot be read" in log[0]
+    assert "the work template refuses" in denial(
+        gate(capsys, monkeypatch, edit(project, body=WORK_MARKER + "\n" + THIN), "--gate", "refuse"))
+
+
+def test_a_fresh_snapshot_of_kerns_answers_the_document_and_a_stale_one_reads_it_again(
+        capsys, monkeypatch, project, gh):
+    import se_relay
+    now = datetime.datetime(2026, 11, 24, 12, 0, tzinfo=datetime.timezone.utc)
+    held = {"data": {"number": 7, "title": TITLE, "body": unmarked(GOOD_WORK), "labels": ["work"]},
+            "read": "2026-11-24T11:58:00Z"}
+    asked = []
+
+    def get(name: str):
+        asked.append(name)
+        return held
+
+    monkeypatch.setattr(se_relay, "relay", lambda root: se_relay.Relay(root, get, lambda: now))
+    reason = denial(gate(capsys, monkeypatch, edit(project, labels=["work"]), "--gate", "refuse"))
+    assert "#7 names no template" in reason and asked == [f"github/issues/{OWNER}.{REPO_NAME}.7"]
+    assert not any(call[:1] == ["api"] for call in gh.calls)
+    held["read"] = "2026-11-24T11:00:00Z"  # older than se_relay.MAX_AGE_SECONDS: GitHub answers
+    assert gate(capsys, monkeypatch, edit(project, labels=["work"]), "--gate", "refuse") == ""
+    assert ["api", f"repos/{OWNER}/{REPO_NAME}/issues/7"] in gh.calls
 
 
 def test_a_crash_after_selection_denies_and_one_before_passes_and_logs(
@@ -915,7 +1036,8 @@ def test_a_direct_write_of_a_work_issue_body_file_passes_where_it_parses_and_els
     assert broken.splitlines() == [
         f"Edit of {relative}: the file it leaves breaks the template that claims its path:",
         f"  {relative} (work-file): Requirements: missing: write `## Requirements`: Numbered, checkable "
-        "requirements, in the order to do them. (or `Not in input` where the input does not say)",
+        "requirements, in the order to do them. (or `Not in input` where the input does not say) "
+        f"(why: {templates.REASONS['required']})",
         fill,
         "Fix the write so the file parses, or fill it: without --fields the fill answers the template's "
         "instructions; with --fields and --input it writes the file"]
