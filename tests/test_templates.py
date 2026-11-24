@@ -1881,6 +1881,8 @@ CONTRACT = {
     "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
     "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:post_started": ("start", comment(
+        work_tickets.STARTED_COMMENT.format(branch="feature/example"))),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
     "work_tickets:escalation_plan": ("integrate", plan_of(
         lambda: work_tickets.escalation_plan(REPO, 7, "the suite failed"), {"comment_issue": FREE})),

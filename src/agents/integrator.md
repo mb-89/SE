@@ -106,6 +106,9 @@ merge or a start.
      `work_tickets.py field-report --check <description file> --issue-body <issue file>`; refuse a
      report it rejects with its messages (`integrate` runs the same check, and refuses a
      description without a report).
+   - The check fills the Branch tip only from the pull request's head branch, in a checkout of
+     it; run without `--worktree`, or with the main checkout, it leaves the saved description and
+     its Branch tip as the worker delivered them.
    - Run `work_tickets.py guard --branch <branch> --pr-description <file> --worktree <its worktree>`.
    - Refuse with reasons when it writes outside its box (files owned by another package, another
      repository), lacks tests for changed behaviour, or claims unverified work.
@@ -223,8 +226,11 @@ merge or a start.
    Where you start the worker with `create_session` rather than `start` (the cloud flow), claim
    the issue first with `work_tickets.py claim <issue>`
    ([the claim](../skills/work-model/SKILL.md#worktrees)); where it refuses, start nothing for
-   that issue. Then change the issue's labels in that same step as `start` does, and remove
-   `in-progress` when you close it, as the work model's
+   that issue.
+
+   Then run `work_tickets.py start <issue>` in the same checkout: it takes that claim as its own,
+   creates or reuses the worktree on the claimed branch, changes the labels and posts the
+   `Started:` comment. Remove `in-progress` when you close the issue, as the work model's
    [scheduling](../skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
 
    Do not judge a worker by its session status right after starting it: a new session reads as
