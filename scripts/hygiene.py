@@ -25,6 +25,8 @@ each named with its check.
   generator's fresh run reproduces it (`scripts/generated.py`, the guidance note
   generated-files-are-marked); the commit hook runs it without the fresh runs (se.toml
   `[commit_checks]`).
+- sections: every tracked text file's `<page>.md "<section>"` and `README "<section>"` name a section
+  of that page (`scripts/references.py` `dangling_sections`), outside SECTIONS_SKIPPED;
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -85,6 +87,14 @@ GIT_ALLOWED: dict[str, tuple[int, str]] = {}
 HOME_ALLOWED: dict[str, str] = {}
 # Workflows and actions, which no allowed folder covers: they name no home (scripts/se_workflows.py).
 WORKFLOWS = re.compile(r"(?:^|/)\.github/(?:workflows|actions)/")
+
+# Tracked files the sections check reads no reference in, each with why. An entry that names no
+# tracked file is refused.
+SECTIONS_SKIPPED: dict[str, str] = {
+    "docs/retro-2026-11-13-to-24.md": "a dated record: it quotes sections as they stood in its window",
+    "tests/test_references.py": "plants dangling section references, the cases the check must find",
+    "tests/test_repository.py": "plants dangling section references in fixture checkouts",
+}
 
 # The file whose presence in a commit's tree marks SE's own line (`se_line`).
 SE_LINE_MARKER = "scripts/public_check.py"
@@ -301,6 +311,22 @@ def generated_findings(root: Path) -> list[str]:
         raise HygieneError(str(error)) from error
 
 
+def section_findings(root: Path, skipped: dict[str, str]) -> list[str]:
+    """Each section reference of a tracked text file that names no section of its page."""
+    files = tracked(root)
+    found = [f"SECTIONS_SKIPPED {name}: no such tracked file" for name in skipped if name not in files]
+    for name in files:
+        path = root / name
+        if name in skipped or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        found += [f"{name} {finding}" for finding in references.dangling_sections(text, root, path)]
+    return found
+
+
 def checks(root: Path) -> dict[str, list[str]]:
     """Each check's findings on `root`, in the order the module's docstring names them."""
     return {
@@ -313,6 +339,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "neutral-home": ([] if (home := se_home.find(root)) is None
                          else home_findings(root, HOME_ALLOWED, home)),
         "generated": generated_findings(root),
+        "sections": section_findings(root, SECTIONS_SKIPPED),
     }
 
 

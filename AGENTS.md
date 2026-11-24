@@ -108,6 +108,8 @@
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:
+  - A section reference, `<page>.md "<section>"` or `README "<section>"`, in any tracked text file
+    whose page holds no such heading (the check `sections`).
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,
     `.github/…`), or a script subcommand its argument parser does not define.
   - `scripts/references.py` owns what counts; the issue-filing commands call it too

@@ -103,17 +103,18 @@ def test_the_allow_lists_say_why() -> None:
 @pytest.fixture
 def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fixture checkout has none of SE's allowed files, so SE's lists would be stale there."""
-    for name in ("BINARY_ALLOWED", "LARGE_ALLOWED", "GIT_ALLOWED", "HOME_ALLOWED"):
+    for name in ("BINARY_ALLOWED", "LARGE_ALLOWED", "GIT_ALLOWED", "HOME_ALLOWED", "SECTIONS_SKIPPED"):
         monkeypatch.setattr(hygiene, name, {})
 
 
 @pytest.mark.usefixtures("fake_git_door")
 def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsys) -> None:
-    commit(repo, {"README.md": "# Clean\n\nSee [agents](AGENTS.md).\n", "AGENTS.md": "# Agents\n",
+    commit(repo, {"README.md": "# Clean\n\n## What it is\n\nSee [agents](AGENTS.md).\n",
+                  "AGENTS.md": "# Agents\n\nSee README \"What it is\".\n",
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].startswith("hygiene: passed (8 checks) in ")
+    assert out[-1].startswith("hygiene: passed (9 checks) in ")
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
 
 
@@ -125,7 +126,8 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     commit(repo, {"tool.bin": b"\x7fELF\0\0", "dump.json": "x" * 101,
                   "scripts/tool.py": f"import subprocess\n# {marker}: retry\nsubprocess.run(['git', 'status'])\n",
                   "README.md": "# Leaky\n\nSee [gone](gone.md), copied from /" + "home/alice/notes.\n",
-                  "docs/install.md": "Install from bob/project.\n"})
+                  "docs/install.md": "Install from bob/project.\n",
+                  "AGENTS.md": "# Agents\n\nSee README \"Gone\" and docs/install.md \"Gone\".\n"})
     git_door.run("remote", "add", "origin", "https://example.com/bob/project.git", root=repo)
     assert hygiene.main(["--repo", str(repo)]) == 1
     out = capsys.readouterr().out
@@ -138,8 +140,11 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "alice" not in out, "the public check names locations and labels, never the matched text"
     assert "hygiene: neutral-home: docs/install.md:1: names the origin's owner" in out
     assert "bob" not in out, "the neutral-home check names locations, never the matched text"
+    assert 'hygiene: sections: AGENTS.md line 3: `README "Gone"` names no section of README.md' in out
+    assert 'hygiene: sections: AGENTS.md line 3: `docs/install.md "Gone"` names no section' in out
     assert out.splitlines()[-1].startswith(
-        "hygiene: refused by binary, large, marker, git-door, references, public, neutral-home (")
+        "hygiene: refused by binary, large, marker, git-door, references, public, neutral-home, "
+        "sections (")
 
 
 class Item:
@@ -321,3 +326,12 @@ def test_hygiene_refuses_a_generated_file_its_generator_does_not_declare(tmp_pat
     (repo / "generated.yaml").write_text("generators: 3\n")
     with pytest.raises(hygiene.HygieneError, match="one key, `generators`"):
         hygiene.checks(repo)
+
+
+def test_a_stale_sections_entry_fails_and_a_skipped_file_is_not_read(tmp_path: Path, fake_git_door) -> None:
+    repo = fixture_repo(tmp_path, {"README.md": b"# Tool\n\n## Use\n",
+                                   "notes.md": b'See README "Use" and README "Gone".\n',
+                                   "record.md": b'It said README "Gone".\n'})
+    assert hygiene.section_findings(repo, {"record.md": "a dated record", "lost.md": "gone"}) == [
+        "SECTIONS_SKIPPED lost.md: no such tracked file",
+        'notes.md line 1: `README "Gone"` names no section of README.md']
