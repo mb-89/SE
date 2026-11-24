@@ -783,8 +783,10 @@ def test_the_cut_off_read_gives_the_countdowns_of_the_whole_read(tmp_path):
 
 
 def test_with_no_run_yet_the_cut_off_read_reads_the_whole_history(tmp_path):
-    """Where no retro (or, with its countdown on, no overhaul) exists, nothing bounds what can
-    count: every closed issue and pull request is read, with the countdowns of the whole read."""
+    """Where no retro exists, nothing bounds what can count: every closed issue and pull request
+    is read, with the countdowns of the whole read. Where retros exist but no overhaul, the read
+    stops at the newest retro's start and the overhaul countdown counts the retros found by their
+    label: the whole read's, as long as each older retro carries it."""
     history = run_history()
     history["closed"] = [item for item in history["closed"] if item["number"] not in (1, 2, 4, 14)]
     cut = CutOffDoor(history)
@@ -797,10 +799,16 @@ def test_with_no_run_yet_the_cut_off_read_reads_the_whole_history(tmp_path):
     history = run_history()
     history["closed"] = [item for item in history["closed"] if item["number"] != 2]
     cut = CutOffDoor(history)
-    assert retro.countdowns(cut, REPO, "main", tmp_path, NOW) == retro.countdowns(
-        WholeDoor(history), REPO, "main", tmp_path, NOW)
-    assert len(cut.read["issues"]) == len(history["closed"])
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    expected = retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["retro"] == expected["retro"]
+    assert cut.read["issues"] == [10, 9, 8, 7, 4, 6]
+    assert (found["overhaul"].count, expected["overhaul"].count) == (2, 3)
 
+    next(item for item in history["closed"] if item["number"] == 14)["labels"] = [{"name": "retro"}]
+    found = retro.countdowns(CutOffDoor(history), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["overhaul"].count == 3
 
 class FakeRelay:
     """kern's relay door as the host's GitHub tools answer over `history`: list_issues in pages

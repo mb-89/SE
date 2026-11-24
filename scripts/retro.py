@@ -77,9 +77,9 @@ reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never c
 `retro.py due` prints the retro and overhaul countdowns (`countdowns`, README "Retro due"), which
 the filing check runs before every filing. It reads the closed issues and pull requests newest
 update first and only as far back as they can count: the runs by their label, then back to the
-start of the newest counted retro (and overhaul, where its countdown is on), the pull requests
-on until each work issue closed since then has its landing; where no run exists, everything
-(`recent_reads`). The answer files are read whole, with the same countdowns.
+start of the newest counted retro (and of the newest overhaul, where its countdown is on and one
+exists), the pull requests on until each work issue closed since then has its landing; with no
+retro yet, everything (`recent_reads`). The answer files are read whole, with the same countdowns.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -890,14 +890,18 @@ def recent_reads(door, opened: list[Issue], overhauls: bool, tracker: str,
                  branch: str) -> tuple[list[Issue], list[Pull]]:
     """The closed issues and pull requests the countdowns need, from a door that reads them newest
     update first (`closed_issues_until`, `pulls_until`) and the runs by their label
-    (`closed_issues_labelled`): the runs first, then the closed issues back to the start of the
-    newest counted retro (and, with `overhauls`, overhaul), as an older one cannot count: an
-    issue's update is never before its creation or its close. Where a kind has no run yet, every
-    closed issue is read. The pull requests are read back to the newest retro's start and on
-    while a work issue closed since then has no landing read yet, down to that issue's creation:
-    a landing merged before the retro started counts for an issue closed after it. The countdowns
-    are those of the whole read; only with the overhaul countdown off does the overhaul's count,
-    which makes nothing due then, cover the retros the label read finds alone."""
+    (`closed_issues_labelled`, RETRO_LABEL and the overhaul's): the runs first, then the closed
+    issues back to the start of the newest counted retro and, with `overhauls` and an overhaul
+    found, the newest overhaul, whichever is older; an older issue cannot count, as its update is
+    never before its creation or its close. With no retro yet, every closed issue is read.
+
+    The pull requests are read back to the newest retro's start and on while a work issue closed
+    since then has no landing read yet, down to that issue's creation: a landing merged before
+    the retro started counts for an issue closed after it.
+
+    The countdowns are those of the whole read wherever every run older than the cut-off carries
+    its label, as the filing labels them (overhaul.py file_run): the overhaul countdown counts
+    the retros the label reads find, and those the closed issues read find by their title."""
     overhaul = sibling("overhaul")
     newest: dict[str, datetime | None] = {"retro": None, "overhaul": None}
     kinds = ("retro", "overhaul") if overhauls else ("retro",)
@@ -911,7 +915,9 @@ def recent_reads(door, opened: list[Issue], overhauls: bool, tracker: str,
                 newest[kind] = start
 
     def cutoff() -> datetime | None:
-        starts = [newest[kind] for kind in kinds]
+        """The older of the newest retro's start and, where that countdown is on and one was
+        found, the newest overhaul's; None with no retro yet (read everything)."""
+        starts = [newest[kind] for kind in kinds if kind == "retro" or newest[kind]]
         return None if None in starts else min(starts)
 
     for issue in opened:
