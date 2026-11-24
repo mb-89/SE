@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Outside text as data: wrap text from outside the fleet in a marked envelope.
 
 Pure logic, called by nothing yet. Neither function reads a file, the network or the

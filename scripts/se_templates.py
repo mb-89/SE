@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's side of templates: the templates engine (`templates.py`) with the checks SE's filing commands add, as
 the command component `templates` that kern's MCP door serves as its tool `templates` (docs/templating.md "Templates"),
 and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
@@ -80,7 +81,9 @@ judged by their own rules (The file tools, below).
   (VS Code) or `-` (Copilot CLI); the server part, or the payload's `mcp_server.name` where it
   carries one, holds `github`. Each tool maps to an action and to the arguments that hold its
   body, title, labels and base; `issue_write` is `issue.create` with method `create` and
-  `issue.edit` otherwise. A call without a body passes. The repository is `owner`/`repo`.
+  `issue.edit` otherwise, its `issue_number` the issue edited, `update_issue_comment`'s
+  `comment_id` the comment. A create without a body passes, and an edit that changes none of
+  body, title and labels. The repository is `owner`/`repo`.
 - The shell reader (SHELL_KEYS to shell_writes): a call of any other tool whose input holds a
   string `command`, `input` or `script` naming `gh` as a word followed by a space (GH_WORD, the
   filter se_hook.sh runs in builtins) is split with shlex at `&&`, `||`, `;`, `|`, `&` and line
@@ -91,15 +94,17 @@ judged by their own rules (The file tools, below).
     `issue.edit`, `comment.create`; `gh pr` with `create`, `edit`, `comment` or `review`:
     `pr.create`, `pr.edit`, `comment.create` (GH_WRITES). Their parts: `--title`/`-t`,
     `--body`/`-b`, `--body-file`/`-F` (`-` reads the part's stdin: a heredoc, a here-string or
-    `< <file>`), `--label`/`-l` (repeated or comma-separated), `--base`/`-B`, `-R`/`--repo` or an
-    issue's URL; without them the repository is the project's origin, and `gh pr create`'s base
+    `< <file>`), `--label`/`-l` (repeated or comma-separated), `gh issue edit`'s `--add-label` and
+    `--remove-label`, `--base`/`-B`, `-R`/`--repo` or an issue's URL, the number at its end the
+    issue edited; without them the repository is the project's origin, and `gh pr create`'s base
     is the integration branch, as gh takes the default branch.
   - `gh api` on GH_API_PATHS (`repos/<owner>/<repo>/issues`, `.../issues/<n>`,
     `.../issues/<n>/comments`, `.../issues/comments/<id>`, `.../pulls`, `.../pulls/<n>`, `{owner}`
     and `{repo}` as origin's) with POST or PATCH, by `-X`/`--method` or, without one, a field:
     `-f`/`-F`/`--field`/`--raw-field` `title=`, `body=`, `labels[]=`, `base=`, `-F body=@<file>`
-    read from the file, `--input <file>` read as JSON. A GET, another endpoint, `gh api graphql`
-    and every other command pass.
+    read from the file, `--input <file>` read as JSON; `issues/<n>` names the issue edited,
+    `issues/comments/<id>` the comment. A GET, another endpoint (`issues/<n>/labels` among them),
+    `gh api graphql` and every other command pass.
   - A body it cannot read (UNREAD): from `$(...)`, backticks or a variable, a pipe into
     `--body-file -`, an unquoted heredoc holding `$` or a backtick, a file that does not exist yet,
     or one gh writes itself (GH_OWN_BODY: `--fill`, `--fill-first`, `--fill-verbose`, `--template`,
@@ -115,10 +120,27 @@ judged by their own rules (The file tools, below).
   read at `origin/<integration branch>`) is `off` (the default), `warn` or `refuse`;
   `SE_TEMPLATES_GATE=off` in the environment turns it off for the machine whatever se.toml says, and
   `--gate`, for tests only, sets it for the run. The templates are SE's (`templates.load`).
-- Selection: `templates.select` for the action, with the call's labels and base. Where the call
-  carries no labels or no base, the body's own template marker picks among the action's
-  templates without that filter; an unmarked body is selected as if the call had no labels. It never
-  reads GitHub.
+- Which template (docs/templates.md "Which template a write is judged by"): a write's template is
+  the one its document names, never a guess from the call.
+  - An edit (DOCUMENT_EDITS: `issue.edit`, `comment.edit`) is judged as the document it leaves
+    behind (`edited`): the issue or comment as it stands (`current_document`: kern's snapshot of
+    the issue where one younger than se_relay's MAX_AGE_SECONDS stands, else one REST read through
+    gh, `work_tickets.issue_api`), with the call's body, title and labels in its place and gh's
+    `--add-label` and `--remove-label` applied.
+  - Its template is the one the new body names (`templates.named_template`: a template marker of a
+    template of the action, else a template's own marker), else the one the current document
+    names. Where the new body drops the current marker, or the labels left lack the template's,
+    each is a refused finding beside the template's own.
+  - Where neither names one and a template would take the document as new (`templates.select`'s
+    guess), the edit is refused (`unmarked_refusal`), naming `work_tickets.py stamp` with that
+    template and the fill; it is judged against none. Where none would, as for an unmarked
+    comment, it is free.
+  - Where the document cannot be read (no number, gh fails), the new body's marker alone decides
+    and an edit without one passes; GATE_LOG names why.
+  - A new document, and a pull request's edit, is selected from the call: `templates.select` with
+    the call's labels and base; where the call carries no labels or no base, the body's own
+    template marker picks among the action's templates without that filter, and an unmarked body
+    is selected as if the call had no labels.
 - The check is `check`'s: the same `filed` and `findings`, the private terms read from the
   project's local list.
 - The answers: with `refuse` and a refused finding, a `deny` whose reason is `templates.report`'s, its
@@ -226,6 +248,8 @@ import time
 import tomllib
 from pathlib import Path
 
+import se_script
+
 HERE = Path(__file__).resolve().parent
 #: The title shape of the templates whose title is a ticket's name (templates/ticket.md, templates/work.md).
 NAME_SHAPE = "work_tickets:name_refusal"
@@ -263,6 +287,9 @@ GATE_TOOLS = {
     "add_comment_to_pending_review": ("comment.create", "body", None, None, None),
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
 }
+#: The edits whose template is the document's own, read from the document they leave behind
+#: (Which template, in the module docstring).
+DOCUMENT_EDITS = ("issue.edit", "comment.edit")
 GATE_FAILED = "SE's template gate failed on this write ({kind}), so it was not sent"
 #: The file tools (the module docstring: The file tools), guarded wherever a template claims a
 #: path: Claude Code's own, by their whole name, and the GitHub tools that write files.
@@ -527,6 +554,9 @@ class ShellWrite:
         self.labels: list[str] | None = None
         self.base: str | None = None
         self.number: int | None = None
+        self.comment: int | None = None
+        self.add_labels: list[str] = []
+        self.remove_labels: list[str] = []
         self.unread: str | None = None
         self.remedy = "--body-file <file>"
         self.default_base = False
@@ -571,6 +601,9 @@ def gh_write(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite
         elif name in ("-l", "--label"):
             call.labels = (call.labels or []) + [label.strip() for label in value.split(",")
                                                  if label.strip()]
+        elif name in ("--add-label", "--remove-label"):
+            changed = call.add_labels if name == "--add-label" else call.remove_labels
+            changed += [label.strip() for label in value.split(",") if label.strip()]
         elif name in ("-B", "--base"):
             call.base = call.text(value, "base")
         elif name in ("-b", "--body"):
@@ -612,6 +645,8 @@ def gh_api(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite |
     call.remedy = "-F body=@<file>"
     number = re.fullmatch(r"issues/(\d+)", where.group(2))
     call.number = int(number.group(1)) if number else None
+    comment = re.fullmatch(r"issues/comments/(\d+)", where.group(2))
+    call.comment = int(comment.group(1)) if comment else None
     for value in given:
         text, call.unread = read_file(value, write.cwd, stdin)
         try:
@@ -735,7 +770,7 @@ def kern_problems(template) -> list[str]:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="se_templates.py", description=__doc__.splitlines()[0])
+    top = se_script.parser(prog="se_templates.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
     tree = {"action": "store_true", "help": "read the working tree's templates/ (default: templates/ at "
                                             "origin/<integration branch> where it holds them)"}
@@ -1194,8 +1229,14 @@ class Write:
         self.labels = self.listed(labels)
         self.base = self.text(base)
         self.repo = "/".join(str(self.input.get(key) or "").strip() for key in ("owner", "repo"))
-        number = self.input.get("issue_number")
-        self.number = number if isinstance(number, int) and not isinstance(number, bool) else None
+        self.number = self.whole("issue_number")
+        self.comment = self.whole("comment_id") if action == "comment.edit" else None
+        self.add_labels: list[str] = []
+        self.remove_labels: list[str] = []
+
+    def whole(self, key: str) -> int | None:
+        value = self.input.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
 
     def text(self, key: str | None) -> str | None:
         value = self.input.get(key) if key else None
@@ -1299,8 +1340,115 @@ def gate_template(catalog: dict, write: Write, root: Path):
     return selection.template, selection.findings
 
 
-def instead(write: Write) -> str:
-    if write.files:
+def current_document(write, root: Path) -> dict | None:
+    """The issue or comment `write` edits as it stands on GitHub (Which template, in the module
+    docstring): `body`, and for an issue `title` and `labels`. kern's snapshot of the issue where a
+    fresh one stands (`se_relay`, younger than its MAX_AGE_SECONDS), else one REST read through
+    gh (`work_tickets.issue_api`); None where the write names no number or neither answers, the
+    reason one line in GATE_LOG."""
+    work_tickets = sibling("work_tickets")
+    comment = getattr(write, "comment", None)
+    if write.action == "issue.edit" and write.number is not None:
+        found = snapshot_issue(write, root)
+        path = f"issues/{write.number}"
+    elif write.action == "comment.edit" and comment is not None:
+        found, path = None, f"issues/comments/{comment}"
+    else:
+        return None
+    try:
+        found = found or work_tickets.issue_api(root, write.repo, path)
+    except Exception as error:  # GitHub cannot be read: no document, and the log says why
+        log_line(root, f"{write.action} in {write.repo}: the document it edits cannot be read "
+                       f"({type(error).__name__}: {(str(error).splitlines() or [''])[0][:160]})")
+        return None
+    if not isinstance(found, dict) or not isinstance(found.get("body") or "", str):
+        return None
+    document: dict = {"body": str(found.get("body") or "")}
+    if write.action == "issue.edit":
+        document["title"] = str(found.get("title") or "")
+        document["labels"] = [str(label.get("name") if isinstance(label, dict) else label)
+                              for label in found.get("labels") or ()]
+    return document
+
+
+def snapshot_issue(write, root: Path) -> dict | None:
+    """The issue `write` edits as kern's snapshot holds it, where one younger than se_relay's
+    MAX_AGE_SECONDS stands; None otherwise, also where no kern serves `root`."""
+    try:
+        relay = sibling("se_relay")
+        door = relay.relay(root)
+        owner, _, name = write.repo.partition("/")
+        found = door.snapshot("issues", owner, name, write.number) if door is not None else None
+        if found is None:
+            return None
+        read = relay.parse_time(found.get("read"))
+        age = (door.now() - read).total_seconds() if read else None
+        return found["data"] if age is not None and age <= relay.MAX_AGE_SECONDS else None
+    except Exception:  # no snapshot: the REST read answers
+        return None
+
+
+def edited(catalog: dict, write, root: Path, project: Path | None):
+    """An edit's template, its findings so far and, where the document names no template, the
+    refusal that says so (Which template, in the module docstring). `write` becomes the document
+    the edit leaves behind: the current one (`current_document`) with the call's body, title and
+    labels in place, gh's `--add-label` and `--remove-label` applied."""
+    templates, work_tickets = sibling("templates"), sibling("work_tickets")
+    current = current_document(write, project or root)
+    given = write.body
+    named = templates.named_template(catalog, write.action, given) if given is not None else None
+    before = templates.named_template(catalog, write.action, current["body"]) if current else None
+    if current is not None:
+        if write.body is None and not getattr(write, "unread", None):
+            write.body = current["body"]
+        if write.action == "issue.edit":
+            write.title = write.title if write.title is not None else current["title"]
+            labels = write.labels if write.labels is not None else current["labels"]
+            removed = {label.casefold() for label in write.remove_labels}
+            write.labels = [*(label for label in labels if label.casefold() not in removed),
+                            *(label for label in write.add_labels
+                              if label.casefold() not in {item.casefold() for item in labels})]
+    template = named or before
+    if template is None:
+        if current is None:  # nothing names a template, and the document cannot be read
+            return None, [], ""
+        guess = templates.select(catalog, write.action, write.body or "", write.title,
+                                 labels=write.labels or (),
+                                 integration=work_tickets.integration_branch(root)).template
+        return None, [], "" if guess is None else unmarked_refusal(write, guess, project or root)
+    found = []
+    if before is not None and given is not None and named is None:
+        found.append(templates.Finding("body", "template", templates.REFUSE,
+                                       f"the edit drops the line that names its template ({before.name}); "
+                                       f"keep `{templates.marker_of(before, current['body'])}`"))
+    have = {label.casefold() for label in write.labels or ()}
+    if write.labels is not None and not all(label.casefold() in have for label in template.labels):
+        found.append(templates.Finding("labels", "template", templates.REFUSE,
+                                       templates._why_not(template, write.action)
+                                       + ", and the edit leaves it without them: keep them"))
+    return template, found, ""
+
+
+def unmarked_refusal(write, guess, root: Path) -> str:
+    """The refusal of an edit whose document names no template (Which template, in the module
+    docstring): it names the stamp, with `guess` the template a new document would get, and the fill."""
+    target = (f"#{write.number}" if write.action == "issue.edit"
+              else f"comment {getattr(write, 'comment', '')}")
+    stamp = (f"uv run python {HERE / 'work_tickets.py'} stamp {write.number} --worktree {root} "
+             f"--repo {write.repo} --template {guess.name}" if write.action == "issue.edit" else "")
+    lines = [f"{write.action} in {write.repo}: {target} names no template: its body carries no "
+             "`<!-- se:template <repository>/<name> <version> <digest> -->` line, so SE does not know "
+             "which template it derives from and judges the edit against none."]
+    if stamp:
+        lines.append(f"Stamp it with its template once it passes that template's check: {stamp} "
+                     f"(the {guess.name} template is what a new document like it would take; name "
+                     "another with --template), then send the edit again.")
+    lines.append(f"Or {instead(write)}, through the fill, which writes the marker.")
+    return "\n".join(lines)
+
+
+def instead(write) -> str:
+    if getattr(write, "files", False):
         return f"write it with uv run python {HERE / 'templates.py'} fill <template> --path <file>"
     if write.action in sibling("templates").ISSUE_ACTIONS:
         return (f"file it with uv run python {HERE / 'work_tickets.py'} file (backlog file for a "
@@ -1334,9 +1482,12 @@ def judge_one(write, project: Path | None, switch: str | None) -> str:
     """The answer for one write, a GitHub tool's or one gh command's of a shell call."""
     templates = sibling("templates")
     unread = getattr(write, "unread", None)
+    edit = write.action in DOCUMENT_EDITS
+    changes = (write.body, write.title, write.labels) if edit else (write.body,)
     try:
-        if (write.body is None and unread is None) or write.repo.startswith("/") \
-                or write.repo.endswith("/"):
+        if (all(value is None for value in changes) and unread is None
+                and not (edit and (write.add_labels or write.remove_labels))) \
+                or write.repo.startswith("/") or write.repo.endswith("/"):
             return ""
         if switch is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == templates.OFF:
             return ""
@@ -1350,7 +1501,10 @@ def judge_one(write, project: Path | None, switch: str | None) -> str:
         if getattr(write, "default_base", False):  # gh's default base, taken as the integration
             write.base = sibling("work_tickets").integration_branch(root)
         catalog = templates.load(templates.ROOT)
-        template, met = gate_template(catalog, write, root)
+        template, met, unmarked = (edited(catalog, write, root, project) if edit
+                                   else (*gate_template(catalog, write, root), ""))
+        if unmarked:
+            return context(unmarked) if switch == templates.WARN else deny(unmarked)
         if template is None:
             if unread:
                 log_line(project, f"{write.said} in {write.repo}: SE cannot read its body "
@@ -1487,6 +1641,7 @@ def judged_write(write: Write, what: str, repo: str, root: Path, catalog: dict,
     templates = sibling("templates")
     environ = {"SE_SESSION": write.session} if write.session else None
     lines = []
+    scaffolded = False
     for relative, owners in claims:
         text = results.get(relative)
         found = [] if text is None else refusals(catalog, root, relative, text)[1]
@@ -1494,17 +1649,30 @@ def judged_write(write: Write, what: str, repo: str, root: Path, catalog: dict,
             continue
         templates.count_refusal(templates.target(owners[0], repo, templates.FILE_ACTION, title=relative),
                                 environ)
+        lines += [f"  {line}" for line in found]
+        code = [name for name in owners if getattr(catalog.get(name), "kind", "") == templates.CODE]
+        if code:  # a code template's file is scaffolded, never filled (templates.py: Code templates)
+            scaffolded = True
+            for name in code:
+                call = (f"uv run python {HERE / 'templates.py'} scaffold {name} --path {root / relative} "
+                        f"--says <one line> --root {root}")
+                lines.append(f"  {relative}: its scaffold ({name}): {call}"
+                             + (f" --templates {source}" if source is not None else ""))
+            continue
         name = owners[0] if len(owners) == 1 else "<template>"
         fill = f"uv run python {HERE / 'templates.py'} fill {name} --path {root / relative} --root {root}"
         if source is not None:
             fill += f" --templates {source}"
-        lines += [f"  {line}" for line in found] + [f"  {relative}: its fill: {fill}"]
+        lines.append(f"  {relative}: its fill: {fill}")
     if not lines:
         return ""
+    advice = ("Fix the write so the file keeps its template's shape, or scaffold a new file: the "
+              "scaffold writes it with its marker and shape, its slots for the rest, and an edit "
+              "that keeps them passes" if scaffolded else
+              "Fix the write so the file parses, or fill it: without --fields the fill answers the "
+              "template's instructions; with --fields and --input it writes the file")
     return deny("\n".join([f"{what}: the file it leaves breaks the template that claims its path:", *lines,
-                           "Fix the write so the file parses, or fill it: without --fields the fill "
-                           "answers the template's instructions; with --fields and --input it writes "
-                           "the file"]))
+                           advice]))
 
 
 def run_runtime(root: Path) -> int:
@@ -1694,9 +1862,14 @@ def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
     """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
     lines where a changed claimed file breaks its template; None where no template claims a path
-    outside LOCAL_STATE or every such file passes. Errors raise."""
+    outside LOCAL_STATE, where `ref` shares no merge base with HEAD (no such ref yet: a checkout
+    with nothing published to compare with, whose pull request CI's check job checks against its
+    base), or where every such file passes. Errors raise."""
     catalog, source = claim_templates(root, None)
     if not claims_a_carried_path(catalog):
+        return None
+    base = sibling("git_door").run("merge-base", ref, "HEAD", root=root)
+    if base.returncode != 0 or not base.stdout.strip():
         return None
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
     return lines if code else None
@@ -1836,4 +2009,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

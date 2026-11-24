@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Standalone validators for agent and skill files: a file in, its findings out, for any repository.
 
 `copilot_agent` holds a Copilot custom agent (`<name>.agent.md`, or a plugin's `agents/<name>.md`,
@@ -15,6 +17,7 @@ import json
 import re
 import sys
 from pathlib import Path, PurePath
+import se_script
 
 # Copilot's custom agent fields: VS Code's custom agent file reference and the Copilot CLI's and cloud
 # agent's own (the SE agent's fact-check of 14 Nov). `handoffs` and `agents` work only in VS Code's
@@ -101,7 +104,7 @@ def lint(path: PurePath, text: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="agent_lint.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="agent_lint.py", description=__doc__.splitlines()[0])
     parser.add_argument("files", nargs="+", type=Path, help="a Copilot `*.agent.md`, a plugin's `agents/*.md` or a skill's `SKILL.md`")
     args = parser.parse_args(argv)
     findings = []
@@ -118,4 +121,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

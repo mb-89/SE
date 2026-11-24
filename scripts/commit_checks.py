@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """A project's own commit checks: the commands its `se.toml` `[commit_checks]` names, run by se's
 commit hook (`.githooks/pre-commit`) on the staged tree, so a commit that breaks one is refused
 before it exists (docs/settings.md "Commit checks").
@@ -27,6 +28,7 @@ import sys
 import tempfile
 import tomllib
 from pathlib import Path
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import git_door  # noqa: E402
@@ -164,7 +166,7 @@ def run(root: Path, out=None, err=None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+    parser = se_script.parser(description=__doc__.split("\n\n")[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
                         help="the repository whose index is checked (default: the working directory)")
@@ -173,4 +175,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """CI's trust in the integrator's run of the complete suite (docs/tests.md "Trusted landings").
 
 `work_tickets.py integrate` runs the complete suite on the tree it lands. Where se.toml `[tests]`
@@ -39,6 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import git_door
+import se_script
 
 RECORD_CHECK = "se integrator pass"  # the check run the record is
 FULL_CHECK = "se full pass"  # the check run a full pass of CI leaves where trust is on
@@ -519,7 +521,7 @@ COMMANDS = {"lookup": "decide whether this CI run passes on the integrator's rec
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None,
          api: Api | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     for name, text in COMMANDS.items():
         commands.add_parser(name, help=text).add_argument(
@@ -548,4 +550,4 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None,
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -35,7 +35,7 @@ word stays its own, and SE's texts say "template overlay" wherever both could be
 A template is one Markdown note in a template repository, `templates/<name>.md`:
 
 - Its front matter declares what the engine reads: `name`, `version` (semantic, `1.2.0`), `kind`
-  (`document`, `block`, `entry` or `interface`), `reader`, `says`, `tags`, what it applies to
+  (`document`, `block`, `entry`, `interface` or `code`), `reader`, `says`, `tags`, what it applies to
   (actions and claimed paths), its `fields` with their kinds and rules, and `extends`.
 - Its body is the skeleton a filled document follows: the `##` sections in order, each with an
   instruction in a comment that the fill hands the agent and the document never shows.
@@ -155,6 +155,11 @@ rule `quote`) and `scripts/se_templates.py` (its `fill`, `file_document`) own wh
 - **Not yet.** A message has no writing tool in kern's door, and the tool's `fill` writes no
   claimed file: `templates.py fill --path` writes it, until kern's files module takes only filled
   templates (The filled template is a type).
+- **The marker.** Every fill and every filing writes the template's marker into the document it
+  makes: `templates.py fill`, the tool's `fill`, and `file`, `backlog file` and `route`, whose
+  body filed as given (`[templates] enforce = "off"`, or `--hold`) gets the marker line where
+  the fill writes it (`templates.stamped`). A document so always says which template it is a
+  value of ([Which template a write is judged by](#which-template-a-write-is-judged-by)).
 
 - It takes the template, the prompt, the raw input and the agent's fields; it resolves the template
   ([Template repositories](#template-repositories)), applies the overlay, checks the fields against
@@ -178,6 +183,46 @@ edit or a write through the tracker's tools of a claimed path is judged by the f
 never by its edit text, parsed as the fill parses it. One that parses passes; one that does not is
 refused before it runs, naming every finding and the fill to use. The gate is on wherever a
 template claims a path, with no se.toml switch to keep it off.
+
+## Code templates
+
+The person decided on 24 Nov, in the templates deck (code templates, option C): one templater does
+everything, so code has templates of the same engine and no scaffolder of its own.
+
+- **The kind.** A code template (`kind: code`) is an adapter: no fields, its shape the adapter's
+  `lines`, each a line the file must hold (its template marker, and for a script the uv entry, the
+  shared library, the help and the entry), and its body the files it scaffolds, each a
+  `## <path>` heading and one fenced block. Placeholders `{{name}}`, `{{ident}}`, `{{package}}`,
+  `{{says}}`, `{{template}}` and `{{version}}` fill its paths and texts; the rest is the slots the
+  author fills.
+- **The scaffold.** `templates.py scaffold <template> --path <file or folder> --says <one line>`
+  writes a new script or module, its marker recording the template and version it derives from
+  (`# se:template se/python-script 1.0.0`, `// se:template se/go-module 1.0.0`), checks each file
+  against the template that claims it, and refuses a file that exists. A generator that emits code
+  renders it through a code template: `se component add` through `python-component`.
+- **The claim.** A code template claims what it shapes: `python-script` and `python-module`
+  `scripts/*.py`, `go-module` every `go.mod`, `python-component` the ad hoc components under
+  `.se/components/`. The gate of [Fill](#fill) therefore refuses a script or a `go.mod` written any
+  other way, naming the scaffold call, and lets an edit pass that keeps the shape; the check of
+  claimed files refuses one that lost it. Scratch work outside the repository is not claimed.
+- **The shared part.** A script's shape is thin because `scripts/se_script.py` carries what every
+  script shares: `se_script.parser` gives argparse's help with the logging line, and
+  `se_script.run(main)`, the entry, sets up logging (`SE_LOG_LEVEL`) and logs the start and exit.
+- **The guidance.** The code templates' tags (`code`, `python` or `go`) reach the guidance notes
+  `python-script-shape` and `go-module-shape` ([Tags and guidance](#tags-and-guidance)).
+
+SE's code templates, each with what it shapes:
+
+| Template | What it shapes |
+|---|---|
+| `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
+| `templates/python-component.md` | An ad hoc Python component: its component.toml with one command, and its __init__.py answering it. |
+| `templates/python-module.md` | A Python module other scripts import: its template marker, its docstring, and a slot for its code. |
+| `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
+
+The Go engine loads a code template and checks a claimed file by its lines as Python does, held to
+the same cases; it scaffolds nothing. The docstring of `scripts/code_templates.py` owns the
+format.
 
 ## The filled template is a type
 
@@ -214,6 +259,35 @@ The two targets the decision names are kern's, both released in kern 2.0.0:
 
 SE's wiring binds the GitHub door's port (`github.template-accept`); it places no files module,
 so its gate keeps checking claimed paths after the fact, as [Fill](#fill) says.
+
+### Which template a write is judged by
+
+A document's template is a fact the document records, its marker line (a file's `derived_from`),
+never a guess from one call. The gate (the docstring of `scripts/se_templates.py`, Which template)
+judges each GitHub write by it:
+
+- **An edit** of an issue or a comment is judged as the document it leaves behind: the issue or
+  comment as it stands, read from kern's snapshot where a fresh one stands, else by one REST read,
+  with the call's body, title and labels in place. A label change alone is judged too.
+- **Its template** is the one the new body's marker names, else the one the current document's
+  marker names (a template's own marker, such as `<!-- se:review -->`, names it too). An edit that
+  drops the marker line, or leaves the document without the labels its template needs, is refused.
+- **A document that names no template** is refused for an issue edit, naming the stamp below and
+  the fill, and judged against no other template. A comment that names none stays free, as no
+  template takes an unmarked comment.
+- **A new document** with no marker is the one case labels and the templates' order decide
+  (`templates.select`), as the filing commands choose its template.
+- **Not read.** Where the document cannot be read, the new body's marker alone decides, and an
+  edit without one passes and is logged. A pull request's edit is still selected from the call.
+
+### Stamp an issue filed without a marker
+
+An issue filed over raw REST, past the fill, names no template, so the gate refuses its edits.
+`work_tickets.py stamp <issue> --worktree <checkout>` gives it the marker of the template it
+derives from: `--template <name>`, else the one a new issue with its labels would take, the one
+the gate's refusal names. It writes only where the stamped body passes that template's check with
+the checks a filing runs, and it changes nothing but the marker line; without gh it prints the
+edit as a step for the GitHub tools.
 
 ## Template repositories
 
@@ -257,7 +331,8 @@ instructions, which the overlay supplies.
 A template owns the paths its `applies.paths` globs claim, in whichever repository it resolves
 from; `templates.py list --owned` is the one listing of them, each glob with its template, and
 SE's start publishes those globs for its hook, which refuses a write that leaves an owned file off
-its template before it runs ([Fill](#fill)). SE's own templates own one, a work issue's body file (`work-file`).
+its template before it runs ([Fill](#fill)). SE's own templates own a work issue's body file (`work-file`) and, through the code templates,
+its scripts, its ad hoc components and every `go.mod` ([Code templates](#code-templates)).
 
 The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
 refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the
@@ -358,6 +433,10 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/boot-report.md` | `boot-report`: SE's start report, a snippet | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
+| `templates/python-script.md` | `python-script`: a script, `scripts/*.py` with a `__main__` entry | code | SE |
+| `templates/python-module.md` | `python-module`: a module other scripts import, `scripts/*.py` | code | SE |
+| `templates/python-component.md` | `python-component`: an ad hoc component, what `se component add` writes | code | SE |
+| `templates/go-module.md` | `go-module`: a Go module, its `go.mod`, package and test | code | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |

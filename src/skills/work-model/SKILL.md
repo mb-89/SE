@@ -964,6 +964,9 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
     tools (`issue_write`, method `update`).
   - A held issue's text is fixed on the issue; `unhold --issue-body <file>`, the issue as
     `issue_read` answered it, checks it against its template and prints the label change as its plan.
+  - `stamp --issue-body <file>` checks an issue filed without a template marker the same way and
+    prints the edit that adds the marker as its plan
+    ([docs/templates.md](../../../docs/templates.md#stamp-an-issue-filed-without-a-marker)).
   - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`
     line.
 - **Every other command** fails, naming itself, the missing `gh` and this section.

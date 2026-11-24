@@ -75,7 +75,9 @@ def test_file_route_and_ready_with_its_claims_run_over_rest(worktree, rest_gh, m
     assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body)) == 0
     assert capsys.readouterr().out == f"Filed work issue https://{HOST}/{SLUG}/issues/6\n"
     assert rest_gh.label_names(SLUG, 6) == ["work", "ready", "repo:repo"]
-    assert rest_gh.issues[SLUG][6]["body"] == f"{work_tickets.FLEET_MARKER}\n## Goal\n\nA filed package.\n"
+    work = work_tickets.template_of("work")  # a body filed as given carries its template's marker
+    assert rest_gh.issues[SLUG][6]["body"] == (f"{work_tickets.FLEET_MARKER}\n{work.marker_line}\n"
+                                               "## Goal\n\nA filed package.\n")
 
     assert run(worktree, "route", "1", "--title", "fix/routed-20261106", "--routing-file", str(routing)) == 0
     routed = rest_gh.issues[SLUG][1]

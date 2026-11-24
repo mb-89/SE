@@ -7,7 +7,7 @@
 #
 # The tag scheme is se-v<version>, distinct from SE's own v<version> release tags (release.yml), so
 # the two never collide; kern's v<version> tags are its own repository's.
-version = "2.0.1"
+version = "2.1.0"
 download = "releases/download/se-v{version}"
 # The binary and its package, which make this a release the tool builds for SE's own binary rather
 # than the bare core's; the package is relative to this folder.

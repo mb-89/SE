@@ -338,6 +338,28 @@ On main, released as 14.0.0 at the next release.
 
 On main, released as 15.0.0 at the next release.
 
+### Scripts and Go modules carry their code template
+
+- **Change:** SE's code templates claim every project's `scripts/*.py` and `go.mod`
+  ([docs/templates.md "Code templates"](templates.md#code-templates)); a changed one without its
+  template's marker and shape is refused by SE's gate, stop-check, push and CI's check.
+  - A script opens `#!/usr/bin/env -S uv run python` and `# se:template se/python-script 1.0.0`,
+    imports `se_script`, builds its parser with `se_script.parser(...)` and ends
+    `raise SystemExit(se_script.run(main))`.
+  - A module other scripts import opens `# se:template se/python-module 1.0.0` and its docstring;
+    a `go.mod` opens `// se:template se/go-module 1.0.0`.
+- **Steps:** bring each script and `go.mod` onto its template before it next changes.
+  - Add the marker line; for a script also the uv first line, `import se_script` (on the script's
+    path), the parser from `se_script.parser` and the entry through `se_script.run`.
+  - Write a new one with `uv run python <se>/scripts/templates.py scaffold <template> --path
+    <file> --says "<what it does>"`.
+- **Check:** `uv run python <se>/scripts/se_templates.py check-files $(git ls-files 'scripts/*.py' go.mod '**/go.mod')`
+  passes.
+
+## SE 16
+
+On main, released as 16.0.0 at the next release.
+
 ### `start` and `claim` without gh read the landing queue
 
 - **Change:** no worker starts while more than `[workers] queue_limit` (default 10) delivered pull

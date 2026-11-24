@@ -19,6 +19,7 @@ import build_docs
 import deck
 import fake_git
 import git_door
+import code_templates
 import templates
 import template_cases
 import outside_text
@@ -130,7 +131,10 @@ NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "stan
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
 #: The templates that claim files (`file.write`): the work issue's body file.
 FILES = ("work-file",)
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES)
+#: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
+#: scaffold writes, each claiming the scripts or modules it shapes.
+CODE_TEMPLATES = ("python-script", "python-module", "python-component", "go-module")
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES, *CODE_TEMPLATES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
@@ -297,7 +301,15 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
         "pugh": (test_deck.PUGH, None),
+        **{name: (code_example(name), None) for name in CODE_TEMPLATES},
     }
+
+
+def code_example(name: str) -> str:
+    """The file a code template claims, as its scaffold writes it."""
+    made = code_templates.scaffold(templates.own(name), Path("x") / "thing", "Do it.", "thing")
+    return next(text for path, text in sorted(made.items())
+                if len(made) == 1 or path.name in ("go.mod", "__init__.py"))
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -1016,9 +1028,11 @@ def test_list_names_every_template_with_its_actions(capsys):
 
 def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tmp_path):
     """Requirement 1: the engine's one listing of the paths the templates own, SE's work issue body
-    file's among them, and another folder's own."""
+    file's and its code templates' scripts and modules among them, and another folder's own."""
     assert templates.main(["list", "--owned", "--tree"]) == 0
-    assert capsys.readouterr().out == ".se/issues/*.md: work-file\n"
+    assert capsys.readouterr().out == ("**/go.mod: go-module\n.se/components/*/__init__.py: python-component\n"
+                                       ".se/issues/*.md: work-file\ngo.mod: go-module\n"
+                                       "scripts/*.py: python-module\nscripts/*.py: python-script\n")
     write_template(tmp_path, "steps", MINIMAL.format(
         name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
     assert templates.main(["list", "--owned", "--templates", str(tmp_path / "templates")]) == 0
@@ -1747,6 +1761,14 @@ def routed_issue(catalog, monkeypatch) -> list[Case]:
         OUTSIDE, "Proposal: make it work", ROUTING), "feat/make-it-work-20261116")]
 
 
+def stamped_issue(catalog, monkeypatch) -> list[Case]:
+    """A work issue filed without its marker, as `stamp` writes it back with the marker."""
+    work = catalog["work"]
+    bare = templates.render(work, dict(work.example["fields"])).replace(work.marker_line + "\n", "")
+    return [Case("issue.edit", "work", templates.stamped(work, bare), work.example["title"],
+                 labels=("work",))]
+
+
 def comment(text: str):
     return lambda catalog, monkeypatch: [Case("comment.create", FREE, text)]
 
@@ -1887,6 +1909,7 @@ def without_beats(plan):
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
     "work_tickets:work_issue_filing": ("file", work_issue),
+    "work_tickets:stamp": ("stamp", stamped_issue),
     "work_tickets:filing_plan": ("file, backlog file and route", filing),
     "work_tickets:filed_once.create": ("file and backlog file",
                                        lambda c, m: work_issue(c, m) + backlog_issue(c, m)),
@@ -2010,6 +2033,39 @@ def test_filled_keeps_a_body_with_enforce_off_and_renders_it_otherwise(catalog):
     assert "## Odd section\n\nKept.\n" in again
     fields = dict(work.example["fields"])
     assert templates.filled(work, fields=fields, enforce="off") == templates.render(work, fields)
+
+
+def test_every_whole_document_a_fill_makes_carries_its_templates_marker(catalog):
+    """A filled issue or comment names the template it derives from (docs/templates.md "The filled
+    template is a type"), whichever of SE's templates filled it."""
+    filled = [name for name, template in catalog.items()
+              if template.example and set(template.actions) & {"issue.create", "comment.create"}
+              and not (template.is_adapter or template.message or template.writes_file)]
+    assert {"work", "ticket", "routed", "handover"} <= set(filled)
+    for name in filled:
+        template = catalog[name]
+        rendered, _ = templates.fill(template, dict(template.example["fields"]), "raw input",
+                                     title=template.example.get("title"))
+        assert template.marker_line in rendered.splitlines(), name
+
+
+def test_stamped_writes_the_marker_where_render_writes_it_and_keeps_every_other_byte(catalog):
+    work, routed, review_template = catalog["work"], catalog["routed"], catalog["review"]
+    fleet = templates.FLEET_MARKER
+    body = f"{fleet}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n"
+    assert templates.stamped(work, body) == (
+        f"{fleet}\n{work.marker_line}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n")
+    assert templates.stamped(work, "## Goal\n\nG.\n") == f"{fleet}\n{work.marker_line}\n\n## Goal\n\nG.\n"
+    again = templates.stamped(work, body)
+    assert templates.stamped(work, again) == again  # stamped once
+    routing = "Please.\n\n<!-- se:handled -->\n## Routing\n\nRouted from: x\n"
+    assert templates.stamped(routed, routing) == (
+        f"Please.\n\n<!-- se:handled -->\n{routed.marker_line}\n## Routing\n\nRouted from: x\n")
+    assert work_tickets.ROUTED_PATTERN.search(templates.stamped(routed, routing))
+    with pytest.raises(templates.TemplateError, match="no `<!-- se:handled -->` line"):
+        templates.stamped(routed, "Please.\n")
+    assert templates.stamped(review_template, "A review.\n") == "A review.\n"  # an adapter's own text
+    assert templates.parse(work, again).fields == templates.parse(work, body).fields
 
 
 def test_private_findings_name_the_field_and_the_list_never_the_term(catalog, tmp_path):

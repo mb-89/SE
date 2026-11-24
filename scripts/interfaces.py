@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """Interfaces: the texts SE's sessions pass to each other, written and read through the schema
 generated from their interface templates (docs/templates.md "Nesting" and "The schema").
 
