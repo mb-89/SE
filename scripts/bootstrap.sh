@@ -154,13 +154,13 @@ kern_run() { # <bin> <session start file>
 # SE_KERN_WAIT seconds (45 by default), within the host's hook budget; one that runs longer goes on,
 # and this start stops naming kern.
 kern_background() { # <mode> <bin> <args>...
-  local detach=() pid waited=0
+  local detach=() pid tenths=0
   command -v setsid >/dev/null 2>&1 && detach=(setsid)
   ${detach[@]+"${detach[@]}"} bash "$se_root/scripts/bootstrap.sh" "$@" </dev/null >/dev/null 2>&1 &
   pid=$!
-  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "${SE_KERN_WAIT:-45}" ]; do
-    sleep 1
-    waited=$((waited + 1))
+  while kill -0 "$pid" 2>/dev/null && [ "$tenths" -lt "$((${SE_KERN_WAIT:-45} * 10))" ]; do
+    sleep 0.1
+    tenths=$((tenths + 1))
   done
 }
 # Whether the project is inside a git checkout: it or a folder above it holds a .git, the folder or
