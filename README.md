@@ -821,9 +821,9 @@ below, a positive number of hours, default 12; other keys are refused.
   <file>` judges the `list_issues` answer that `queue`'s plan reads.
   - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
     delete its branch, take off `in-progress` and remove the beat line.
-  - A claim no worker took is undone with `work_tickets.py unclaim <issue>...`: the beat line
-    removed, `ready` set where `in-progress` is, and the `Started:` comment answered with one
-    line. It refuses an issue whose branch holds commits beyond main, a worker's.
+  - A claim no worker took is undone with `work_tickets.py unclaim`, for one or more issues: the
+    beat line removed, `ready` set where `in-progress` is, and the `Started:` comment answered
+    with one line. It refuses an issue whose branch holds commits beyond main, a worker's.
   - Its branch stays as an unused claim, behind main with no commit of its own, which `ready`
     lists and `claim` and `start` take ([Worktrees](src/skills/work-model/SKILL.md#worktrees)).
 
