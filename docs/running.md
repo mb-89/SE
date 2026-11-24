@@ -51,7 +51,7 @@ A person never waits on a silent command. The budgets are declared once, in
 - First line within 1 s: a run that has shown nothing after half a second prints
   `<command>: working, nothing to show yet`.
 - Interactive commands finish within 5 s: `work_tickets.py status`, `queue`, `intake` and
-  `metrics`; `se_start.py status`, the greeting, within 1 s. Each run notes its budget in its
+  `metrics`; `se_start.py status`, the greeting, within 10 s. Each run notes its budget in its
   [metrics](#metrics) line, so `work_tickets.py metrics` flags an overrun.
 - Long commands announce each phase as it starts, `Phase: <what>`: `integrate` (the pull request
   read, the guard, sync, the merge, the suite, the checks, the push, the landing plan,

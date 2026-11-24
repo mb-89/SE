@@ -85,8 +85,6 @@ func fieldReport(t *testing.T, result string) string {
 
 **Commit groupings:** None
 
-**Suite time:** None
-
 ## Not delivered
 
 None
