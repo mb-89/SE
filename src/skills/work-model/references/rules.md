@@ -891,6 +891,14 @@ Anything controversial goes to a person, and everything else flows without one.
   - se: the [escalation ladder](../SKILL.md#escalation-ladder); decisions reach the person as
     decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues
     and never in a question dialog.
+  - se: a release is no person's decision, the person's decision of 24 Nov 2026 that ended the
+    earlier rule of a yes per release. It [follows the work](../SKILL.md#roles-and-flow), SE's
+    call to the integrator.
+    - The person: "If by working on them you release something, then you release it. I don't
+      want the work stopped for something like this."
+    - Each repository's `.claude/settings.json` allows the command
+      (`<se>/scripts/claude_settings.py`); `tests/test_agent_definitions.py` holds the agents and
+      skills to it.
   - Go line (frozen): the retro counted `se-person` answers.
 - **Related:** wrk-004, dec-012
 

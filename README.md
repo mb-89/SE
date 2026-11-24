@@ -125,6 +125,11 @@ first message with it. A session whose permission mode asks before commands, and
 watches, needs SE's scripts and files allowed in the repository's `.claude/settings.json`:
 `"permissions": {"allow": ["Bash(uv run python:*)", "Read(~/.claude/skills/se/**)"]}`.
 
+A release runs in such a session too, on SE's message alone: run
+`uv run python <se>/scripts/claude_settings.py allow --repo <repo>` once per repository and commit
+`.claude/settings.json`. [scripts/claude_settings.py](scripts/claude_settings.py) owns the rules,
+why no setup step runs it, and the rules SE starts each integrator with.
+
 ### Cloud sessions
 
 What a cloud session meets, whatever state its container comes up in.
@@ -752,9 +757,10 @@ highest kind recorded since the last release, whose commit the tag of the curren
 Two landings of kind patch, then one release, raise the version by one patch. With nothing
 integrated since the last release, the release releases nothing and says so.
 
-An integration without the trailer is refused, naming the merge and the remedy; the release never
-guesses. One already on the integration branch cannot be reworded there: the person sets
-`version` by hand in a pull request, which the next release tags as it is.
+A landed integration without the trailer has no default kind: the release refuses it, naming
+it, until `--kind <commit>=<kind> <reason>` states its kind, which the release commit records. A
+kind that cannot be told otherwise (an unknown one, or two) is set by hand: the person sets
+`version` in a pull request, which the next release tags as it is.
 
 Below 1.0.0 a major bumps the minor part (0.3.1 to 0.4.0), so no kind reaches 1.0.0: the person
 sets `version = "1.0.0"` by hand, as the statement that the interface is stable, and the release
@@ -2163,7 +2169,7 @@ settings checks and the generated docs.
 | `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py refs request` | `work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO] [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL] [--conclusion CONCLUSION] [--log-file LOG_FILE] issue` | for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its output and label the issue escalated; prints the line for SE. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py rehearse` | `work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]` | rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay |
-| `work_tickets.py release` | `work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]` | release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README "Project settings"); with nothing integrated since, it releases nothing |
+| `work_tickets.py release` | `work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG] [--kind COMMIT=KIND REASON]` | release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README "Project settings"); with nothing integrated since, it releases nothing |
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
