@@ -357,6 +357,7 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/boot-report.md` | `boot-report`: SE's start report, a snippet | interface | SE |
+| `templates/generated-marker.md` | `generated-marker`: the words of a generated file's marker | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |

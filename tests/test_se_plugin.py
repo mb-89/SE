@@ -942,12 +942,14 @@ def test_ses_own_notes_are_skills():
 
 
 def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tmp_path, capsys, monkeypatch):
-    """A copy of the generator alone (se_plugin.py, agent_lint.py and generated.py, whose marker it
-    writes) checks its layout as before."""
+    """A copy of the generator alone (se_plugin.py, agent_lint.py, generated.py, whose marker it
+    writes, and interfaces.py with the schema that marker is written through) checks its layout as
+    before."""
     root = drafts_copy(tmp_path)
     (root / "scripts").mkdir()
-    for name in ("se_plugin.py", "agent_lint.py", "generated.py"):
+    for name in ("se_plugin.py", "agent_lint.py", "generated.py", "interfaces.py"):
         shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
+    shutil.copytree(ROOT / "scripts" / "interfaces", root / "scripts" / "interfaces")
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     # The copy runs as itself, in this process: its own module, its own agent_lint.py, and no
     # se_guidance.py loaded, so a check that reached for it would fail to load it.

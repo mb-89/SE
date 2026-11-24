@@ -2543,6 +2543,7 @@ both.
 | `templates/boot-report.md` | SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command. |
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
+| `templates/generated-marker.md` | A generated file's marker words. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
@@ -2584,13 +2585,9 @@ where it holds them, else the working tree (`--tree` always).
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
-The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`) shape the
-texts SE shows and its sessions pass to each other. `templates.py interfaces` writes each one's
-schema beside the code that uses it, `scripts/interfaces/<name>.json`, and `--check` names a file
-that differs from its template.
-
-`work_tickets.py deliver` and `escalate` write their messages through `scripts/interfaces.py`, and
-`se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
+The interface templates shape the texts SE writes. `templates.py interfaces` writes each one's
+schema beside the code, `scripts/interfaces/<name>.json`, which writes through it
+(`scripts/interfaces.py`); `--check` names a file that differs from its template.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.

@@ -21,6 +21,9 @@ field-report:
   - platform-code-legs
   - test-paths-on-windows
   - tests-spawn-no-processes
+generated-marker:
+  - discover-cheap-load-late
+  - guidance-comes-first
 handover:
   - discover-cheap-load-late
   - guidance-comes-first
