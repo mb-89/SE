@@ -19,16 +19,14 @@
      Add one row per work-issue requirement and acceptance item; numbered items under "Changes
      after filing" are requirements, by their number, as are those under "Routing". Evidence
      the host cannot carry is replaced by the command that reproduces it: where images cannot
-     be attached, each screenshot's row names the command that takes it again. -->
+     be attached, each screenshot's row names the command that takes it again. A new test over
+     2 s in the focused run gets its own row, with its reason. -->
 
 | Work issue item | Result | Commits | Evidence |
 |---|---|---|---|
 
 **Commit groupings:** None <!-- or, per grouping the worker's commit rule allows: the commits, the
 requirements they share, and why (one function changed together, or a test-only commit) -->
-
-**Suite time:** None <!-- where the change adds tests, the [test rules](../skills/work-model/SKILL.md#tests):
-     `work_tickets.py suite` before and after, and each new test over 2 s with its reason -->
 
 ## Not delivered
 

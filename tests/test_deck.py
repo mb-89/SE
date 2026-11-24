@@ -31,7 +31,7 @@ import deck  # noqa: E402
 import deck_look  # noqa: E402
 from fake_processes import Answer  # noqa: E402
 
-NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nToday %s is chosen by hand.\n"
+NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nToday %s is set in a settings file.\n"
         "\n## The problem\n\nIt is chosen by hand.\n\n## What others do\n\nOthers pick it by a rule.\n")
 
 

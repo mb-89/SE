@@ -41,7 +41,7 @@ example:
 
 ## Current situation
 
-<!-- situation: What exists today and who uses it, in plain technical English, opening with the situation itself, never a stock phrase; a later sentence names the class the case belongs to. -->
+<!-- situation: What exists today and who uses it, in plain technical English, with no stock first sentence. -->
 
 ## The problem
 

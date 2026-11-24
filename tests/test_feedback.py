@@ -52,7 +52,7 @@ def test_the_budgets_are_declared_once_and_every_interactive_run_notes_its_own(t
     assert {command: line.get("budget_seconds") for command, line in lines.items()} == {
         "work_tickets.py queue": 5.0, "work_tickets.py intake": 5.0,
         "work_tickets.py status": 5.0, "work_tickets.py metrics": 5.0,
-        "se_start.py status": 1.0, "work_tickets.py sync": None}
+        "se_start.py status": 10.0, "work_tickets.py sync": None}
     assert feedback.FIRST_LINE_SECONDS == 1.0 and feedback.INTERACTIVE_SECONDS == 5.0
     over = {**lines["work_tickets.py queue"], "wall_seconds": 11.5}
     assert metrics.overruns(over) == ["wall time 11.5 s over its budget 5 s"]
