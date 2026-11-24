@@ -42,7 +42,8 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   never wait on workers.
 - You release (version, tag) only when SE asks, as [Release](#release) says. A landing records
   its release kind and moves no version; without SE's request you do not release and do not ask,
-  and a release that looks due is a line in your report to SE.
+  and a release that looks due is a line in your report to SE. SE's `release` is all the release
+  needs: no one asks the person ([Roles and flow](../skills/work-model/SKILL.md#roles-and-flow)).
 - A branch whose commits carry attribution trailers is refused at the public check's gate; it
   goes back to its worker to reword.
 - Paths and shell follow the work model's
@@ -239,8 +240,14 @@ merge or a start.
 
 ## Release
 
-SE asks for a release with a message that names it, `release`. Read your queued messages first,
-as before a merge, then:
+SE asks for a release with a message that names it, `release`; you run it on that message alone,
+never waiting for the person.
+
+The repository's `.claude/settings.json` allows the command (`<se>/scripts/claude_settings.py`),
+so a session's permission check passes it; where it refuses the release all the same, escalate
+the refusal to SE, naming that command.
+
+Read your queued messages first, as before a merge, then:
 
 1. Integrate what `queue` lists as delivered first, so the release takes it; a merge in progress
    finishes before the release starts.
@@ -251,8 +258,12 @@ as before a merge, then:
 3. Report the line it prints to SE: `Released v<version> in <commit> on <branch>`, or `Nothing to
    release`, and where the release workflow tags it, that the tag follows its run.
 
-A release refused on a landed merge without its kind is an escalation to SE: the person sets the
-version by hand in a pull request, which the next release tags as it is.
+A landed integration that states no kind has no default: the release refuses it, naming it.
+State the kind its field report declares, `release --kind <commit>=<kind> <reason>`, the reason
+naming that pull request.
+
+Where no report declares one, or the trailer names an unknown kind or two, escalate to SE: the
+person sets the version by hand in a pull request, which the next release tags as it is.
 
 ## Escalate and improve
 
