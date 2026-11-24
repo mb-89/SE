@@ -599,13 +599,15 @@ def report_row(state: State) -> dict[str, str]:
     return {"name": item.name, "loaded": _v(item.version) if item.version else "none", "newest": newest}
 
 
-def update_case(states: list[State]) -> str:
+def update_case(states: list[State], read: list[State] = ()) -> str:
     """`due` where a newer release than one loaded is known, else `unknown` where a newest version
-    is not read, else `current`; from versions alone."""
+    is not read, else `current`; from versions alone. `read` (SE's required rows) counts only for
+    `unknown`: /se:update moves SE and the project, never an installed SE's own lock."""
     if any(s.latest and s.item.kind != "local" and (s.item.version is None or s.latest > s.item.version)
            for s in states if not s.error):
         return "due"
-    if any(s.error or s.unchecked or (s.latest is None and s.item.url) for s in states if s.item.kind != "local"):
+    if any(s.error or s.unchecked or (s.latest is None and s.item.url) for s in [*states, *read]
+           if s.item.kind != "local"):
         return "unknown"
     return "current"
 
@@ -631,7 +633,7 @@ def report_values(report: Report) -> dict[str, object]:
     return {"version": _v(local.se_version), "skills": str(c.skills), "rules": str(c.rules),
             "subagents": str(c.subagents), "docs": local.docs_url or ".",
             **{key: page_link(local.docs_url, page) for key, page in PAGE_OF.items()},
-            "components": table, "update": update_case(states)}
+            "components": table, "update": update_case(states, report.required_states if report.required else [])}
 
 
 def greeting(report: Report, se_root: Path) -> list[str]:

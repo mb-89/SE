@@ -639,11 +639,21 @@ def test_started_in_a_folder_that_is_no_repository_the_report_lists_se_kern_obs_
     assert table(report) == ["| SE | 1.2.0 | unknown |", "| kern | 0.2.0 | unknown |",
                              "| obs | 10.3.2 | unknown |", "| obs-html | 0.5.2 | unknown |"]
     assert not any(line.startswith(se_start.STOP) for line in report)
+    assert report[-1] == "Newest versions not read yet; the next start shows them.", "the required rows count too"
     assert fakes["placed"] == [setup["se"]], "SE's own tree, placed from SE's root"
     assert fakes["asked"] == [(Path("/bin/se-kern-0.2.0"), setup["se"])], "the core runs for SE's root"
     probe, run = fakes["loaders"]
     assert probe[:5] == ["uv", "run", "--quiet", "--project", str(setup["se"] / ".se" / "modules" / "obs")]
     assert run == ["uv", "run", "obs-html", "--help"], "obs-html runs, not only installs"
+
+
+def test_the_update_line_counts_the_required_rows_whose_newest_is_not_read(setup, monkeypatch, capsys):
+    """SE's own row is read and current, the required rows' newest not read yet: the last line says
+    so, not that everything is current."""
+    se_start.Cache(setup["clock"](), None, {SE_URL: {"versions": [[1, 2, 0]]}}).write(setup["cache"])
+    report, _, _ = required_start(setup, monkeypatch, capsys)
+    assert table(report)[0] == "| SE | 1.2.0 | 1.2.0 |" and "| obs | 10.3.2 | unknown |" in table(report)
+    assert report[-1] == "Newest versions not read yet; the next start shows them."
 
 
 def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(setup, monkeypatch, capsys):

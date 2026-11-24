@@ -45,8 +45,11 @@ To update: /se:update
 
 The last line is one of three. `To update: /se:update` where a newer release than one loaded is
 known; `Everything is current.` where none is; `Newest versions not read yet; the next start shows
-them.` where a newest version is unknown. No path, no command line and no per-component line
-appears in the report.
+them.` where a newest version is unknown, a required row's too.
+
+A newer release of a required component makes the update due only where the project locks it, as
+the update moves SE and the project, never an installed SE's own lock. No path, no command line and
+no per-component line appears in the report.
 
 - **What the session alone acts on** comes below the report in the start's hand-over, under `For
   the session, not part of the report:`: the bootstrap's notes, kern's state (no pid), a stale
