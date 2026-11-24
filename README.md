@@ -144,9 +144,11 @@ What a cloud session meets, whatever state its container comes up in.
   `se.toml` after its start, SessionStart ran before the clone existed. The first hook whose working
   directory is inside the clone starts its core in the background, as SessionStart would have, and
   the hooks there then post to it ([scripts/se_hook.sh](scripts/se_hook.sh)).
-  - A session whose folder is inside no git checkout, as one started without sources is, starts no
-    core and says nothing of one; a checkout with an se.toml cloned into it then gets its core from
-    its first hook there.
+  - A session whose folder is inside no git checkout, as one started without sources is, starts
+    the core for SE's root, as kern is one of SE's
+    [required components](docs/boot.md#required-components); its hooks find no binary named for that
+    folder and pass, and a checkout with an se.toml cloned into it gets its own core from its first
+    hook there.
 - **`setup.sh` in a spawned session.** Claude Code's auto-mode permission check judges `bash
   scripts/setup.sh` as one command, before any of its steps runs.
   - In a session another session started without sources, which then cloned SE by hand, it refused
@@ -283,21 +285,25 @@ no Go components. The plugin's hooks start the binary and post every session eve
   - Before the core starts, the start syncs the installed SE's kern where that clone is missing
     or not at the commit `se.lock` locks, both read from the files alone, so an SE at its pin
     starts no process for it.
-  - Where that fails, the session goes on without it and the greeting names the cause. A project
+  - Where that fails, the start goes on to the binary and the greeting names the cause. A project
     that is SE's own checkout syncs it in the modules step.
 - **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: for a project inside a
   git checkout, where `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the
   project, which returns at once, and hands the core the session's start, which takes the session's
   lease. It names the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
-  - For a project inside no git checkout it runs none.
+  - For a project inside no git checkout it runs one for SE's root, named in SE's own
+    `.se/.runtime/kern.path` ([required components](docs/boot.md#required-components)).
   - `~/.se/bin/<name>` links to the version in place (a copy where the file system makes no link),
     and Claude Code's env file puts `~/.se/bin` on the session's PATH, so `se status` works there.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
   - Where no release matches, the binary is built from its folder (SE's `components/`, on kern's
-    clone at its pin; the bare kern in that clone) with `go` in the background, and the greeting
-    says so; without `go` it failed, and the greeting names both causes.
+    clone at its pin; the bare kern in that clone) with `go` in the background; without `go` it
+    failed, and the start stops naming both causes.
+  - The start waits for that background up to `SE_KERN_WAIT` seconds (45 by default); one that runs
+    longer goes on, and the start stops naming kern and the remedy, a new start once it is in place
+    ([required components](docs/boot.md#required-components)).
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
 - **RUNME** places the binary once, with `bootstrap.sh --binary` (RUNME.conf's `get se` line): it
@@ -596,7 +602,7 @@ go = "components/go.mod"                     # in place of ref: the version that
 | `ref` | the pin, a full commit SHA. Any commit on the component's `main` can be pinned, not only releases; `update` moves it. |
 | `version` | in place of `ref`, a semantic version range of the component's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a component releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). An entry pins one of `ref`, `version` and `go`. |
 | `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version no owner tags, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
-| `optional` | `true` marks a component the host works without: `sync` names one no owner offers in one line and goes on. An entry without it is required, and a required one missing fails, naming its path from the root, the remotes read and the remedy. |
+| `optional` | `true` marks a component the host works without: `sync` names one no owner offers in one line and goes on. An entry without it is required, and a required one missing fails, naming its path from the root, the remotes read and the remedy. SE's own `se.toml` declares kern, obs and obs-html so, which every start loads from SE's root ([required components](docs/boot.md#required-components)). |
 | `path` | optional relative directory inside the component; without it the whole component is used. |
 | `url` | refused: an entry names no address, since a component is found by its name. A machine that needs another place says so in the machine-local file below. |
 | `se.lock` | next to `se.toml`, it records, as `[components.<name>]`, the release each `version` range and `go` pin of the tree chose, with its version and commit; `sync` and `update` write it and the repository commits it. |
