@@ -3158,9 +3158,10 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
     report's Release kind on a first integration, and on a re-integration (an earlier merge of
     `branch` is on the integration branch) its Re-integration kind, patch without a report."""
     if integrated_before(root, branch):
-        return f"{RELEASE_TRAILER}: {reintegration_kind(report_body)}"
-    return (f"{RELEASE_TRAILER}: "
-            f"{declared_release_kind(branch, report_body, issue_body, project_version(root))}")
+        kind = reintegration_kind(report_body)
+    else:
+        kind = declared_release_kind(branch, report_body, issue_body, project_version(root))
+    return interface_message("release-trailer", kind=kind)
 
 
 def branch_head(root: Path, branch: str) -> str:
@@ -4513,9 +4514,7 @@ def forget_claim(root: Path, number: int) -> None:
     claim_record_path(root, number).unlink(missing_ok=True)
 
 
-UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment
-UNCLAIMED_COMMENT = (UNCLAIMED_MARK + " {started} started no worker; `ready`, `claim` and `start` "
-                     "take its branch `{branch}` again.\n")
+UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment (templates/claim-undone.md)
 
 
 def unclaim(root: Path, number: int, repo: str) -> str:
@@ -4548,7 +4547,7 @@ def unclaim(root: Path, number: int, repo: str) -> str:
                           for comment in comments[starts[-1] + 1:]):
         started = str(comments[starts[-1]].get("url") or "") or "its Started comment"
         run_gh_with_body(root, ["issue", "comment", str(number), *where],
-                         UNCLAIMED_COMMENT.format(started=started, branch=branch))
+                         interface_message("claim-undone", started=started, branch=branch) + "\n")
         done.append("Started comment answered")
     return f"Unclaimed #{number}: {', '.join(done) if done else 'nothing left to undo'}"
 
@@ -4877,7 +4876,7 @@ def start(
 def post_started(root: Path, number: int, repo: str, branch: str) -> None:
     """Post the Started comment on work issue #`number` through gh, as `start_plan`'s last step."""
     run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)],
-                     STARTED_COMMENT.format(branch=branch))
+                     started_comment(branch))
 
 
 def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
@@ -4943,7 +4942,9 @@ def branch_worktree(root: Path, branch: str) -> Path | None:
     return None
 
 
-STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
+def started_comment(branch: str) -> str:
+    """The Started comment of a worker on `branch` (templates/started-comment.md)."""
+    return interface_message("started-comment", branch=branch) + "\n"
 
 
 def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
@@ -4961,7 +4962,7 @@ def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: b
             "assignees": [agent]}),) if agent else ()),
         Step("comment_issue", "add_issue_comment", {
             **owner_repo(repo), "issue_number": number,
-            "body": STARTED_COMMENT.format(branch=branch)},
+            "body": started_comment(branch)},
             note="followed by the host's footer where it requires one on every comment"),
     ), f"#{number} is started: in-progress, with its Started comment")
 
@@ -9892,8 +9893,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     if left:
-        print(f"escalated #{work_number}: stays open for what its partial delivery left; re-scope "
-              f"the issue or take it to the owner: {'; '.join(left)}")
+        print(interface_message("escalation", issue=str(work_number),
+                                question="stays open for what its partial delivery left; re-scope the "
+                                         f"issue or take it to the owner: {'; '.join(left)}"))
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -10406,8 +10408,10 @@ def refs_request_read_back(root: Path, number: int, triples: list[tuple[str, str
             "(git ls-remote); nothing was escalated. Write the triples from origin's refs, then "
             "run refs request again")
     after = "after these steps, " if door is None else ""
-    return (f"{after}escalated #{number}: apply the ref change ({len(triples)} ref(s), dry run "
-            f"passed)? On yes: work_tickets.py refs apply {number}")
+    return after + interface_message(
+        "escalation", issue=str(number),
+        question=f"apply the ref change ({len(triples)} ref(s), dry run passed)? On yes: "
+                 f"work_tickets.py refs apply {number}")
 
 
 def posted_request(comments: list[dict[str, object]], number: int

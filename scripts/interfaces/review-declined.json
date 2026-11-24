@@ -1,0 +1,25 @@
+{
+  "template": "se/review-declined",
+  "version": "1.0.0",
+  "says": "A declined review's comment on the work issue: the pull request the review declined and its link.",
+  "message": "Declined by the review of pull request #{number} ({url}): the change is fundamentally wrong and does not land. The review comment there holds the findings; SE re-scopes this issue or takes it to the owner.",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string",
+        "description": "The number of the declined pull request, digits alone."
+      },
+      "url": {
+        "type": "string",
+        "description": "The declined pull request's link."
+      }
+    },
+    "required": [
+      "number",
+      "url"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -22,6 +22,7 @@ both.
 |---|---|
 | `templates/decision.md` | A decision note: the situation, the problem and what others do, then the options' pugh fence. |
 | `templates/boot-report.md` | SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command. |
+| `templates/claim-undone.md` | The answer to a Started comment whose claim was undone: that comment and the branch the next start takes. |
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/generated-marker.md` | A generated file's marker words. |
@@ -31,6 +32,7 @@ both.
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
+| `templates/limit-restart.md` | A restart after a usage limit: the worker session the integrator resumed. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
 | `templates/overhaul-judgment.md` | An overhaul's judged block: a verdict on every rule, what it looked at, the findings and what went well, as JSON under its marker. |
@@ -41,6 +43,7 @@ both.
 | `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/release-trailer.md` | An integration merge's release kind, its one trailer. |
 | `templates/requirement.md` | One requirement: one checkable statement, how it is checked and where it comes from. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
 | `templates/retro-doc.md` | A retro report's link to its committed retro doc: the commit and the doc's path in the checkout. |
@@ -48,10 +51,14 @@ both.
 | `templates/retro-part.md` | The label a part of a split retro report ends in: which part of how many, of which retro's report. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
+| `templates/review-declined.md` | A declined review's comment on the work issue: the pull request the review declined and its link. |
+| `templates/review-done.md` | A cold review's end: the reviewed pull request, the verdict and the review comment's link. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
 | `templates/rules-page.md` | The page `docs/rules.md`. |
+| `templates/run-closed.md` | A retro's or an overhaul's hand-back: the run's kind and issue number and its report's link. |
 | `templates/skills-page.md` | The page `docs/skills.md`. |
 | `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
+| `templates/started-comment.md` | A work issue's Started comment: the branch its worker works on. |
 | `templates/sub-agents-page.md` | The page `docs/sub-agents.md`. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
@@ -80,20 +87,25 @@ where it holds them, else the working tree (`--tree` always).
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
-The interface templates (`boot-report`, `delivery-notice`, `escalation`, `finding-ref`,
-`generated-marker`, `handover`, `retro-doc`, `retro-due`, `retro-part`, `rules-page`,
-`skills-page`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
-other.
+The interface templates (`kind: interface` in their front matter) shape the texts SE shows,
+writes and its sessions pass to each other.
+
+No code sends `review-done` and `run-closed`, the reviewer's and the retro's end messages: their
+agents name them.
 
 `templates.py interfaces` writes each one's schema beside the code that uses it,
 `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
 
 Through `scripts/interfaces.py`:
 
-- `work_tickets.py deliver` and `escalate` write their messages;
+- `work_tickets.py deliver` and `escalate` write their messages, `start` its Started comment,
+  `unclaim` its answer to it and `release-trailer` every merge's Release-kind trailer;
 - `se_start.py` its start report, a snippet of several lines with a table and a line of three
   cases;
 - `se_plugin.py build` the three layout pages, and `generated.py` every generated file's marker;
+- `review.py file` the decline comment on a declined pull request's work issue;
+- `work_tickets.py fleet-check` the restart comment its remedy names for a session stopped on a
+  usage limit (`limit_restart.py`);
 - `retro.py due` its two countdown lines, `retro.py file` its report's link to the retro doc and the
   label of each part of a split report, and both reports the finding reference work issues name.
 

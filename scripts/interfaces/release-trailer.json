@@ -1,0 +1,26 @@
+{
+  "template": "se/release-trailer",
+  "version": "1.0.0",
+  "says": "An integration merge's release kind, its one trailer.",
+  "message": "Release-kind: {kind}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "patch",
+          "minor",
+          "major",
+          "Not in input"
+        ],
+        "description": "patch, minor or major: the release the merge asks for."
+      }
+    },
+    "required": [
+      "kind"
+    ],
+    "additionalProperties": false
+  }
+}

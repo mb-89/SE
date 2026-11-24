@@ -20,16 +20,22 @@ fleet_findings` is the thin wiring that wraps them.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 #: The finding's kind, listed after the fleet check's own kinds.
 KIND = "stopped on a limit"
-#: The comment the integrator writes on the issue when it resumes the session; one per issue.
+#: The start of the comment the integrator writes on the issue when it resumes the session, one per
+#: issue (templates/limit-restart.md, `restarted_comment`).
 RESTARTED = "Restarted after a usage limit:"
+#: The interface template of that comment.
+TEMPLATE = "limit-restart"
 SETTING = "[fleet] restart_after_limit"
 #: What a result's text says when the session stopped on a usage limit.
 LIMIT_TEXT = re.compile(r"\b(?:usage|rate|session|weekly)\s+limit\b|\blimit\s+(?:reached|hit)\b|"
@@ -144,6 +150,19 @@ def text_of(session: Mapping[str, object]) -> str:
                       ensure_ascii=False)
 
 
+def restarted_comment(session: str) -> str:
+    """The comment that says session `session` was resumed, written through its interface template
+    (scripts/interfaces.py)."""
+    interfaces = sys.modules.get("interfaces")
+    if interfaces is None:
+        spec = importlib.util.spec_from_file_location(
+            "interfaces", Path(__file__).resolve().with_name("interfaces.py"))
+        interfaces = importlib.util.module_from_spec(spec)
+        sys.modules["interfaces"] = interfaces
+        spec.loader.exec_module(interfaces)
+    return interfaces.write(TEMPLATE, {"session": session})
+
+
 def restarted(comments: list[object] | None) -> bool:
     """Whether an issue's comments hold the integrator's RESTARTED comment."""
     return any(isinstance(comment, dict) and
@@ -180,7 +199,7 @@ def findings(sessions: list[object], in_progress: Mapping[int, str], delivered: 
         what = (f"worker session {stop.session} stopped on a usage limit{at} without delivering "
                 f"{branch}{lifts}")
         resume = (f"resume session {stop.session} with one message to continue #{number} and "
-                  f"deliver, then comment `{RESTARTED} session {stop.session}` on #{number}; once "
+                  f"deliver, then comment `{restarted_comment(stop.session)}` on #{number}; once "
                   "per issue")
         if not on:
             remedy = (f"none: reported only, as se.toml {SETTING} is off; SE decides whether "
