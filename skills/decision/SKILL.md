@@ -149,21 +149,27 @@ A deck may also carry record chapters, notes without a bless request and without
 what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
 
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
-   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html`. Its chapters and
-   their versions are in `<deck>.document.json` beside it, the obs Document it was built from; never
-   decode the built page for them.
-2. Hand the deck to the person where they are, and wait for their answers:
-   - **The Claude app** (cloud and mobile): publish `<deck>.html` with the Artifact tool and the
-     capabilities `deck.py --help` names, `artifact` and full-form `comments`, and send the person
-     its link.
+   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html --host <host>`, the
+   host the answers go back to: `claude-app`, `claude-code` or `copilot` (`local` for any other).
+   Its chapters and their versions are in `<deck>.document.json` beside it, the obs Document it was
+   built from; never decode the built page for them.
+2. Hand the deck to the person where they are, and end your turn; their answers arrive later, and
+   nothing waits on them:
+   - **The Claude app** (cloud and mobile), `--host claude-app`: publish `<deck>.html` with the
+     Artifact tool and the capabilities `deck.py --help` names, `artifact` and full-form
+     `comments`, and send the person its link.
      - Their Send saves `answers.json` into the artifact and sends the answers to Claude as a
        comment; either wakes this session.
      - Read `answers.json` with the Artifact tool's `read` and `path: "answers.json"`. Where it is
        missing or older than the comment, take the payload from the comment's `answers.json:` part,
        or from its lines where the payload did not fit.
-   - **Claude Code and Copilot** (local): run
-     `uv run python <se>/scripts/deck.py serve <deck>.html --wait --timeout <seconds>` and send the
-     person the URL it prints first; it ends with their answers.
+   - **Claude Code and Copilot** (local), `--host claude-code` or `--host copilot`: run
+     `uv run python <se>/scripts/deck.py serve <deck>.html` in the background (under Copilot, a
+     background terminal) and send the person the URL it prints first.
+     - Their Send posts the answers to that server, which writes `answers.json` beside
+       `<deck>.html`; the deck tells them it was sent to Claude Code or to Copilot.
+     - Read that file on your next turn, when the person says they sent; stop the server once it
+       is read.
 3. Run `uv run python <se>/scripts/deck.py answers <answers.json>` and act on what it prints; add
    `--record <notes> --destination <record>.html` for [the record](#the-record).
    - Any verdict may carry a comment, Bless included: act on the comment too.

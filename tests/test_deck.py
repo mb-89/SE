@@ -107,8 +107,9 @@ DECKS = {
 
 
 def _deck(folder: Path, destination: Path) -> subprocess.CompletedProcess:
+    """The Claude app's deck, whatever host runs the tests: the browser tests drive its runtime."""
     return subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "build", str(folder),
-                           "--destination", str(destination)], capture_output=True, text=True)
+                           "--destination", str(destination), "--host", "claude-app"], capture_output=True, text=True)
 
 
 @pytest.fixture(scope="session")
@@ -496,6 +497,78 @@ def test_a_refused_deck_leaves_no_document(decks):
     assert not deck.document_path(destination).exists()
 
 
+def _host(bundled: dict[str, dict], host: str, **where: object) -> dict:
+    return _bundle(bundled, files="ok", comment="ok", deck={"title": "Retro", "decisions": [], "host": host}, **where)
+
+
+@pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
+def test_under_copilot_or_claude_code_send_reaches_the_session_through_obs_html_serve(bundled, host, name):
+    """The regression of retro #1810 finding 16: under Copilot the deck said its answers did not reach Claude.
+    Its sink is the host's own, named after it, and posts to the server that writes answers.json."""
+    calls = _host(bundled, host, served=True, late=True, never=True)
+    assert (calls["id"], calls["name"]) == (host, name)
+    assert calls["result"] == {"ways": ["server"], "written": "answers.json"}
+    assert [post["body"] for post in calls["posted"]] == [PAYLOAD]
+    assert (calls["published"], calls["comments"], calls["warnings"]) == ([], [], [])
+
+
+@pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
+def test_an_unserved_copilot_or_claude_code_deck_names_its_own_host_never_claude(bundled, host, name):
+    calls = _host(bundled, host, late=True, never=True)
+    assert calls["result"] is None
+    message = calls["error"]["message"]
+    assert message.startswith("sending is not available here") and f"reached {name}." in message
+    assert "deck.py serve" in message and "reached Claude." not in message
+
+
+def test_a_copilot_deck_never_takes_the_claude_app_runtime(bundled):
+    calls = _host(bundled, "copilot")
+    assert calls["result"] is None and calls["published"] == [] and calls["comments"] == []
+
+
+def test_a_claude_code_deck_published_in_the_claude_app_after_all_takes_its_runtime(bundled):
+    calls = _host(bundled, "claude-code")
+    assert calls["name"] == "Claude Code" and calls["result"]["ways"] == ["answers.json", "comment"]
+    assert _host(bundled, "claude-code", served=True)["result"]["ways"] == ["server"]
+
+
+def test_the_claude_app_adapter_takes_its_runtime_first_and_the_server_after(bundled):
+    assert _host(bundled, "claude-app", served=True)["result"]["ways"] == ["answers.json", "comment"]
+    calls = _host(bundled, "claude-app", served=True, late=True, never=True)
+    assert calls["result"] == {"ways": ["server"], "written": "answers.json"} and calls["name"] is None
+
+
+@pytest.mark.parametrize("where", [{}, {"served": True}], ids=["file", "served"])
+def test_a_local_deck_registers_no_sink_so_obs_html_takes_the_answers(bundled, where):
+    calls = _host(bundled, "local", **where)
+    assert calls["registered"] is False and calls["application"] == [deck.BUNDLE_ID, []]
+    assert calls["warnings"] == [] and calls["posted"] == []
+
+
+def test_a_host_without_an_adapter_registers_no_sink_and_says_so(bundled):
+    calls = _host(bundled, "vscode")
+    assert calls["registered"] is False
+    [warning] = calls["warnings"]
+    assert warning.startswith('se-answers: this deck names the host "vscode", which has no adapter here')
+
+
+@pytest.mark.parametrize(("environment", "host"), [
+    ({"SE_HOOK_HOST": "copilot", "CLAUDECODE": "1"}, "copilot"),
+    ({"CLAUDECODE": "1", "CLAUDE_CODE_REMOTE": "true"}, "claude-app"),
+    ({"CLAUDECODE": "1"}, "claude-code"),
+    ({}, "local"),
+    ({"SE_HOOK_HOST": "claude"}, "local"),
+], ids=["copilot", "cloud", "claude-code", "none", "claude-hook-file"])
+def test_the_default_host_is_the_one_the_build_runs_under(environment, host):
+    assert deck.default_host(environment) == host
+
+
+def test_a_host_the_deck_does_not_know_is_refused_before_obs_runs(tmp_path, capsys):
+    folder = _folder(tmp_path, {"one": NOTE % ("One", "one")})
+    assert deck.build(folder, tmp_path / "deck.html", host="vscode") == 2
+    assert "--host vscode is none of claude-app, claude-code, copilot, local" in capsys.readouterr().err
+
+
 def test_the_bundle_data_is_the_decks_title_and_decisions_and_cannot_end_its_script():
     document = {"manifest": {"title": "A </script><!-- deck"}, "chapters": [
         {"id": "pick", "content": [{"type": "pugh", "children": []}], "children": []},
@@ -505,7 +578,9 @@ def test_the_bundle_data_is_the_decks_title_and_decisions_and_cannot_end_its_scr
     assert rest == deck.BUNDLE.read_text(encoding="utf-8")
     assert "<" not in head
     data = json.loads(head.removeprefix("globalThis.seDeck = Object.freeze(").removesuffix(");"))
-    assert data == {"title": "A </script><!-- deck", "decisions": ["pick"]}
+    assert data == {"title": "A </script><!-- deck", "decisions": ["pick"], "host": "claude-app"}
+    assert json.loads(deck._bundle(document, "copilot").split("\n", 1)[0].removeprefix(
+        "globalThis.seDeck = Object.freeze(").removesuffix(");"))["host"] == "copilot"
 
 
 @pytest.mark.spawns("tool: `deck.py answers --record` builds the record with the real obs, obs-document in "
@@ -548,7 +623,8 @@ function page() {
         return node;
     };
     const body = element();
-    const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0};
+    const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0,
+                   posted: []};
     globalThis.console = {...console, warn: message => calls.warnings.push(message)};
     if (mode.deck) globalThis.seDeck = mode.deck;
     globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
@@ -557,6 +633,11 @@ function page() {
                                                   reveal: id => calls.notices.push(["reveal", id]),
                                                   remove: id => calls.notices.push(["remove", id])};
     if (mode.served) globalThis.ObsHtmlAnswers = {server: () => "http://127.0.0.1:1/answers"};
+    // obs-html serve's answer to the page's post: it writes answers.json beside the deck.
+    globalThis.fetch = async (url, init) => {
+        calls.posted.push({url, body: JSON.parse(init.body)});
+        return {ok: true, status: 200, json: async () => ({written: "answers.json"})};
+    };
     globalThis.obsArtifact = {
         registerApplication: application => { calls.application = [application.id, application.actions]; },
         trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
@@ -582,6 +663,10 @@ function page() {
     eval(bundle);
     (async () => {
         const registered = calls.sink !== null;  // Registered at the first run, with or without claude.
+        if (!registered) {  // No sink of its own: obs-html's own sinks take the answers.
+            report({registered, application: calls.application, warnings: calls.warnings, posted: calls.posted});
+            return;
+        }
         if (mode.late && !mode.never) globalThis.claude = claude;
         let result = null, error = null;
         try { result = await calls.sink.send(payload); }
@@ -589,7 +674,8 @@ function page() {
         report({registered, application: calls.application, namespace: calls.sink.namespace,
                 id: calls.sink.id, name: calls.sink.name ?? null, result, error,
                 elements: calls.created + body.children.length, notices: calls.notices,
-                published: calls.published, comments: calls.comments, warnings: calls.warnings});
+                published: calls.published, comments: calls.comments, warnings: calls.warnings,
+                posted: calls.posted});
     })();
 }
 (async () => {
@@ -615,6 +701,9 @@ BUNDLE_MODES = [
     {"files": "capability_disabled", "comment": "claude_unavailable"},
     {"files": "ok", "comment": "ok", "late": True},
     {"files": "ok", "comment": "ok", "late": True, "never": True},
+    *({"files": "ok", "comment": "ok", "deck": {"title": "Retro", "decisions": [], "host": host}, **where}
+      for host in ("claude-app", "claude-code", "copilot", "local", "vscode")
+      for where in ({}, {"served": True}, {"late": True, "never": True}, {"served": True, "late": True, "never": True})),
 ]
 
 

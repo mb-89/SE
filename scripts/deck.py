@@ -5,7 +5,7 @@
 Reader: the agent that asks the person for decisions, and whoever changes this command. The decision
 skill (src/skills/decision/SKILL.md) says when to use it; this file owns what each subcommand does.
 
-  build FOLDER --destination HTML   FOLDER holds the decision notes and their manifest (obs's
+  build FOLDER --destination HTML [--host HOST]   FOLDER holds the decision notes and their manifest (obs's
       `manifest.md`, or what the folder's cfg.json names). obs parses them, then builds them into one
       HTML artifact, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle, in
       obs's screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
@@ -21,6 +21,9 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       It builds with obs-html's passing line after Send on for four seconds (`BRIEF_NOTICE_MILLISECONDS`,
       obs's `artifact.reading.briefNoticeMilliseconds`), set in the vault copy's cfg.json beside the
       folder's own keys (`brief_notice`); a value the folder's cfg.json sets wins, so 0 turns it off there.
+      HOST (HOSTS) is the host the answers go back to, written into the deck's data, where the answers
+      bundle picks its adapter (the bundle's header owns each): `claude-app`, `claude-code`, `copilot`, or
+      `local`, obs-html's own sinks; without it, the host this command runs under (`default_host`).
       In the Claude app, publish the deck with the Artifact tool and `capabilities: {artifact: {},
       comments: {}}`: `artifact` lets Send save answers.json (the record the session reads), and the
       full-form `comments` lets it also send the answers to Claude as a comment, which wakes the
@@ -29,7 +32,9 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       how the reader is told.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
-      beside HTML). For Claude Code, Copilot and any local browser.
+      beside HTML). For Claude Code, Copilot and any local browser. Without --wait it serves until stopped
+      and writes answers.json beside HTML at each send, so a session that runs it in the background reads
+      that file on its next turn and never waits on the person.
   answers ANSWERS [--record FOLDER --destination HTML]   Prints, per decision, what to act on: the
       verdict, the picked option, the comment and the weights, marks, vetoes, lifted vetoes, datum and
       rulings the person changed.
@@ -47,6 +52,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import os
 import re
 import shutil
 import sys
@@ -55,6 +61,7 @@ from pathlib import Path
 import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hosts  # noqa: E402
 import process_door  # noqa: E402
 import se_components  # noqa: E402
 import templates  # noqa: E402
@@ -66,6 +73,20 @@ BUNDLE_FILE = f"{BUNDLE_ID}.js"
 # How long obs-html's passing line after Send ("Sent to Claude.") shows on SE's decks, in ms
 # (obs-html's spec/artifact-ui.md, Dock menu: `artifact.reading.briefNoticeMilliseconds`, default 0, off).
 BRIEF_NOTICE_MILLISECONDS = 4000
+#: The hosts a deck's answers go back to, one adapter each in the answers bundle (scripts/deck_answers.js,
+#: its header): the Claude app, Claude Code, Copilot, and `local`, which leaves obs-html's own sinks.
+HOSTS = ("claude-app", "claude-code", "copilot", "local")
+
+
+def default_host(environment: dict[str, str]) -> str:
+    """The host a deck built under ``environment`` sends its answers to, by the host table's marks
+    (scripts/hosts.sh): Copilot where its hook file names it, the Claude app in Claude's cloud, Claude
+    Code where it started the process, else ``local``."""
+    if environment.get(hosts.table()["SE_HOOK_HOSTS"][0]) == "copilot":
+        return "copilot"
+    if "claude" in hosts.clouds(environment):
+        return "claude-app"
+    return "claude-code" if hosts.host(environment) == "claude" else "local"
 
 
 def document_path(destination: Path) -> Path:
@@ -73,12 +94,19 @@ def document_path(destination: Path) -> Path:
     return destination.with_suffix(".document.json")
 
 
-def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
-    """Build ``folder`` into ``destination`` with the answers bundle; with ``answers``, the record.
+def build(folder: Path, destination: Path, answers: Path | None = None, host: str | None = None,
+          asks: bool = True) -> int:
+    """Build ``folder`` into ``destination`` with the answers bundle for ``host`` (HOSTS; None, the host
+    this runs under, ``default_host``); with ``answers``, the record.
 
     obs parses the notes into a Document first; its chapters decide the refusals and give the bundle its
     data (``_bundle``). The deck's build writes its own Document beside it (``document_path``), so tests
-    and agents read its chapters and versions there, never from the built page."""
+    and agents read its chapters and versions there, never from the built page. Without ``asks`` a deck
+    where no chapter asks for a bless is built all the same: a retro's deck with no finding to decide."""
+    host = host or default_host(dict(os.environ))
+    if host not in HOSTS:
+        print(f"deck: --host {host} is none of {', '.join(HOSTS)}", file=sys.stderr)
+        return 2
     if not folder.is_dir():
         print(f"deck: {folder} is no folder of decision notes", file=sys.stderr)
         return 2
@@ -102,13 +130,13 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         chapters = document["chapters"]
         for warning in _warnings(chapters):
             print(f"deck: warning: {warning}", file=sys.stderr)
-        refusal = _refusal(chapters, recorded=answers is not None)
+        refusal = _refusal(chapters, recorded=answers is not None, asks=asks)
         if refusal:
             destination.unlink(missing_ok=True)
             written.unlink(missing_ok=True)
             print(f"deck: {refusal}", file=sys.stderr)
             return 1
-        (vault / BUNDLE_FILE).write_text(_bundle(document), encoding="utf-8", newline="\n")
+        (vault / BUNDLE_FILE).write_text(_bundle(document, host), encoding="utf-8", newline="\n")
         code = obs_document(obs, [
             "--source", str(vault), "--document", str(parsed), "--destination", str(destination.resolve()),
             "--adapter-option", f"trusted-runtime-bundle={BUNDLE_ID}={BUNDLE_FILE}", *recorded,
@@ -120,11 +148,13 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
     return 0
 
 
-def _bundle(document: dict) -> str:
-    """The answers bundle with the deck's own data in front, ``globalThis.seDeck``: the deck's ``title`` and
-    its ``decisions``, the ids of the chapters with a ``pugh`` fence (deck_answers.js reads it)."""
+def _bundle(document: dict, host: str = "claude-app") -> str:
+    """The answers bundle with the deck's own data in front, ``globalThis.seDeck``: the deck's ``title``, its
+    ``decisions``, the ids of the chapters with a ``pugh`` fence, and the ``host`` whose adapter takes the
+    answers (HOSTS; deck_answers.js reads it)."""
     data = {"title": document["manifest"]["title"],
-            "decisions": [chapter["id"] for chapter in document["chapters"] if _holds_pugh(chapter["content"])]}
+            "decisions": [chapter["id"] for chapter in document["chapters"] if _holds_pugh(chapter["content"])],
+            "host": host}
     # JSON in a script: "<" escaped, so no "</script" or "<!--" ends or changes it.
     text = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     return f"globalThis.seDeck = Object.freeze({text});\n" + BUNDLE.read_text(encoding="utf-8")
@@ -344,9 +374,10 @@ def _items(lines: list[str], key: str) -> int | None:
     return count
 
 
-def _refusal(chapters: list[dict], recorded: bool) -> str | None:
+def _refusal(chapters: list[dict], recorded: bool, asks: bool = True) -> str | None:
     """Why the deck's chapters are refused: a decision that asks for no bless, unless the build ``recorded``
-    the answers, a decision that does not explain its problem before its options, or no chapter that asks."""
+    the answers, a decision that does not explain its problem before its options, or, where it ``asks``, no
+    chapter that asks."""
     remedy = "give each decision note `obs: {bless: pending}` in its frontmatter"
     decisions = [chapter for chapter in chapters if _holds_pugh(chapter["content"])]
     silent = [chapter["id"] for chapter in decisions if not recorded and "bless" not in chapter]
@@ -358,7 +389,7 @@ def _refusal(chapters: list[dict], recorded: bool) -> str | None:
         return (f"decision(s) {', '.join(unexplained)} do not explain the problem before the options; write "
                 f"{_named_sections()} before the `pugh` fence, as the decision skill's note shape "
                 "(src/skills/decision/SKILL.md) and the decision template (templates/decision.md) say")
-    if not any("bless" in chapter for chapter in chapters):
+    if asks and not any("bless" in chapter for chapter in chapters):
         return f"no chapter asks for a bless, so the deck asks the person nothing; {remedy}"
     return None
 
@@ -451,6 +482,9 @@ def make_parser() -> argparse.ArgumentParser:
     built = commands.add_parser("build", help="build a folder of decision notes into one deck")
     built.add_argument("folder", type=Path)
     built.add_argument("--destination", type=Path, required=True, help="the HTML file to write, outside FOLDER")
+    built.add_argument("--host", choices=HOSTS, help="the host the answers go back to (default: the one this runs "
+                                                     "under: claude-app in Claude's cloud, claude-code under Claude "
+                                                     "Code, copilot under Copilot's hooks, else local)")
     served = commands.add_parser("serve", help="serve a deck locally and print the answers it is sent")
     served.add_argument("artifact", type=Path)
     served.add_argument("--wait", action="store_true", help="exit after the first answers, printing them")
@@ -472,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
     if routed is not None:
         return routed
     if arguments.command == "build":
-        return build(arguments.folder, arguments.destination)
+        return build(arguments.folder, arguments.destination, host=arguments.host)
     if arguments.command == "serve":
         return serve(arguments.artifact, arguments.wait, arguments.timeout)
     if bool(arguments.record) != bool(arguments.destination):
