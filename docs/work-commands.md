@@ -177,7 +177,7 @@ document.
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON \| --body-file BODY_FILE] [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
@@ -356,7 +356,7 @@ numbered, each with its home and its kind:
 
 Then what went well, and in step 6 the person's decisions, the classes still open and what
 follows. The facts and the block stay in the retro doc, which the report links at the integration
-branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+branch's commit (the message `templates/retro-doc.md`), where the next collect and overhaul read
 them.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
