@@ -12278,6 +12278,124 @@ def run_paused(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def turn_start_parts(root: Path, repo: str, all_repos: bool = False) -> dict[str, object]:
+    """What SE reads at each turn's start, all at once while the checkout syncs: the pause search,
+    the escalations, the delivered pull requests, the capacity, the startable and the claimed work
+    (`ready_and_claimed`), the outside issues where se.toml sets `[outside]`, and the fleet's
+    findings. Each part is its answer, or the QueueError its read raised: a part not read is named
+    with its cause, never taken for empty (rule gen-003)."""
+    labels = repository_label_arguments(root, all_repos)
+    base = integration_branch(root)
+
+    def part(read: Callable[[], object]) -> Callable[[], object]:
+        def guarded() -> object:
+            try:
+                return read()
+            except QueueError as error:
+                return error
+        return guarded
+
+    names = ("paused", "sync", "escalations", "delivered", "work", "capacity", "outside", "fleet")
+    answers = concurrently(*(part(read) for read in (
+        lambda: pause_issues(root, repo),
+        lambda: sync(root),
+        lambda: json.loads(run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "escalated",
+            "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
+        ])),
+        lambda: delivered_pull_requests(root, repo),
+        lambda: ready_and_claimed(root, repo, all_repos),
+        lambda: capacity(root, repo, all_repos),
+        lambda: intake_outside(root) if se_table(root, "outside") else None,
+        lambda: fleet_findings(Fleet(root, repo, base), datetime.now(timezone.utc), fleet_lease(root),
+                               repository_name(root), ages=fleet_ages(root)),
+    )))
+    return dict(zip(names, answers))
+
+
+def turn_start_lines(parts: dict[str, object], repo: str, timeout: timedelta,
+                     now: datetime) -> list[str]:
+    """The turn start's report: one heading line per part with its count or answer, each item
+    indented below it, in the order SE acts on them (README "Turn start check")."""
+    lines: list[str] = []
+
+    def section(title: str, value: object, items: Callable[[object], list[str]]) -> None:
+        if isinstance(value, QueueError):
+            lines.append(f"{title}: not read: {value}")
+            return
+        listed = items(value)
+        lines.append(f"{title}: {len(listed) if listed else 'none'}")
+        lines.extend(f"  {item}" for item in listed)
+
+    paused = parts["paused"]
+    if isinstance(paused, QueueError):
+        lines.append(f"Paused: not read: {paused}")
+    elif paused:
+        lines.append(f"Paused: yes, by {pause_names(paused)}: nothing starts, lands or is routed "
+                     "until the owner closes it")
+    else:
+        lines.append(f"Paused: no (no open issue labelled {PAUSE_LABEL} in {repo})")
+    if isinstance(parts["sync"], QueueError):
+        lines.append(f"Sync: not done: {parts['sync']}")
+    section("Escalations", parts["escalations"], lambda found: [
+        f"escalated #{item['number']} {item['title']} {item['url']}" for item in found])
+    section("Delivered pull requests", parts["delivered"], lambda found: [
+        f"delivered PR #{pull['number']} {pull['title']} {pull['url']}" for pull in found])
+    slots = parts["capacity"]
+    lines.append(f"Capacity: not read: {slots}" if isinstance(slots, QueueError) else
+                 "Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
+    work = parts["work"]
+    startable, claimed = (work, work) if isinstance(work, QueueError) else work
+    section("Startable work", startable, lambda found: [
+        f"ready #{issue['number']} {issue['title']}" for issue in found])
+
+    def claims(found: object) -> list[str]:
+        listed = sorted((claim_of(issue, now, timeout) for issue in found), key=lambda c: c.number)
+        stale = stale_claims_line(listed)
+        return [*(claim_line(claim, timeout) for claim in listed), *([stale] if stale else [])]
+    section("Claimed work", claimed, claims)
+    outside = parts["outside"]
+    if outside is None:
+        lines.append("Outside issues: none watched (no [outside] in se.toml)")
+    else:
+        section("Outside issues", outside, lambda found: [
+            f"{issue['repo']}#{issue['number']} {issue['title']} {issue['url']}"
+            + (f" (author association: {issue['association']}, hidden parts: {issue['hidden']})"
+               if "association" in issue else "") for issue in found])
+    fleet = parts["fleet"]
+    if isinstance(fleet, QueueError):
+        lines.append(f"Fleet: not read: {fleet}")
+    else:
+        stuck = [finding for finding in fleet if finding.stuck]
+        lines.append(f"Fleet: {len(stuck)} stuck or stray" if stuck else "Fleet: healthy")
+        if fleet:
+            lines.extend(f"  {line}" for line in fleet_report(fleet, False).splitlines()
+                         if line != "healthy")
+    return lines
+
+
+@command("turn-start", "what SE reads at each turn's start, in one call: the pause state, the "
+                       "escalations, the delivered pull requests, the capacity, the startable and "
+                       "the claimed work, the outside issues and the fleet's findings, read at once "
+                       "while the checkout syncs; a part whose read fails names its cause. Exit "
+                       "code 1 while the fleet is paused. Without gh it prints the queue's and the "
+                       "fleet check's plans, exit code 2",
+         *TRACKER_QUERY)
+def run_turn_start(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    if hand_off():
+        sync(root)
+        print(queue_plan(root, repo, args.all_repos).text())
+        print(fleet_plan(repo, integration_branch(root)).text())
+        print(f"Outside issues: read by hand, as the se checkout's {WITHOUT_GH} says")
+        return 2
+    parts = turn_start_parts(root, repo, args.all_repos)
+    for line in turn_start_lines(parts, repo, claim_timeout(root), utc_now()):
+        print(line)
+    paused = parts["paused"]
+    return 1 if paused and not isinstance(paused, QueueError) else 0
+
+
 @command("fleet-check", "list every stuck or stray piece of work, each with its issue, pull request "
                         "and remedy: in-progress work without a branch once the lease has passed "
                         "since its Started comment (listed as starting before) or without a push "
@@ -12567,7 +12685,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
 #: The commands a person waits on that only read: these go through kern where it runs

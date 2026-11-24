@@ -200,3 +200,69 @@ def test_integrate_lands_and_closes_the_work_issue_over_rest(
     assert landed.stdout == "worker\n"  # squashed onto origin's main
     assert rest_gh.issues[SLUG][5]["state"] == "closed"
     assert in_one_call(rest_gh, out, main_checkout)
+
+
+def test_turn_start_prints_every_part_of_the_turn_s_start_from_one_call(
+        worktree, rest_gh, monkeypatch, capsys):
+    (worktree / "se.toml").write_text(OUTSIDE_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
+    monkeypatch.setattr(work_tickets, "fleet_branches", lambda root: {})
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos=False: None)
+    rest_gh.issue(SLUG, 2, "feature/ready-20261106", labels=["work", "ready", "repo:repo"])
+    rest_gh.issue(SLUG, 3, "feature/stuck-20261106", labels=["work", "escalated", "repo:repo"])
+    rest_gh.issue(SLUG, 4, "feature/running-20261106", labels=["work", "in-progress", "repo:repo"])
+    rest_gh.issue(SLUG, 14, "issue 14", "From the other side.")
+    rest_gh.pull(SLUG, 7, "feature/done-20261106", "feature/done-20261106", body=reported_at("abc1234"))
+
+    assert run(worktree, "turn-start") == 0
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[:8] == [
+        f"Paused: no (no open issue labelled pause in {REPO})",
+        "Escalations: 1", f"  escalated #3 feature/stuck-20261106 https://{HOST}/{SLUG}/issues/3",
+        "Delivered pull requests: 1",
+        f"  delivered PR #7 feature/done-20261106 https://{HOST}/{SLUG}/pull/7",
+        "Capacity: unlimited (cloud)",
+        "Startable work: 1", "  ready #2 feature/ready-20261106"]
+    assert lines[8:10] == ["Claimed work: 2", lines[9]] and lines[9].startswith("  claimed #4 ")
+    assert "Outside issues: 1" in lines  # #14, above its cut-off; owner/other has none
+    assert f"  {REPO}#14 issue 14 https://{HOST}/{SLUG}/issues/14" in lines
+    assert any(line.startswith("Fleet: ") for line in lines)
+    assert in_one_call(rest_gh, out, worktree)
+
+
+def test_turn_start_names_a_part_it_could_not_read_and_exits_one_while_paused(
+        worktree, rest_gh, monkeypatch, capsys):
+    (worktree / "se.toml").write_text(OUTSIDE_CONFIG, encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "fleet_branches", lambda root: {})
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, all_repos=False: 2)
+    rest_gh.issue(SLUG, 3, "Pause the fleet", labels=[work_tickets.PAUSE_LABEL])
+    rest_gh.unreachable.add("owner/other")  # outside this session's reach
+
+    assert run(worktree, "turn-start") == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == (f"Paused: yes, by #3 Pause the fleet https://{HOST}/{SLUG}/issues/3: "
+                        "nothing starts, lands or is routed until the owner closes it")
+    assert "Capacity: 2" in lines and "Delivered pull requests: none" in lines
+    outside = next(line for line in lines if line.startswith("Outside issues: "))
+    assert outside.startswith("Outside issues: not read: gh api GET repos/owner/other/issues "
+                              "failed: gh: Not Found (HTTP 404)")
+
+
+def test_turn_start_without_gh_prints_the_queue_s_and_the_fleet_check_s_plans(
+        worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: REPO)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+
+    assert run(worktree, "turn-start") == 2
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"GitHub plan: queue of {REPO}\n1. list_issues ")
+    assert "GitHub plan: fleet check\n" in out and out.rstrip().endswith(
+        "Outside issues: read by hand, as the se checkout's src/skills/work-model/SKILL.md#without-gh says")

@@ -11,7 +11,7 @@ answered from them and each write changes them, so a command's reads after its w
 `calls` records every gh call's words, `writes` every write as `(method, path, body)`. A route it
 does not know answers 404, naming it. `signed_in=True` makes `gh auth status` pass, as a signed-in
 gh's; `rest=False` refuses `gh api` too, as a host with no account; `host` names the host its page
-addresses carry.
+addresses carry; a repository in `unreachable` answers 404 to every call.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ class RestGitHub:
     signed_in: bool = False
     rest: bool = True
     host: str = HOST
+    unreachable: set[str] = field(default_factory=set)
     issues: dict[str, dict[int, dict]] = field(default_factory=dict)
     comments: dict[tuple[str, int], list[dict]] = field(default_factory=dict)
     labels: dict[str, list[dict]] = field(default_factory=dict)
@@ -133,6 +134,8 @@ class RestGitHub:
         if segments[0] != "repos" or len(segments) < 4:
             raise LookupError(path)
         slug, rest = "/".join(segments[1:3]), segments[3:]
+        if slug in self.unreachable:
+            raise LookupError(path)
         if method != "GET":
             self.writes.append((method, "/".join(rest), body))
         page = int(query.get("page", 1)), int(query.get("per_page", 30))
