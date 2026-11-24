@@ -12372,8 +12372,7 @@ DELIVERED = arg("--delivered", type=Path, metavar="FILE",
 
 
 @command("start", "start a ready work issue: claim its branch on the issue's remote, worktree "
-                  "from it, label in-progress; refused while more delivered pull requests wait "
-                  "than [workers] queue_limit; "
+                  "from it, label in-progress; "
                   "without gh, the label change and the Started comment as GitHub steps, or "
                   "through kern's relay where it serves the checkout",
          WORKTREE,
@@ -12420,8 +12419,7 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
 
 @command("claim", "claim a ready issue for a session-tool start: its branch at the newest main "
                   "on the issue's remote, or an unused claim there; refused where another start "
-                  "holds it, or while more delivered pull requests wait than [workers] "
-                  "queue_limit",
+                  "holds it or the landing queue is full",
          WORKTREE,
          arg("issue", type=int),
          REPO,

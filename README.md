@@ -789,45 +789,33 @@ claim_timeout_hours = 12
 queue_limit = 10
 ```
 
-`[workers]` limits how many working agents run at once. `local` holds a local device's limit,
-default 4; `cloud` holds the cloud's (a Claude Code cloud session, a CI runner), and unset leaves
-the cloud open. Each is a whole number of at least 1.
+`[workers]` limits the working agents running at once: `local` on a local device, default 4;
+`cloud` in the cloud (a Claude Code cloud session, a CI runner), unset open; each a whole number
+of at least 1. `claim_timeout_hours` is the claim timeout below in hours, default 12;
+`queue_limit` the landing queue's, default 10; other keys are refused.
 
-`claim_timeout_hours` is the claim timeout below, a positive number of hours, default 12.
-`queue_limit` is the landing queue's limit below, a whole number of at least 0, default 10. Other
-keys are refused.
-
-- **What counts.** A worker runs while its work issue is open and labelled `in-progress`.
-  `work_tickets.py capacity` prints how many more may start: the limit less those running, on a
-  local device also its cores and memory.
-- **Who holds it.** `start` refuses a start beyond it. Without gh it reads the workers running
-  through kern's relay, or from `--running <file>`. An [integrator](src/agents/integrator.md)
-  starts no more, and after each landing starts the next startable issue, so a worker that
-  finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
-  reached.
-- **The landing queue.** No worker starts while more than `queue_limit` delivered pull requests
-  wait for the integrator: one started then branches from a `main` several landings old, merges
-  them all again and waits behind them.
-  - `start` and `claim` refuse, naming the count and the limit. Without gh they read the open
-    pull requests through kern's relay, or from `--delivered <file>`.
-  - `queue` prints the count against the limit, and after a landing `integrate` starts none while
-    the queue is over it.
+- **What counts.** A worker runs while its work issue is open and labelled `in-progress`;
+  `work_tickets.py capacity` prints how many more may start ([Work commands](#work-commands)).
+- **Who holds it.** `start` refuses a start beyond it; without gh it reads the workers running
+  through kern's relay or `--running <file>`. After each landing an
+  [integrator](src/agents/integrator.md) starts the next startable issue within it, so a finished
+  worker frees its place; the [dispatcher](#dispatcher) fires nothing while it is reached.
+- **The landing queue.** While more than `queue_limit` delivered pull requests wait, `start` and
+  `claim` refuse, naming both numbers (a worker would start on an old `main`); `queue` prints both.
 - **Not limited.** Integrators, reviewers and SE's own session.
-- **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
-  one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
-  with the claim, and the close-out removes it.
-  - The worker's `intake` records its due time in `.se/work/beat.yaml`. On every tool call the
-    plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
-    passed it starts `work_tickets.py beat` in the background, which sets the line to now.
-  - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
-    so the session runs its read and write when the hook tells it. The write carries the issue's
-    own labels, so the [template gate](#templates) judges it by the issue's own template.
+- **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label and a
+  body line, `<!-- se:beat <UTC time to the minute> -->`; `start` writes the first with the
+  claim, the close-out removes it.
+  - The worker's `intake` records its due time in `.se/work/beat.yaml`, which the plugin's hook
+    alone reads on each tool call to start `work_tickets.py beat` ([Work commands](#work-commands)).
+  - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay:
+    the session runs its read and write when the hook says. The write carries the issue's labels,
+    so the [template gate](#templates) judges it by its own template.
   - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
     and the template check ignore it.
 - **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the
-  claim timeout) or stale (older, or no beat), with the beat's age; neither is startable. Its
-  last line names the stale ones for SE to pass to the person; without gh, `ready --claimed
-  <file>` judges the `list_issues` answer that `queue`'s plan reads.
+  claim timeout) or stale (older, or no beat); neither is startable, and SE passes the stale ones
+  to the person. Without gh, `ready --claimed <file>` judges `queue`'s plan's `list_issues` read.
   - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
     delete its branch, take off `in-progress` and remove the beat line.
 
@@ -2165,7 +2153,7 @@ settings checks and the generated docs.
 | Command | Usage | What it does |
 |---|---|---|
 | `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show how many more workers may start: the worker limit ([workers] in se.toml), on a local device also its cores and memory, less those running |
-| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] [--delivered FILE] issue` | claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it, or while more delivered pull requests wait than [workers] queue_limit |
+| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] [--delivered FILE] issue` | claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it or the landing queue is full |
 | `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
 | `work_tickets.py dispatch` | `work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire \| --dry-run]` | the dispatcher (README "Dispatcher", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none |
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
@@ -2184,7 +2172,7 @@ settings checks and the generated docs.
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
-| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] [--delivered FILE] issue` | start a ready work issue: claim its branch on the issue's remote, worktree from it, label in-progress; refused while more delivered pull requests wait than [workers] queue_limit; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
+| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] [--delivered FILE] issue` | start a ready work issue: claim its branch on the issue's remote, worktree from it, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
 | `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
