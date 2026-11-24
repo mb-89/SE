@@ -24,7 +24,7 @@ var (
 	correctedKey   = regexp.MustCompile(`^corrected[ \t]*:`)
 	correctedMark  = "<!-- se:corrected %s -->"
 	snippetKinds   = []string{"rows", "case"}
-	uncorrectedSet = append([]string{"code", "node", "register"}, snippetKinds...)
+	uncorrectedSet = append([]string{"code"}, snippetKinds...)
 )
 
 // Correction is one text the pass changed: its field (`body` for the document's line endings), the
@@ -134,7 +134,7 @@ func CorrectedText(text string, whole bool) (string, []string) {
 
 // correctable is templates.py `_correctable`: whether the pass touches the field's value.
 func correctable(item *Field) bool {
-	return !(item.Source == "title" || item.Verbatim || item.Node != "" || item.Fence != "" || in(item.Kind, uncorrectedSet))
+	return !(item.Source == "title" || item.Verbatim || item.Fence != "" || in(item.Kind, uncorrectedSet))
 }
 
 // Correct is templates.py `correct`: the values with each correctable field's texts corrected, and
@@ -160,7 +160,7 @@ func Correct(t *Template, values Object) (Object, []Correction) {
 		}
 		switch x := value.(type) {
 		case string:
-			given.Set(item.Name, fixed(x, item.Kind != "text"))
+			given.Set(item.Name, fixed(x, !in(item.Kind, []string{"text", "node", "register"})))
 		case []any:
 			list := make([]any, len(x))
 			for i, entry := range x {

@@ -33,6 +33,7 @@ var Reasons = map[string]string{
 	"slot":           "the fill slot marks where the text goes; a section that still holds it was never written",
 	"private":        "the repository is publishable at any time; a private term written there is published",
 	"name":           "the name is the branch too; one outside the name rule breaks the branch and the list",
+	"checkable":      "a requirement is met or not by one test or one look; two statements in one, or a word nobody can measure, cannot be checked off",
 }
 
 // Why is the reason of the finding's rule: why the rule holds.

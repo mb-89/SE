@@ -316,7 +316,7 @@ class FakeGh:
 
 IDENTITY = '[project]\nidentity = "mb <mb>"\n'
 # The marker lines a filing stamps onto a body filed as given (templates.stamped).
-_SE_TEMPLATES = work_tickets.sibling("templates").load(work_tickets.SE_ROOT)
+_SE_TEMPLATES = work_tickets.sibling("templates").load(work_tickets.SE_ROOT, tree=True)
 WORK_MARKER, TICKET_MARKER, ROUTED_MARKER = (_SE_TEMPLATES[name].marker_line
                                              for name in ("work", "ticket", "routed"))
 
@@ -8167,6 +8167,23 @@ def test_refuse_refuses_before_any_gh_call_relay_call_or_printed_plan(worktree, 
     captured = capsys.readouterr()
     assert relayed == [] and captured.out == "" and gh.calls == []
     assert "--hold" in captured.err  # the second refusal of the same issue offers it
+
+
+def test_refuse_refuses_a_work_issue_whose_requirement_is_not_one_checkable_statement(
+        worktree, gh, capsys, templates_home):
+    """The work issue's Requirements are requirement items (templates/requirement.md): filing one
+    that holds two statements is refused before any gh call, naming the requirement and why."""
+    enforce(worktree, "refuse")
+    body = worktree / "two-statements.md"
+    fields = {**WORK_FIELDS, "requirements": ["`file` writes the plain title.",
+                                              "`route` keeps it. It also logs it."]}
+    body.write_text(TEMPLATES.render(WORK_TEMPLATE, fields), encoding="utf-8")
+    assert run(worktree, "file", "--title", WORK_TITLE, "--body-file", str(body)) == 1
+    captured = capsys.readouterr()
+    assert gh.calls == [] and captured.out == ""
+    assert "work > Requirements > requirement 2: statement holds more than one sentence" in captured.err
+    assert "requirement 1" not in captured.err
+    assert TEMPLATES.REASONS["checkable"] in captured.err
 
 
 def test_file_fields_without_gh_prints_the_rendered_body_that_the_template_passes(

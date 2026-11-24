@@ -2,7 +2,7 @@
 # A work issue: one package for one worker, its title a name under the name rule and its branch
 # that name. It extends the ticket template; scripts/templates.py's docstring owns this note's format.
 name: work
-version: 1.0.0
+version: 1.1.0
 kind: document
 reader: fleet
 says: "One package for one worker: the ticket's why, then numbered requirements and acceptance."
@@ -72,7 +72,9 @@ fields:
   - name: design_owner
     kind: text
   - name: requirements
-    kind: list
+    items: requirement@1.0.0
+    carried: ["acceptance", "source"]
+    since: 1.1.0
     exact_heading: true
     numbered: true
     required: true
@@ -139,7 +141,7 @@ example:
 
 ## Requirements
 
-<!-- requirements: Numbered, checkable requirements, in the order to do them. -->
+<!-- requirements: Numbered requirements in the order to do them, each one checkable statement (the requirement template); the Acceptance section carries how each is checked. -->
 
 ## Changes after filing
 

@@ -62,7 +62,8 @@ None
 
 ## Requirements
 
-<!-- Numbered, checkable, in the order to do them; commits follow the
+<!-- Numbered, in the order to do them, each one checkable statement of one sentence
+     (templates/requirement.md); commits follow the
      [worker's procedure](../../agents/worker.md#procedure). Keep a package worker-sized:
      one reviewable change, roughly one to five requirements. Split larger work
      (e.g. a scheduler with several commands) into separate issues linked by "Blocked by",
