@@ -4804,6 +4804,7 @@ def start(
     )
     if issue is None:
         raise QueueError(f"Issue #{number} is not startable")
+    refuse_long_queue(root, number, len(delivered_pull_requests(root, repo)))
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
     slots = capacity(root, repo, cloud=in_cloud() or cloud)
     if slots is not None and slots <= 0:
@@ -5032,15 +5033,16 @@ def refuse_full_start(root: Path, number: int, repo: str, cloud: bool, door: obj
 def start_handed_off(
     root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
     cloud_agent: str | None, issue_file: Path | None, blockers_file: Path | None = None,
-    running_file: Path | None = None,
+    running_file: Path | None = None, delivered_file: Path | None = None,
 ) -> tuple[Path | None, str, str]:
     """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
     GitHub tools answered it (`issue_file`); held while a blocker holds it (`refuse_held_start`,
     its states from `blockers_file` off the relay); the worktree as with gh; then the label change
     and the Started comment sent through kern's relay where it serves the checkout, else printed as
     steps for the session's GitHub tools; refused where the worker limit is reached
-    (`refuse_full_start`, the workers running from `running_file` off the relay). The worktree
-    (None for a cloud worker), the issue's URL and its branch."""
+    (`refuse_full_start`, the workers running from `running_file` off the relay), or while more
+    delivered pull requests wait than the queue limit (`refuse_long_queue`, from `delivered_file`
+    off the relay). The worktree (None for a cloud worker), the issue's URL and its branch."""
     door = relay_door(root, repo)
     if door is not None:
         refuse_while_paused("start", door.paused(repo))
@@ -5063,6 +5065,8 @@ def start_handed_off(
         raise QueueError(f"Issue #{number} is not startable: it is labelled "
                          f"{', '.join(sorted(labels & NOT_STARTABLE_LABELS))}")
     refuse_held_start(number, issue, door, blockers_file)
+    refuse_long_queue(root, number, delivered_count(root, number, repo, door, delivered_file,
+                                                    "start"))
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
     refuse_full_start(root, number, repo, in_cloud() or cloud, door, running_file)
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
@@ -5212,10 +5216,10 @@ def worker_limit(root: Path, cloud: bool) -> int | None:
     """At most this many working agents run at once (README "Workers"): `se.toml` `[workers]`
     `local` on a local device, default LOCAL_WORKERS; `cloud` in the cloud, unset no limit (None)."""
     table = se_table(root, "workers")
-    unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours"})
+    unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours", "queue_limit"})
     if unknown:
         raise QueueError(f"[workers] in {root / 'se.toml'} holds unknown keys {', '.join(unknown)}; "
-                         "it holds local, cloud and claim_timeout_hours")
+                         "it holds local, cloud, claim_timeout_hours and queue_limit")
     key = "cloud" if cloud else "local"
     value = table.get(key, None if cloud else LOCAL_WORKERS)
     if value is None:
@@ -5265,10 +5269,15 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False,
 def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
     """Delivered, waiting for integration: the open pull requests to the integration branch whose
     description carries a complete field report, one that follows its template."""
-    pulls = json.loads(run_gh(root, [
+    return delivered_in(root, json.loads(run_gh(root, [
         "pr", "list", "--state", "open", "--base", integration_branch(root),
         "--json", "number,title,url,body", "--limit", "200", *repo_arguments(remote_repo(root) or repo),
-    ]))
+    ]) or "[]"))
+
+
+def delivered_in(root: Path, pulls: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The delivered pull requests among `pulls` (gh's or the GitHub tools' open pull requests to
+    the integration branch): those whose description carries a complete field report."""
     delivered = []
     for pull in pulls:
         try:
@@ -5278,6 +5287,63 @@ def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
         if not field_report_problems(report, None, project_version(root)):
             delivered.append(pull)
     return delivered
+
+
+QUEUE_LIMIT = 10  # [workers] queue_limit, unset: no worker starts while more delivered wait
+
+
+def queue_limit(root: Path) -> int:
+    """At most this many delivered pull requests wait for the integrator while a worker starts
+    (README "Workers"): `se.toml` `[workers]` `queue_limit`, default QUEUE_LIMIT. A worker started
+    behind a longer queue branches from a main several landings old and merges them all again."""
+    value = se_table(root, "workers").get("queue_limit", QUEUE_LIMIT)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise QueueError(f"[workers] queue_limit in {root / 'se.toml'} must be a whole number of at "
+                         f"least 0, not {value!r}")
+    return value
+
+
+def refuse_long_queue(root: Path, number: int, delivered: int) -> None:
+    """Refuse to start or claim work issue #`number` while more delivered pull requests wait for
+    the integrator than the queue limit (`queue_limit`), naming the count and the limit."""
+    limit = queue_limit(root)
+    if delivered > limit:
+        raise QueueError(f"Issue #{number} is not startable: {delivered} delivered pull requests "
+                         f"wait for the integrator, more than the queue limit of {limit} "
+                         "([workers] queue_limit in se.toml); start it once the integrator has "
+                         f"landed {delivered - limit}")
+
+
+def delivered_step(root: Path, repo: str) -> Step:
+    """The read of the open pull requests to the integration branch, for the session's GitHub
+    tools; those whose description carries a complete field report are delivered."""
+    return Step("delivered", "list_pull_requests", {**owner_repo(remote_repo(root) or repo),
+                                                    "state": "open", "base": integration_branch(root),
+                                                    "perPage": 100},
+                note="a pull request is delivered where its description carries a complete field "
+                     "report: save the description to a file and run work_tickets.py field-report "
+                     "--check <file> on it")
+
+
+def delivered_count(root: Path, number: int, repo: str, door: object | None,
+                    delivered_file: Path | None, command: str) -> int:
+    """How many delivered pull requests wait, for `start` or `claim` of #`number`: read with gh,
+    else through kern's relay (`delivered_step`), else from `delivered_file`, the GitHub tools'
+    `list_pull_requests` answer saved unchanged. Not read is no empty queue (rule gen-003)."""
+    if not hand_off():
+        return len(delivered_pull_requests(root, repo))
+    step = delivered_step(root, repo)
+    if door is not None:
+        answer = door.ask(step.tool, step.arguments)
+    elif delivered_file is not None:
+        answer = json_answer(delivered_file, "delivered pull requests")
+    else:
+        raise QueueError(
+            f"{command}: no worker starts while more than {queue_limit(root)} delivered pull "
+            f"requests wait ([workers] queue_limit in se.toml), so {command} counts them: list them "
+            f"with your GitHub tools ({step.tool}, {json.dumps(step.arguments)}), save the answer "
+            f"unchanged and pass --delivered <file> ({WITHOUT_GH})")
+    return len(delivered_in(root, tool_items(answer, "pull_requests")))
 
 
 def queue(
@@ -9740,8 +9806,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(STARTED_NONE_HERE)
         return short
     started, waiting = start_startable(root, tracker)
-    print(f"Started: {started}" + (f"; {waiting} startable wait for capacity, the next landing "
-                                   "starts them" if waiting else ""))
+    print(f"Started: {started}" + (f"; {waiting} startable wait for capacity or for the landing "
+                                   "queue ([workers] queue_limit), the next landing starts them"
+                                   if waiting else ""))
     return short
 
 
@@ -9753,8 +9820,11 @@ STARTED_NONE_HERE = "Started: none here; start what is unblocked with the host's
 def start_startable(root: Path, repo: str) -> tuple[int, int]:
     """Start every startable work issue while capacity is left (`capacity`: the worker limit, on a
     local device also its cores and memory), as `integrate` does after each landing, so a worker
-    that finished frees its place for the next. How many started, and how many wait."""
+    that finished frees its place for the next; none while more delivered pull requests wait
+    than the queue limit (`queue_limit`). How many started, and how many wait."""
     startable = ready_issues(root, repo)
+    if startable and len(delivered_pull_requests(root, repo)) > queue_limit(root):
+        return 0, len(startable)
     for index, candidate in enumerate(startable):
         slots = capacity(root, repo)
         if slots is not None and slots <= 0:
@@ -12286,8 +12356,16 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+DELIVERED = arg("--delivered", type=Path, metavar="FILE",
+                help="without gh, off kern's relay: the open pull requests to the integration "
+                     "branch as your GitHub tools' list_pull_requests answered them, saved "
+                     "unchanged; refused while more than [workers] queue_limit in se.toml "
+                     "(default 10) of them carry a complete field report")
+
+
 @command("start", "start a ready work issue: claim its branch on the issue's remote, worktree "
-                  "from it, label in-progress; "
+                  "from it, label in-progress; refused while more delivered pull requests wait "
+                  "than [workers] queue_limit; "
                   "without gh, the label change and the Started comment as GitHub steps, or "
                   "through kern's relay where it serves the checkout",
          WORKTREE,
@@ -12309,13 +12387,14 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
              help="without gh, off kern's relay, where a worker limit holds ([workers] in "
                   "se.toml): the open issues labelled in-progress as your GitHub tools' "
                   "list_issues answered it, saved unchanged; start refuses while as many workers "
-                  "run as the limit"))
+                  "run as the limit"),
+         DELIVERED)
 def run_start(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     if hand_off():
         path, url, branch = start_handed_off(root, args.issue, repo, args.worktree_root,
                                              args.create, args.cloud_agent, args.issue_body,
-                                             args.blockers, args.running)
+                                             args.blockers, args.running, args.delivered)
         sent = relay_door(root, repo) is not None
     else:
         path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
@@ -12333,16 +12412,21 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
 
 @command("claim", "claim a ready issue for a session-tool start: its branch at the newest main "
                   "on the issue's remote, or an unused claim there; refused where another start "
-                  "holds it",
+                  "holds it, or while more delivered pull requests wait than [workers] "
+                  "queue_limit",
          WORKTREE,
          arg("issue", type=int),
          REPO,
          arg("--issue-body", type=Path, metavar="FILE",
              help="without gh, off kern's relay: the issue as your GitHub tools' issue_read "
-                  "(method get) answered it, for its branch name and its labels"))
+                  "(method get) answered it, for its branch name and its labels"),
+         DELIVERED)
 def run_claim(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     issue = claimed_issue(root, args.issue, repo, args.issue_body)
+    door = relay_door(root, repo) if hand_off() else None
+    refuse_long_queue(root, args.issue, delivered_count(root, args.issue, repo, door,
+                                                        args.delivered, "claim"))
     branch, commit = str(issue["title"]), newest_integration_commit(root)
     remote = claim(root, args.issue, repo, branch, commit,
                    reuse=IN_PROGRESS_LABEL not in issue_labels(issue))
@@ -12497,17 +12581,12 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
     limit = worker_limit(root, cloud=True)
     where = owner_repo(repo)
     labels = [] if all_repos else [repository_label(root)]
-    base = integration_branch(root)
     return Plan(f"queue of {repo}", (
         pause_step(repo),
         Step("escalations", "list_issues", {**where, "state": "OPEN",
                                             "labels": ["escalated", *labels], "perPage": 100},
              note="each issue listed is an escalation"),
-        Step("delivered", "list_pull_requests", {**owner_repo(remote_repo(root) or repo),
-                                                 "state": "open", "base": base, "perPage": 100},
-             note="a pull request is delivered where its description carries a complete field "
-                  "report: save the description to a file and run work_tickets.py field-report "
-                  "--check <file> on it"),
+        delivered_step(root, repo),
         Step("ready", "list_issues", {**where, "state": "OPEN", "labels": ["work", "ready", *labels],
                                       "perPage": 100},
              note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS

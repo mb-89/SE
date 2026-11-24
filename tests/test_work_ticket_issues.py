@@ -1984,8 +1984,9 @@ class StartableFleet:
     """GitHub's work issues, faked for start: each startable issue is labelled ready until a start
     labels it in-progress; `finish` closes one, as its landing does."""
 
-    def __init__(self, count: int) -> None:
+    def __init__(self, count: int, delivered: int = 0) -> None:
         self.labels = {number: "ready" for number in range(1, count + 1)}
+        self.delivered = delivered  # the pull requests delivered, waiting for the integrator
 
     def ready(self, root, repo, all_repos=False, allow_existing_branch=False):
         return [{"number": number, "title": f"feature-{number}"}
@@ -2002,6 +2003,13 @@ class StartableFleet:
             return json.dumps({"body": ""})
         if args[:2] in (["issue", "edit"], ["issue", "comment"]) and "--body-file" in args:
             return ""
+        if args[:2] == ["issue", "list"] and "escalated" in args:
+            return json.dumps([])
+        if args[:2] == ["pr", "list"]:
+            return json.dumps([{"number": 100 + n, "title": f"delivered-{n}", "url": f"{URL}/{n}",
+                                "body": f"Fixes {URL}\n\n{COMPLETE_REPORT}"}
+                               for n in range(self.delivered)]
+                              + [{"number": 99, "title": "draft", "url": URL, "body": "wip"}])
         raise AssertionError(f"gh {args}")
 
     def finish(self, number: int) -> None:
@@ -2031,6 +2039,70 @@ def test_six_startable_issues_with_a_limit_of_four_start_four_and_a_fifth_when_o
     fleet.finish(2)  # its landing closes it, and integrate then starts what is unblocked
     assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (1, 1)
     assert fleet.running() == [1, 3, 4, 5]
+
+
+def startable_fleet(worktree: Path, monkeypatch, delivered: int, table: str = "") -> StartableFleet:
+    """Three startable issues on a local device with room for them all, `delivered` pull requests
+    waiting for the integrator, and `table` as se.toml's `[workers]`."""
+    (worktree / "se.toml").write_text(f"{IDENTITY}[workers]\nlocal = 8\n{table}", encoding="utf-8")
+    fleet = StartableFleet(3, delivered)
+    monkeypatch.setattr(work_tickets.os, "cpu_count", lambda: 64)
+    monkeypatch.setattr(work_tickets.sys, "platform", "not-windows")
+    monkeypatch.setattr(work_tickets, "run_gh", fleet.gh)
+    monkeypatch.setattr(work_tickets, "ready_issues", fleet.ready)
+    monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: [])
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "start_worktree",
+                        lambda root, number, repo, branch, worktree_root, create: worktree / branch)
+    return fleet
+
+
+def test_start_refuses_while_more_than_ten_delivered_pull_requests_wait_and_starts_at_ten(
+        worktree, monkeypatch):
+    fleet = startable_fleet(worktree, monkeypatch, delivered=11)
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.start(worktree, 1, "git.example/owner/repo", None, True)
+    assert str(refused.value) == (
+        "Issue #1 is not startable: 11 delivered pull requests wait for the integrator, more than "
+        "the queue limit of 10 ([workers] queue_limit in se.toml); start it once the integrator "
+        "has landed 1")
+    assert fleet.running() == []  # nothing claimed or labelled
+    assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (0, 3)
+    assert fleet.running() == []
+
+    fleet.delivered = 10  # the integrator landed one
+    assert work_tickets.start(worktree, 1, "git.example/owner/repo", None, True) == worktree / "feature-1"
+    assert fleet.running() == [1]
+    assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (2, 0)
+
+
+def test_a_queue_limit_of_three_is_read_and_applied_by_start_and_claim(
+        worktree, monkeypatch, capsys):
+    fleet = startable_fleet(worktree, monkeypatch, delivered=4, table="queue_limit = 3\n")
+    assert work_tickets.queue_limit(worktree) == 3
+    with pytest.raises(work_tickets.QueueError, match="4 delivered pull requests wait for the "
+                       "integrator, more than the queue limit of 3"):
+        work_tickets.start(worktree, 1, "git.example/owner/repo", None, True)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: {
+        "number": number, "title": f"feature-{number}", "labels": [{"name": "ready"}]})
+    monkeypatch.setattr(work_tickets, "claim", lambda *args, **kwargs: pytest.fail("claimed"))
+    assert work_tickets.main(["claim", "2", "--worktree", str(worktree),
+                              "--repo", "git.example/owner/repo"]) == 1
+    assert "4 delivered pull requests wait" in capsys.readouterr().err
+
+    fleet.delivered = 3
+    assert work_tickets.start(worktree, 1, "git.example/owner/repo", None, True) == worktree / "feature-1"
+    assert fleet.running() == [1]
+
+
+@pytest.mark.parametrize("value", ["-1", "true", '"ten"', "2.5"])
+def test_a_queue_limit_that_is_no_whole_number_of_at_least_zero_is_refused(worktree, value):
+    (worktree / "se.toml").write_text(f"{IDENTITY}[workers]\nqueue_limit = {value}\n",
+                                      encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match="queue_limit in .* must be a whole number"):
+        work_tickets.queue_limit(worktree)
+    assert work_tickets.worker_limit(worktree, cloud=False) == 4  # a key [workers] holds
 
 
 def test_queue_lists_delivered_pull_requests_escalations_and_startable_work(worktree, monkeypatch):
@@ -2680,7 +2752,7 @@ def test_start_without_gh_after_its_own_claim_plans_the_label_change_and_the_com
     assert run(first, "claim", "5", *repo) == 0
     answer = started_without_gh(monkeypatch, tmp_path)
 
-    assert run(first, "start", "5", *repo, "--issue-body", str(answer)) == 0
+    assert run(first, "start", "5", *repo, "--issue-body", str(answer), *no_queue(tmp_path)) == 0
     out = capsys.readouterr().out
     steps = [line.split(" ", 2)[1] for line in out.splitlines() if line[:1].isdigit()]
     assert steps == ["list_issues", "issue_write", "issue_write", "issue_write", "add_issue_comment"]
@@ -2701,9 +2773,27 @@ def test_the_issue_remote_is_the_remote_naming_the_issue_repository_else_its_url
         "https://elsewhere.example/owner/repo.git"
 
 
+def delivered_answer(tmp_path: Path, count: int) -> Path:
+    """The open pull requests to main as list_pull_requests answers them: `count` delivered, each
+    with a complete field report, and one without a report, which is not."""
+    saved = tmp_path / f"delivered-{count}.json"
+    saved.write_text(json.dumps([
+        {"number": 100 + n, "title": f"feature-{n}", "body": f"Fixes {URL}\n\n{COMPLETE_REPORT}"}
+        for n in range(count)] + [{"number": 99, "title": "draft", "body": f"Fixes {URL}\n"}]),
+        encoding="utf-8")
+    return saved
+
+
+def no_queue(tmp_path: Path) -> tuple[str, str]:
+    """`--delivered` with `started_without_gh`'s answer: no delivered pull request waits."""
+    return "--delivered", str(tmp_path / "delivered-0.json")
+
+
 def started_without_gh(monkeypatch, tmp_path: Path, labels=("work", "ready")) -> Path:
     """No usable gh, as in Claude's cloud, whose worker limit is open by default: every gh call fails
-    the test; the issue as the GitHub tools answer it."""
+    the test; the issue as the GitHub tools answer it. Saved beside it, `delivered-0.json`: no
+    delivered pull request waits (`delivered_answer`)."""
+    delivered_answer(tmp_path, 0)
     monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
@@ -2718,7 +2808,7 @@ def test_start_without_gh_prints_the_label_change_and_the_started_comment_as_ste
         main_checkout, monkeypatch, capsys, tmp_path):
     answer = started_without_gh(monkeypatch, tmp_path)
 
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 0
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path)) == 0
     out = capsys.readouterr().out
     worktree = main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"
     assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
@@ -2739,7 +2829,7 @@ def test_start_without_gh_assigns_a_cloud_worker_in_its_steps(
         main_checkout, monkeypatch, capsys, tmp_path):
     answer = started_without_gh(monkeypatch, tmp_path)
 
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path),
                "--cloud-agent", "worker-login") == 0
     out = capsys.readouterr().out
     assert '"assignees": ["worker-login"]' in out and "Launch worker:" not in out
@@ -2777,15 +2867,15 @@ def test_start_without_gh_on_a_local_device_counts_the_workers_running_against_t
     monkeypatch.delenv("CLAUDE_CODE_REMOTE")
     worktrees = main_checkout.parent / f"{main_checkout.name}.worktrees"
 
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path)) == 1
     err = capsys.readouterr().err
     assert "at most 4 workers run at once" in err and "--running <file>" in err
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path),
                "--running", str(running_file(tmp_path, main_checkout, 4))) == 1
     assert "4 workers run, the worker limit is 4" in capsys.readouterr().err
     assert not worktrees.exists()
 
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path),
                "--running", str(running_file(tmp_path, main_checkout, 3))) == 0
     assert (worktrees / "feature-example-20261104").is_dir()
 
@@ -2795,9 +2885,32 @@ def test_start_without_gh_in_the_cloud_with_a_limit_lists_the_workers_running(
     answer = started_without_gh(monkeypatch, tmp_path)
     with (main_checkout / "se.toml").open("a", encoding="utf-8") as settings:
         settings.write("\n[workers]\ncloud = 2\n")
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path),
                "--running", str(running_file(tmp_path, main_checkout, 2))) == 1
     assert "2 workers run, the worker limit is 2" in capsys.readouterr().err
+
+
+def test_start_without_gh_counts_the_delivered_pull_requests_against_the_queue_limit(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+    worktrees = main_checkout.parent / f"{main_checkout.name}.worktrees"
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    err = capsys.readouterr().err
+    assert "more than 10 delivered pull requests wait" in err and "--delivered <file>" in err
+    assert '"list_pull_requests"' not in err and "list_pull_requests, " in err
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--delivered", str(delivered_answer(tmp_path, 11))) == 1
+    assert ("11 delivered pull requests wait for the integrator, more than the queue limit of 10"
+            in capsys.readouterr().err)
+    assert run(main_checkout, "claim", "5", "--issue-body", str(answer),
+               "--delivered", str(delivered_answer(tmp_path, 11))) == 1
+    assert "11 delivered pull requests wait" in capsys.readouterr().err
+    assert not worktrees.exists()
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--delivered", str(delivered_answer(tmp_path, 10))) == 0
+    assert (worktrees / "feature-example-20261104").is_dir()
 
 
 def blocked_answer(tmp_path: Path, body: str, summary: int | None = None) -> Path:
@@ -2822,12 +2935,12 @@ def test_start_without_gh_holds_an_issue_whose_blocked_by_names_an_open_or_unrea
     answer = blocked_answer(tmp_path, blocked_by("#4"))
     worktrees = main_checkout.parent / f"{main_checkout.name}.worktrees"
 
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path)) == 1
     err = capsys.readouterr().err
     assert "#4 (not read)" in err and "--blockers <file>" in err
     assert not worktrees.exists()
 
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path),
                "--blockers", str(blockers_file(tmp_path, "open", None))) == 1
     assert "#4 (open)" in capsys.readouterr().err
     assert not worktrees.exists()
@@ -2837,7 +2950,7 @@ def test_start_without_gh_starts_once_its_blocker_is_closed_as_completed(
         main_checkout, monkeypatch, capsys, tmp_path):
     started_without_gh(monkeypatch, tmp_path)
     plain = started_without_gh(monkeypatch, tmp_path)
-    assert run(main_checkout, "start", "5", "--issue-body", str(plain)) == 0
+    assert run(main_checkout, "start", "5", "--issue-body", str(plain), *no_queue(tmp_path)) == 0
     expected = capsys.readouterr().out
     git_ok("-C", str(main_checkout), "worktree", "remove", "--force",
            str(main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"))
@@ -2845,7 +2958,7 @@ def test_start_without_gh_starts_once_its_blocker_is_closed_as_completed(
     git_ok("-C", str(main_checkout), "push", "-q", "origin", f":refs/heads/{BRANCH}")  # its claim
 
     answer = blocked_answer(tmp_path, blocked_by("#4"))
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path),
                "--blockers", str(blockers_file(tmp_path, "closed", "completed"))) == 0
     assert capsys.readouterr().out == expected
 
@@ -2854,7 +2967,7 @@ def test_start_without_gh_holds_an_issue_its_answer_counts_a_link_for(
         main_checkout, monkeypatch, capsys, tmp_path):
     started_without_gh(monkeypatch, tmp_path)
     answer = blocked_answer(tmp_path, blocked_by(), summary=1)
-    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer), *no_queue(tmp_path)) == 1
     assert "linked as blocking it" in capsys.readouterr().err
     assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
 
@@ -2898,6 +3011,8 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
         method = input_.get("method")
         if tool == "list_issues":
             return {"issues": []}
+        if tool == "list_pull_requests":
+            return []
         if tool == "issue_read" and method == "get":
             return {"number": 5, "title": BRANCH, "html_url": URL, "labels": list(labels),
                     "body": body[0]}
@@ -2919,12 +3034,15 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
         assert run(main_checkout, "start", "5") == 0
 
     assert [(tool, input_.get("method")) for tool, input_ in asked] == [
-        ("list_issues", None), ("issue_read", "get"), ("issue_read", "get_labels"),
-        ("issue_write", "update"), ("issue_read", "get_labels"), ("issue_write", "update"),
-        ("issue_read", "get"), ("issue_write", "update"), ("add_issue_comment", None)]
+        ("list_issues", None), ("issue_read", "get"), ("list_pull_requests", None),
+        ("issue_read", "get_labels"), ("issue_write", "update"), ("issue_read", "get_labels"),
+        ("issue_write", "update"), ("issue_read", "get"), ("issue_write", "update"),
+        ("add_issue_comment", None)]
+    assert asked[2][1] == {"owner": "owner", "repo": "repo", "state": "open", "base": "main",
+                           "perPage": 100}
     assert labels == ["work", "in-progress"]
     assert body[0] == "<!-- se:fleet -->\n<!-- se:beat 2026-11-23T08:30Z -->\n\n## Situation\n"
-    assert asked[7][1]["labels"] == ["in-progress", "work"]  # the gate judges it by its template
+    assert asked[8][1]["labels"] == ["in-progress", "work"]  # the gate judges it by its template
     assert asked[-1][1]["body"] == f"Started: worker session on branch `{BRANCH}`\n"
     out = capsys.readouterr().out
     assert "GitHub plan:" not in out and "Started #5\n" in out
