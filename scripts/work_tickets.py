@@ -6134,6 +6134,61 @@ def refuse_dangling(repo: str, command: str, body: str) -> None:
             + "\n".join(f"  {finding}" for finding in found))
 
 
+#: Another repository's issue in a work issue's Blocked by: `<owner>/<repository>#<n>`, or a link
+#: to it, `.../<owner>/<repository>/issues/<n>`.
+FOREIGN_ISSUE = re.compile(
+    r"(?:(?<![\w./-])(?P<short>[\w.-]+/[\w.-]+)#\d+\b)"
+    r"|(?:/(?P<linked>[\w.-]+/[\w.-]+)/(?:issues|pull)/\d+\b)")
+#: The release a line names: a semantic version, `v2.3.0` or `2.3.0`.
+RELEASE_VERSION = re.compile(r"(?<![\w.])v?\d+\.\d+\.\d+\b")
+#: A premise the Approach states about the code: a line `Premise: <what holds> (checked: <how>)`,
+#: the work template's Approach says (templates/work.md).
+PREMISE_LINE = re.compile(r"^\s*(?:[-*]\s+)?\**premise\**\s*:", re.IGNORECASE)
+#: How a premise was checked: `checked:` and then the file and line read (`<file>:<line>`) or the
+#: command run, as a code span.
+PREMISE_CHECK = re.compile(r"\bchecked\s*:\s*.*?(?:[\w./-]+:\d+|`[^`]+`)", re.IGNORECASE)
+
+
+def unreleased_blockers(repo: str, body: str) -> list[str]:
+    """The lines of the body's Blocked by that name another repository's issue and no release:
+    a part another repository owns blocks the work only through its release, at a version the
+    work's pin admits (agents/se.md, Work issues)."""
+    own = api_repo(repo).casefold()
+    found = []
+    for line in section(markdown_sections(body), "blocked by").splitlines():
+        foreign = [match.group("short") or match.group("linked")
+                   for match in FOREIGN_ISSUE.finditer(line)]
+        if any(name.casefold() != own for name in foreign) and not RELEASE_VERSION.search(line):
+            found.append(line.strip())
+    return found
+
+
+def unchecked_premises(body: str) -> list[str]:
+    """The `Premise:` lines of the body's Approach that name no check: neither the file and line
+    read nor the command run (templates/work.md, Approach)."""
+    found, fenced = [], False
+    for line in section(markdown_sections(body), "approach").splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and PREMISE_LINE.match(line) and not PREMISE_CHECK.search(line):
+            found.append(line.strip())
+    return found
+
+
+def refuse_unchecked_filing(repo: str, command: str, body: str) -> None:
+    """Refuse a work issue whose Blocked by names another repository's issue without its release
+    (`unreleased_blockers`), or whose Approach states a premise about the code without its check
+    (`unchecked_premises`), naming each line."""
+    problems = [f"  Blocked by: {line}: another repository's issue blocks only through its "
+                "release; name the release at a version the pin admits, `<owner>/<repository>#<n>, "
+                "released in v<x.y.z>`, or split the requirement off as that repository's issue"
+                for line in unreleased_blockers(repo, body)]
+    problems += [f"  Approach: {line}: name how the premise was checked, `(checked: <file>:<line> "
+                 "read)` or `(checked: `<command>` run)`" for line in unchecked_premises(body)]
+    if problems:
+        raise QueueError(f"{command}: the work issue is not ready to file:\n" + "\n".join(problems))
+
+
 def template_of(name: str):
     """The template `name` of SE's templates (`templates.load`), a QueueError where they do not load."""
     templates = sibling("templates")
@@ -6548,6 +6603,7 @@ def file_work_issue(
     labels = [*(label for label in work_labels(root, repo) if ready or label != "ready"),
               *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
+    refuse_unchecked_filing(repo, "file", body)
     if gate:
         filing_check(root, repo, "file")
     first = [label for label in labels if not blockers or label != "ready"]
