@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Read names from the core that runs in a checkout, live: SE's one reader of a kern name.
 
 The core's standing file (`<checkout>/.se/.runtime/standing.json`, kern's README "The host")

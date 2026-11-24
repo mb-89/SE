@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """SE's request guards under GitHub Copilot: each path where SE, under Copilot, would make Copilot
 call its model more often than the person's own prompts, and the se.toml setting that turns that
 guard off. docs/copilot.md "What a session costs" owns the costs and their sources.

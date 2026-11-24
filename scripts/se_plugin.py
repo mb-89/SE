@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Generate the se plugin's agents and skills for Claude Code and Copilot from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
@@ -71,6 +73,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 _lint_spec = importlib.util.spec_from_file_location("agent_lint", Path(__file__).with_name("agent_lint.py"))
@@ -808,7 +811,7 @@ def build(root: Path = ROOT) -> list[PurePosixPath]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="se_plugin.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="se_plugin.py", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("build", "check"),
                         help="build: write the layout from src/ and guidance/; check: refuse when they "
                         "differ or the guidance check refuses a note")
@@ -839,4 +842,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

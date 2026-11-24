@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Import adapters: bring a template from its source tool into a template repository's Markdown
 (docs/templates.md "Template repositories").
 
@@ -60,6 +61,7 @@ import re
 import sys
 from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path, PurePosixPath
+import se_script
 
 IMPORTS_FILE = "imports.yaml"
 #: The keys of an import's entry: the required ones, then the template's keys it may add.
@@ -276,7 +278,7 @@ def refresh(folder: Path) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="template_import.py",
+    parser = se_script.parser(prog="template_import.py",
                                      description="bring imported templates up to date from their source tools")
     commands = parser.add_subparsers(dest="command", required=True)
     refreshing = commands.add_parser("refresh", help="write each imported template whose source changed")
@@ -294,4 +296,4 @@ def main(arguments: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

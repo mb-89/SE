@@ -1,8 +1,10 @@
+# se:template se/python-module 1.0.0
 """`se component add <name>`: scaffold an ad hoc component (docs/go-core.md "Scripts are ad hoc,
 components are long-term").
 
 An ad hoc component is a Python component over NATS that lives under the ignored `.se/components/`,
-so it is never tracked. `add` writes its `component.toml` and `__init__.py`, places it in the ad hoc
+so it is never tracked. `add` writes its `component.toml` and `__init__.py` through SE's code
+template `python-component` (`scaffolded`, docs/templates.md "Code templates"), places it in the ad hoc
 wiring overlay `.se/wiring.toml` that the core reads after `wiring.toml`, and prints the one step
 left: restart the core, which picks it up in about 30 ms. What keeps being used is promoted to a
 tracked component under `components/` (retro.py collect names the candidates).
@@ -32,40 +34,19 @@ class ComponentError(Exception):
     """Why an ad hoc component could not be scaffolded."""
 
 
-def component_toml(name: str) -> str:
-    """The scaffolded component.toml: one command, offered to the agent."""
-    return (f'# An ad hoc component scaffolded by `se component add {name}` (SE\'s docs/go-core.md\n'
-            '# "Scripts are ad hoc, components are long-term"). It lives under the ignored\n'
-            '# .se/components/, so it is never tracked; edit it freely, then restart the core.\n'
-            f'name = "{name}"\n'
-            'contract = 1\n'
-            f'help = "An ad hoc component: say what {name} does."\n'
-            '\n'
-            f'[commands."{name} run"]\n'
-            f'usage = "{name} run [WORDS...]"\n'
-            'summary = "Do the ad hoc work."\n'
-            'group = "Ad hoc"\n'
-            f'help = "Replace this with what {name} does; the scaffold echoes its words."\n'
-            'class = "batch"\n'
-            'session = true\n')
+#: The code template the scaffold renders, SE's own (templates/python-component.md).
+TEMPLATE = "python-component"
 
 
-def init_py(name: str) -> str:
-    """The scaffolded __init__.py: a Python component over NATS, one command answered."""
-    ident = name.replace("-", "_")
-    return ('"""An ad hoc component scaffolded by `se component add` (SE\'s docs/go-core.md "Scripts\n'
-            'are ad hoc, components are long-term"). Add inputs, outputs, commands or verbs to\n'
-            'component.toml and answer them here; kern\'s Python SDK is python/kern/ in kern\'s clone, .se/modules/kern.\n'
-            '"""\n'
-            '\n'
-            'from kern import component\n'
-            '\n'
-            f'{ident} = component("{name}")\n'
-            '\n'
-            '\n'
-            f'@{ident}.command("{name} run")\n'
-            'def run(args, inputs, say):\n'
-            f'    return {ident}.result("ad hoc {name} ran: " + " ".join(args))\n')
+def scaffolded(name: str) -> dict[str, str]:
+    """The component's files, by name, as the code template TEMPLATE scaffolds them for `name`:
+    its component.toml, one command offered to the agent, and its __init__.py answering it."""
+    import code_templates  # the engine loads late: only a scaffold needs it
+    import templates
+
+    made = code_templates.scaffold(templates.own(TEMPLATE), COMPONENTS / name,
+                                   f"An ad hoc component: say what {name} does.", name)
+    return {path.name: text for path, text in made.items()}
 
 
 def instance_block(name: str) -> str:
@@ -84,9 +65,10 @@ def add(root: Path, name: str) -> list[str]:
     folder = root / COMPONENTS / name
     if folder.exists():
         raise ComponentError(f"{folder} already exists: an ad hoc component {name} is already here")
+    files = scaffolded(name)
     folder.mkdir(parents=True)
-    (folder / "component.toml").write_text(component_toml(name), encoding="utf-8", newline="\n")
-    (folder / "__init__.py").write_text(init_py(name), encoding="utf-8", newline="\n")
+    for file, text in files.items():
+        (folder / file).write_text(text, encoding="utf-8", newline="\n")
 
     overlay = root / OVERLAY
     block = instance_block(name)
