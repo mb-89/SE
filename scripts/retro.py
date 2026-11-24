@@ -3,9 +3,9 @@
 """Retro commands: the mechanical half of a retro, the facts the judging agent starts from.
 
 `retro.py collect <retro issue>` reads the window from GitHub: every work issue closed since the
-last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed;
-where none has, since the oldest open retro issue was created, and the whole history only where no
-retro issue exists. `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
+last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed,
+and the whole history, from the project's first issue, where none has (docs/fleet.md "Retro due":
+a retro covers everything up to its start). `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
 issue closed (whose findings it then scores); the rule checks judge that window alone. Each issue
 comes with the field report of the pull request that landed
 it, found through the landing pull request's `<!-- se:field-report-in <n> -->` marker. It writes a
@@ -505,9 +505,9 @@ def not_delivered(report: str) -> list[str]:
 
 
 # Where a window starts (Window.start): the close of the last closed retro issue (or of the one
-# --retro names), the time --since gives, the creation of the oldest open retro issue where none
-# has closed, or nowhere: the whole history, where no retro issue exists.
-CLOSED_RETRO, GIVEN, OPEN_RETRO, HISTORY = "closed-retro", "given", "open-retro", "history"
+# --retro names), the time --since gives, or nowhere: the whole history, where no retro issue has
+# closed.
+CLOSED_RETRO, GIVEN, HISTORY = "closed-retro", "given", "history"
 
 
 @dataclass
@@ -656,22 +656,15 @@ class Read:
         return moment is not None and (since is None or moment > since)
 
 
-def window_start(door, last: Issue | None, since: str | None) -> tuple[str | None, int | None, str] | None:
+def window_start(last: Issue | None, since: str | None) -> tuple[str | None, int | None, str]:
     """Where the window starts, as (since, since_retro, start): the time `since` gives, else the
-    close of `last`, else the creation of the oldest open retro issue (read through `door`), else
-    the whole history; None where the door is still missing answers."""
+    close of `last`, else the whole history, from the project's first issue: a first retro
+    covers everything up to its start (docs/fleet.md "Retro due"), an open retro issue included."""
     if since is not None:
         return since, None, GIVEN
     if last is not None:
         return last.closed_at, last.number, CLOSED_RETRO
-    opened = [issue_of(item) for item in door.open_issues()]
-    if door.missing:
-        return None
-    oldest = min((issue for issue in opened if is_retro(issue) and when(issue.created_at)),
-                 key=lambda issue: when(issue.created_at), default=None)
-    if oldest is None:
-        return None, None, HISTORY
-    return oldest.created_at, oldest.number, OPEN_RETRO
+    return None, None, HISTORY
 
 
 def read_window(door, number: int, since: str | None = None,
@@ -705,9 +698,7 @@ def read_window(door, number: int, since: str | None = None,
                              f"{RETRO_TITLE}... or labelled {RETRO_LABEL}) other than #{number}")
     else:
         last = max(retros, key=lambda issue: when(issue.closed_at), default=None)
-    start = window_start(door, last, since)
-    if start is None:
-        return None
+    start = window_start(last, since)
     moment = when(start[0])
     # An issue closed in the window was updated in it: only those are read one by one.
     if not completed([issue for issue in issues if WORK_LABEL in issue.labels
@@ -1446,14 +1437,12 @@ def collect_lines(found: Collected) -> list[str]:
     window = found.window
     starts = {
         CLOSED_RETRO: f"when retro #{window.since_retro} closed",
-        GIVEN: "as --since gives",
-        OPEN_RETRO: f"when retro #{window.since_retro}, the oldest open retro issue, was created; "
-                    "no retro issue has closed"}
+        GIVEN: "as --since gives"}
     if window.since:
         lines = [f"Window: work issues closed after {window.since}, {starts[window.start]}, "
                  f"up to {window.until}."]
     else:
-        lines = [f"Window: the whole history up to {window.until}; no retro issue exists."]
+        lines = [f"Window: the whole history up to {window.until}; no retro issue has closed."]
     previous = (found.previous or {}).get("sizes") or {}
     lines += ["", "### Sizes", ""]
     if previous:

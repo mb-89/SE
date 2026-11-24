@@ -292,33 +292,27 @@ def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(
     assert broken == [{"item": "#25", "what": "names #15, which is not labelled work"}]
 
 
-def test_without_a_closed_retro_the_window_starts_at_the_oldest_open_retro(checkout):
-    """No retro issue has closed: the window starts when the oldest open one was created, and the
-    rule checks judge that window alone; with no retro issue at all, it is the whole history."""
+def test_without_a_closed_retro_the_window_is_the_whole_history(checkout):
+    """No retro issue has closed: the window starts at the project's first issue, whatever retro
+    issue is open, this one among them, so a first retro collects every landed issue."""
     given = answers(checkout)
     given["issues.json"] = [item for item in given["issues.json"] if item["number"] != 5]
     given["open-issues.json"] = [
-        {**issue(31, "docs/retro-20261105", None), "state": "open",
+        {**issue(30, "docs/retro-20261105", None), "state": "open",
          "created_at": "2026-11-05T00:00:00Z"},
-        {**issue(30, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
+        {**issue(31, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
          "createdAt": "2026-11-02T13:00:00Z"},
         {**issue(29, "feat/open", None), "state": "open", "created_at": "2026-10-01T00:00:00Z"}]
     found = collected(checkout, given)
 
-    assert found.window == retro.Window(30, "2026-11-02T13:00:00Z", 30, "2026-11-12T12:00:00Z",
-                                        retro.OPEN_RETRO)
-    assert [item.number for item in found.issues] == [12, 13, 14]
+    assert found.window == retro.Window(30, None, None, "2026-11-12T12:00:00Z", retro.HISTORY)
+    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
+    assert [item.number for item in found.issues if item.landed] == [11, 12]
     assert found.previous is None
     checks = {check.name: check for check in found.checks}
-    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (2, 3)
-    assert "when retro #30, the oldest open retro issue, was created" in retro.draft(found)
-
-    given["open-issues.json"] = given["open-issues.json"][2:]
-    found = collected(checkout, given)
-    assert found.window.since is None and found.window.start == retro.HISTORY
-    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
-    assert {check.name: check for check in found.checks}["outside-pr"].checked == 5
-    assert "the whole history up to" in retro.draft(found)
+    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (3, 5)
+    assert "the whole history up to 2026-11-12T12:00:00Z; no retro issue has closed" in (
+        retro.draft(found))
 
 
 def test_since_narrows_the_window_and_the_rule_checks(checkout):

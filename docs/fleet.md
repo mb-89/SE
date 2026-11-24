@@ -121,7 +121,8 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
   reason and its number, until the person has decided its findings in an SE session and it is
   closed. Running work goes on, and issues keep coming back; they count towards the next run.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
-  due included; its counters reset when it starts (its issue's creation), so a late retro never
+  due included, and a first retro, where none has closed, the whole history from the project's
+  first issue; its counters reset when it starts (its issue's creation), so a late retro never
   makes the next one due at once.
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
   session; its first step asks the person for the field feedback.

@@ -253,8 +253,9 @@ writes.
 `retro.py collect` is a retro's mechanical half.
 
 Its window is every work issue closed since the last closed retro issue (titled
-`docs/retro-...` or labelled `retro`) closed. Where none has, it starts when the oldest open retro
-issue was created; only where no retro issue exists is it the whole history.
+`docs/retro-...` or labelled `retro`) closed. Where none has, it is the whole history, from the
+project's first issue, whatever retro issue is open ([Retro due](fleet.md#retro-due): a retro
+covers everything up to its start).
 
 `--since` starts the window at a date (`YYYY-MM-DD`) or time, `--retro` where that closed retro
 issue closed, whose findings it then scores; the rule checks judge only the window.
