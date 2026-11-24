@@ -201,6 +201,9 @@ pass it; they refuse:
     `work_tickets.py suite` in budget.
   - On a pull request it also runs `pr_issues.py`, the work model's rule that the description
     names an open work issue ([Integration branch](src/skills/work-model/SKILL.md#integration-branch)).
+  - On a pull request it also runs the action `release-kind` (`pr_issues.py --release-kind`), the
+    work model's rule that the description states its release kind
+    ([Release kind](src/skills/work-model/SKILL.md#release-kind)).
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
 - Two layers, and no third: the public list is committed and holds every term that may be
