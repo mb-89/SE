@@ -166,11 +166,15 @@ its tools.
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - **Releases**: a landing only records its release kind; the version moves when you ask the
   integrator for a release, the message `release` (its [Release](integrator.md#release)); the
-  integrator never asks for one. Ask only when a release says something to whoever uses the
-  project, as several landings belong to one release:
-  - before the person shares the project, or when the person asks for a release;
-  - when a dependent project needs a change that landed here and its pin takes released versions
-    only (a `version` range, README [Modules](../README.md#modules)).
+  integrator never asks for one.
+  - A release follows the work ([Roles and flow](../skills/work-model/SKILL.md#roles-and-flow)):
+    send `release` whenever landed work is needed in a released version, and never ask the
+    person whether to release.
+  - Several landings belong to one release, so send it when it is needed:
+    - when a dependent project needs a change that landed here and its pin takes released
+      versions only (a `version` range, README [Modules](../README.md#modules));
+    - when the work the person gave you includes a release, before the person shares the
+      project, or when the person wants one.
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell).
 
