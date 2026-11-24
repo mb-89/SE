@@ -1761,6 +1761,14 @@ def routed_issue(catalog, monkeypatch) -> list[Case]:
         OUTSIDE, "Proposal: make it work", ROUTING), "feat/make-it-work-20261116")]
 
 
+def stamped_issue(catalog, monkeypatch) -> list[Case]:
+    """A work issue filed without its marker, as `stamp` writes it back with the marker."""
+    work = catalog["work"]
+    bare = templates.render(work, dict(work.example["fields"])).replace(work.marker_line + "\n", "")
+    return [Case("issue.edit", "work", templates.stamped(work, bare), work.example["title"],
+                 labels=("work",))]
+
+
 def comment(text: str):
     return lambda catalog, monkeypatch: [Case("comment.create", FREE, text)]
 
@@ -1901,6 +1909,7 @@ def without_beats(plan):
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
     "work_tickets:work_issue_filing": ("file", work_issue),
+    "work_tickets:stamp": ("stamp", stamped_issue),
     "work_tickets:filing_plan": ("file, backlog file and route", filing),
     "work_tickets:filed_once.create": ("file and backlog file",
                                        lambda c, m: work_issue(c, m) + backlog_issue(c, m)),
@@ -2024,6 +2033,39 @@ def test_filled_keeps_a_body_with_enforce_off_and_renders_it_otherwise(catalog):
     assert "## Odd section\n\nKept.\n" in again
     fields = dict(work.example["fields"])
     assert templates.filled(work, fields=fields, enforce="off") == templates.render(work, fields)
+
+
+def test_every_whole_document_a_fill_makes_carries_its_templates_marker(catalog):
+    """A filled issue or comment names the template it derives from (docs/templates.md "The filled
+    template is a type"), whichever of SE's templates filled it."""
+    filled = [name for name, template in catalog.items()
+              if template.example and set(template.actions) & {"issue.create", "comment.create"}
+              and not (template.is_adapter or template.message or template.writes_file)]
+    assert {"work", "ticket", "routed", "handover"} <= set(filled)
+    for name in filled:
+        template = catalog[name]
+        rendered, _ = templates.fill(template, dict(template.example["fields"]), "raw input",
+                                     title=template.example.get("title"))
+        assert template.marker_line in rendered.splitlines(), name
+
+
+def test_stamped_writes_the_marker_where_render_writes_it_and_keeps_every_other_byte(catalog):
+    work, routed, review_template = catalog["work"], catalog["routed"], catalog["review"]
+    fleet = templates.FLEET_MARKER
+    body = f"{fleet}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n"
+    assert templates.stamped(work, body) == (
+        f"{fleet}\n{work.marker_line}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n")
+    assert templates.stamped(work, "## Goal\n\nG.\n") == f"{fleet}\n{work.marker_line}\n\n## Goal\n\nG.\n"
+    again = templates.stamped(work, body)
+    assert templates.stamped(work, again) == again  # stamped once
+    routing = "Please.\n\n<!-- se:handled -->\n## Routing\n\nRouted from: x\n"
+    assert templates.stamped(routed, routing) == (
+        f"Please.\n\n<!-- se:handled -->\n{routed.marker_line}\n## Routing\n\nRouted from: x\n")
+    assert work_tickets.ROUTED_PATTERN.search(templates.stamped(routed, routing))
+    with pytest.raises(templates.TemplateError, match="no `<!-- se:handled -->` line"):
+        templates.stamped(routed, "Please.\n")
+    assert templates.stamped(review_template, "A review.\n") == "A review.\n"  # an adapter's own text
+    assert templates.parse(work, again).fields == templates.parse(work, body).fields
 
 
 def test_private_findings_name_the_field_and_the_list_never_the_term(catalog, tmp_path):

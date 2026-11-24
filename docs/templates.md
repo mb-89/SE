@@ -155,6 +155,11 @@ rule `quote`) and `scripts/se_templates.py` (its `fill`, `file_document`) own wh
 - **Not yet.** A message has no writing tool in kern's door, and the tool's `fill` writes no
   claimed file: `templates.py fill --path` writes it, until kern's files module takes only filled
   templates (The filled template is a type).
+- **The marker.** Every fill and every filing writes the template's marker into the document it
+  makes: `templates.py fill`, the tool's `fill`, and `file`, `backlog file` and `route`, whose
+  body filed as given (`[templates] enforce = "off"`, or `--hold`) gets the marker line where
+  the fill writes it (`templates.stamped`). A document so always says which template it is a
+  value of ([Which template a write is judged by](#which-template-a-write-is-judged-by)).
 
 - It takes the template, the prompt, the raw input and the agent's fields; it resolves the template
   ([Template repositories](#template-repositories)), applies the overlay, checks the fields against
@@ -277,6 +282,35 @@ The two targets the decision names are kern's, both released in kern 2.0.0:
 
 SE's wiring binds the GitHub door's port (`github.template-accept`); it places no files module,
 so its gate keeps checking claimed paths after the fact, as [Fill](#fill) says.
+
+### Which template a write is judged by
+
+A document's template is a fact the document records, its marker line (a file's `derived_from`),
+never a guess from one call. The gate (the docstring of `scripts/se_templates.py`, Which template)
+judges each GitHub write by it:
+
+- **An edit** of an issue or a comment is judged as the document it leaves behind: the issue or
+  comment as it stands, read from kern's snapshot where a fresh one stands, else by one REST read,
+  with the call's body, title and labels in place. A label change alone is judged too.
+- **Its template** is the one the new body's marker names, else the one the current document's
+  marker names (a template's own marker, such as `<!-- se:review -->`, names it too). An edit that
+  drops the marker line, or leaves the document without the labels its template needs, is refused.
+- **A document that names no template** is refused for an issue edit, naming the stamp below and
+  the fill, and judged against no other template. A comment that names none stays free, as no
+  template takes an unmarked comment.
+- **A new document** with no marker is the one case labels and the templates' order decide
+  (`templates.select`), as the filing commands choose its template.
+- **Not read.** Where the document cannot be read, the new body's marker alone decides, and an
+  edit without one passes and is logged. A pull request's edit is still selected from the call.
+
+### Stamp an issue filed without a marker
+
+An issue filed over raw REST, past the fill, names no template, so the gate refuses its edits.
+`work_tickets.py stamp <issue> --worktree <checkout>` gives it the marker of the template it
+derives from: `--template <name>`, else the one a new issue with its labels would take, the one
+the gate's refusal names. It writes only where the stamped body passes that template's check with
+the checks a filing runs, and it changes nothing but the marker line; without gh it prints the
+edit as a step for the GitHub tools.
 
 ## Template repositories
 
