@@ -427,7 +427,7 @@ so each cloud session has its own core.
 | first request answered over the bus | 28.4 to 32.8 ms after process start | 967 ms |
 | a Python component attached and answering | 2.3 to 2.8 ms over the bus, 36 to 40 ms with the interpreter's start, 46 to 61 ms through `uv run` | about 900 ms |
 
-The greeting stays `se_start.py status`'s, within its 1 s budget; it reads `get.core.health` with a
+The greeting stays `se_start.py status`'s, within its 10 s budget; it reads `get.core.health` with a
 200 ms wait and says `core: starting` where none answers yet. Nothing waits for Python components:
 their names read as `not provided` until they attach.
 
