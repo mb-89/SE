@@ -3,10 +3,16 @@
 permission check, auto mode's among them.
 
     claude_settings.py allow --repo <repo>
+    claude_settings.py rules
 
 `allow` merges `ALLOW` into `<repo>/.claude/settings.json` `permissions.allow`, keeping every other
 key and rule and the order of those already there; a rule already present is not added again.
 Exit code 0 written or already in place, 1 a file it cannot merge into (nothing is written).
+
+`rules` prints `ALLOW` as one JSON list, the `extra_allowed_tools` SE gives each integrator session
+it starts with `create_session` (se.md "Sessions"): a release SE asks for comes as a message from
+another session, which auto mode's check does not count as the person's, so the integrator's own
+session carries the rule. Exit code 0.
 
 It widens what every session of the repository may run, so it is a step only the person approves
 (the work model's "Steps only the person approves"): the person, or SE on the person's yes, runs it
@@ -17,7 +23,8 @@ own permissions ("Undermining Oversight"), and setup would stop at it.
 `ALLOW` is the one list. A release is the integrator's step on SE's message, never a question to
 the person (the work model's "Roles and flow"), so it runs in a session no one watches:
 `work_tickets.py release` and its `--read-back`, wherever se's scripts live (the plugin's
-`~/.claude/skills/se`, a module's `.se/modules/se`, se's own `scripts/`).
+`~/.claude/skills/se`, a module's `.se/modules/se`, se's own `scripts/`), and in the prefix form
+for the path a cloud session runs se from.
 """
 
 from __future__ import annotations
@@ -28,10 +35,12 @@ import sys
 from pathlib import Path, PurePosixPath
 
 SETTINGS = PurePosixPath(".claude/settings.json")
-#: The permission rules SE needs in every repository it sets up, each a Claude Code rule; `*`
-#: stands for any text, so the first holds every path of se's scripts, the second every argument
-#: of a release (`--worktree`, `--repo`, `--read-back <tag>`).
-ALLOW = ("Bash(uv run python *work_tickets.py release *)",)
+#: The permission rules SE needs in every repository and integrator session, each a Claude Code
+#: rule. In the first `*` stands for any text, so it holds every path of se's scripts and every
+#: argument of a release (`--worktree`, `--repo`, `--read-back <tag>`); the second is the prefix
+#: rule (`:*`) for the plugin's path in a cloud session, `/root/.claude/skills/se`.
+ALLOW = ("Bash(uv run python *work_tickets.py release *)",
+         "Bash(uv run python /root/.claude/skills/se/scripts/work_tickets.py release:*)")
 
 
 class SettingsError(Exception):
@@ -73,7 +82,12 @@ def main(argv: list[str] | None = None) -> int:
     allow_parser = commands.add_parser("allow", help="merge SE's permission rules into the repository's "
                                                      ".claude/settings.json")
     allow_parser.add_argument("--repo", type=Path, required=True)
+    commands.add_parser("rules", help="print SE's permission rules as one JSON list, the extra_allowed_tools "
+                                      "of an integrator session SE starts")
     args = parser.parse_args(argv)
+    if args.command == "rules":
+        print(json.dumps(list(ALLOW)))
+        return 0
     try:
         print(f"claude settings: {allow(args.repo)}")
     except SettingsError as error:

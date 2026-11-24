@@ -17,12 +17,32 @@ import claude_settings  # noqa: E402
 
 
 def allows(rules: list[str], command: str) -> bool:
-    """Whether one of the Claude Code Bash rules allows `command`: `*` stands for any text."""
+    """Whether one of the Claude Code Bash rules allows `command`: `*` stands for any text, and a
+    prefix rule `<prefix>:*` for the prefix and any arguments after it."""
     for rule in rules:
         found = re.fullmatch(r"Bash\((.*)\)", rule)
-        if found and re.fullmatch(".*".join(map(re.escape, found[1].split("*"))), command):
+        if found is None:
+            continue
+        pattern = found[1]
+        if pattern.endswith(":*"):
+            prefix = pattern[:-2]
+            if command == prefix or command.startswith(prefix + " "):
+                return True
+        elif re.fullmatch(".*".join(map(re.escape, pattern.split("*"))), command):
             return True
     return False
+
+
+def test_each_rule_alone_allows_the_cloud_release() -> None:
+    cloud = "uv run python /root/.claude/skills/se/scripts/work_tickets.py release --worktree /home/user/obs"
+    for rule in claude_settings.ALLOW:
+        assert allows([rule], cloud), rule
+        assert not allows([rule], cloud.replace(" release ", " integrate ")), rule
+
+
+def test_rules_prints_the_rules_for_an_integrator_session(capsys) -> None:
+    assert claude_settings.main(["rules"]) == 0
+    assert json.loads(capsys.readouterr().out) == list(claude_settings.ALLOW)
 
 
 RELEASES = [

@@ -130,9 +130,9 @@ A release runs in such a session too, the integrator's on SE's message, never as
 auto-mode permission check passes it, run this once per repository and commit
 `.claude/settings.json`: `uv run python <se>/scripts/claude_settings.py allow --repo <repo>`.
 
-It merges the rule for `work_tickets.py release` and its `--read-back`, keeping every other key;
-[scripts/claude_settings.py](scripts/claude_settings.py) owns the rule and says why no setup step
-runs it.
+It merges the rules for `work_tickets.py release` and its `--read-back`, keeping every other key;
+[scripts/claude_settings.py](scripts/claude_settings.py) owns the rules and says why no setup step
+runs it. SE also starts each integrator with them (`claude_settings.py rules`, se.md "Sessions").
 
 ### Cloud sessions
 
