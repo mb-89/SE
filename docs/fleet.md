@@ -127,8 +127,9 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
   session; its first step asks the person for the field feedback.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
-  `retro.py due` prints both countdowns. The [start greeting](start.md#start-and-refresh) names a run due
-  or open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
+  `retro.py due` prints both countdowns. It reads back to the newest run's start, all with no
+  retro yet (`recent_reads`). The [start greeting](start.md#start-and-refresh) names a run due or
+  open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
   read live ([components/README.md](../components/README.md)).
 - **Not counted yet.** A red `main` and a worker stopped by the usage limit leave no mark on an
   issue, so they add nothing until one does.
