@@ -155,8 +155,13 @@ uv run python <se>/scripts/se_workflows.py check
 ```
 
 - What SE ships: `.github/workflows/` `branch-cleanup.yml`, `kern-battery.yml`, `kern-release.yml`
-  and `release.yml`, and the actions `integrator-pass`, `kern-at-pin`, `suite-shard` and
-  `suite-time` (`SHIPPED` in `scripts/se_workflows.py`).
+  and `release.yml`, and the actions `integrator-pass`, `kern-at-pin`, `release-kind`,
+  `suite-shard` and `suite-time` (`SHIPPED` in `scripts/se_workflows.py`).
+  - Every project holds `release-kind`, whichever others it calls (`EVERY_PROJECT`): its required
+    check `check` calls it on each pull request (`uses: ./.github/actions/release-kind`), the gate
+    that refuses a pull request into the integration branch whose description states no release
+    kind ([Release kind](../src/skills/work-model/SKILL.md#release-kind)). `write` adds it where the
+    pin ships it, and `check` names it missing.
   - Beside them, the files a project holds as SE has them: `RUNME.sh` and `RUNME.ps1`, the
     installer beside the project's own `RUNME.conf`, and `ref-maintenance.yml`, which its owner
     triggers by hand; each keeps its triggers (`WHOLE`).
