@@ -35,10 +35,11 @@
 # `se_templates.py gate` reads its gh writes (its docstring: The shell reader). The tests are builtins
 # only, so every other call costs what it did. SE_TEMPLATES_GATE=off skips it.
 # Where a template claims a path, which SE's start leaves as the line `claimed` in
-# <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), the gate also runs for Claude
-# Code's Write, Edit and MultiEdit of a file in the project and for the GitHub tools that write
-# files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools), and denies a claimed path's
-# write, which only the fill makes; without that line they cost what they did.
+# <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), followed by each glob the templates
+# own (`templates.py owned`), the gate also runs for Claude Code's Write, Edit and MultiEdit of a
+# project file whose path matches one of those globs as a bash pattern, and for the GitHub tools that
+# write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools), and denies a claimed
+# path's write, which only the fill makes; every other call costs what it did.
 #
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
@@ -129,23 +130,41 @@ FILE_TOOLS=(Write Edit MultiEdit)
 GITHUB_FILE_TOOLS=(push_files create_or_update_file)
 # Whether the payload is a file tool's call the gate judges: only where the start left `claimed` in
 # templates-files; Claude Code's own file tools by their whole name, whose file_path lies in the
-# project, and the GitHub file tools as guarded reads them. Builtins only.
+# project and, relative to it, matches an owned glob (owned_globs, the file's other lines), and the
+# GitHub file tools as guarded reads them. Builtins only.
 files_write=false
-if [ "$event" = PreToolUse ] && read -r level 2>/dev/null <"$project/.se/.runtime/templates-files" &&
-  [ "${level%$'\r'}" = claimed ]; then
-  files_write=true
+owned_globs=()
+if [ "$event" = PreToolUse ] && [ -f "$project/.se/.runtime/templates-files" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if ! $files_write; then
+      [ "$line" = claimed ] || break
+      files_write=true
+    elif [ -n "$line" ]; then
+      owned_globs+=("$line")
+    fi
+  done <"$project/.se/.runtime/templates-files" 2>/dev/null
 fi
 filed() { # <payload>
   $files_write || return 1
-  local name path known
+  local name path known glob
   [[ $1 =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] || return 1
   name="${BASH_REMATCH[1]}"
   for known in "${FILE_TOOLS[@]}"; do
     [ "$name" = "$known" ] || continue
     [[ $1 =~ \"file_path\"[[:space:]]*:[[:space:]]*\"(([^\"\\]|\\.)*)\" ]] || return 1
     path="${BASH_REMATCH[1]//\\\\/\\}"
-    [[ $path == "$project"/* || $path == "$project"\\* ]]
-    return
+    [[ $path == "$project"/* || $path == "$project"\\* ]] || return 1
+    path="${path#"$project"}"
+    path="${path:1}"
+    path="${path//\\//}"
+    # a path the gate resolves before it matches (`..`, `.`, `//`) is judged by the gate alone
+    [[ /$path/ == */../* || /$path/ == */./* || $path == *//* ]] && return 0
+    for glob in "${owned_globs[@]}"; do
+      # shellcheck disable=SC2053 # the glob is a pattern
+      [[ $path == $glob ]] && return 0
+    done
+    return 1
   done
   guarded "$1" "${GITHUB_FILE_TOOLS[@]}"
 }
