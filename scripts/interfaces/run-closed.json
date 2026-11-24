@@ -1,0 +1,35 @@
+{
+  "template": "se/run-closed",
+  "version": "1.0.0",
+  "says": "A retro's or an overhaul's hand-back: the run's kind and issue number and its report's link.",
+  "message": "{kind} #{number} closed: {link}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "retro",
+          "overhaul",
+          "Not in input"
+        ],
+        "description": "retro or overhaul: the run that closed."
+      },
+      "number": {
+        "type": "string",
+        "description": "The run's issue number, digits alone."
+      },
+      "link": {
+        "type": "string",
+        "description": "The link of the report the run posted."
+      }
+    },
+    "required": [
+      "kind",
+      "number",
+      "link"
+    ],
+    "additionalProperties": false
+  }
+}
