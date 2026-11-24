@@ -60,7 +60,16 @@ review:
 routed:
   - discover-cheap-load-late
   - guidance-comes-first
+rules-page:
+  - discover-cheap-load-late
+  - guidance-comes-first
+skills-page:
+  - discover-cheap-load-late
+  - guidance-comes-first
 standing-questions:
+  - discover-cheap-load-late
+  - guidance-comes-first
+sub-agents-page:
   - discover-cheap-load-late
   - guidance-comes-first
 ticket:

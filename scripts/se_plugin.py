@@ -53,9 +53,10 @@ and its modules, so a note it refuses, an orphan among them, fails where a stale
 checkout without one (a copy of the generator alone) has no note of its own to check.
 
 `build` also writes the documentation's three pages of what the layout loads, `docs/skills.md`,
-`docs/rules.md` and `docs/sub-agents.md` (PAGES), from the layout it builds: one table each of the
-skills (guidance notes aside), the rules in force (the rule book's and every guidance note) and the
-sub-agents (every agent but SE). `inventory` reads them from a layout, the one it builds or the
+`docs/rules.md` and `docs/sub-agents.md` (PAGES), from the layout it builds, each through its
+interface template (`templates/skills-page.md`, `rules-page.md`, `sub-agents-page.md`, filled by
+scripts/interfaces.py): one table each of the skills (guidance notes aside), the rules in force (the
+rule book's and every guidance note) and the sub-agents (every agent but SE). `inventory` reads them from a layout, the one it builds or the
 one an installed SE holds, so SE's start report counts exactly what these pages list
 (docs/boot.md "The start report").
 """
@@ -83,6 +84,11 @@ generated_files = sys.modules.get("generated") or importlib.util.module_from_spe
 if "generated" not in sys.modules:
     sys.modules["generated"] = generated_files
     _marker_spec.loader.exec_module(generated_files)
+_interfaces_spec = importlib.util.spec_from_file_location("interfaces", Path(__file__).with_name("interfaces.py"))
+interfaces = sys.modules.get("interfaces") or importlib.util.module_from_spec(_interfaces_spec)
+if "interfaces" not in sys.modules:
+    sys.modules["interfaces"] = interfaces
+    _interfaces_spec.loader.exec_module(interfaces)
 SOURCE = PurePosixPath("src")
 DRAFTS = PurePosixPath("drafts/skills")
 GUIDANCE = PurePosixPath("guidance")  # se_guidance.py TREE
@@ -670,9 +676,10 @@ def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
     return files
 
 
-#: The documentation's pages of what the layout loads, each its path and its title.
-PAGES = {PurePosixPath("docs/skills.md"): "Skills", PurePosixPath("docs/rules.md"): "Rules",
-         PurePosixPath("docs/sub-agents.md"): "Sub-agents"}
+#: The documentation's pages of what the layout loads, each its path and the interface template
+#: that writes it (`templates/<name>.md`, its schema in scripts/interfaces/).
+PAGES = {PurePosixPath("docs/skills.md"): "skills-page", PurePosixPath("docs/rules.md"): "rules-page",
+         PurePosixPath("docs/sub-agents.md"): "sub-agents-page"}
 #: The rule book in the layout, whose `### <id> <name>` headings are its rules.
 LAYOUT_BOOK = SKILLS / "work-model" / "references" / "rules.md"
 BOOK_RULE = re.compile(r"^### (?P<id>[a-z][a-z0-9-]*-\d{3,}) (?P<name>.+?)\s*$", re.M)
@@ -731,24 +738,20 @@ def _cell(text: str) -> str:
 
 
 def pages(found: Inventory) -> dict[PurePosixPath, bytes]:
-    """The documentation's pages of `found`, each opened by its generated notice."""
-    def page(path: PurePosixPath, intro: str, head: tuple[str, str], rows) -> bytes:
-        lines = [notice("the layout se_plugin.py build writes").rstrip("\n"), "", f"# {PAGES[path]}", "",
-                 intro, "", f"| {head[0]} | {head[1]} |", "|---|---|",
-                 *(f"| `{_cell(name)}` | {_cell(text)} |" for name, text in rows)]
-        return ("\n".join(lines) + "\n").encode("utf-8")
+    """The documentation's pages of `found`, each its interface template (PAGES) filled through
+    scripts/interfaces.py and opened by its generated notice, the marker's words in its comment."""
+    def page(path: PurePosixPath, counts: dict[str, int], rows) -> bytes:
+        values = {"notice": generated_files.words(GENERATOR, "the layout se_plugin.py build writes"),
+                  **{name: str(count) for name, count in counts.items()},
+                  "rows": [{"name": _cell(name), "text": _cell(text)} for name, text in rows]}
+        return (interfaces.write(PAGES[path], values) + "\n").encode("utf-8")
 
     skills, rules, agents = PAGES
     return {
-        skills: page(skills, f"The {len(found.skills)} skills SE loads, each by its name and when it is "
-                     "used; each guidance note is a skill too, listed with the rules.",
-                     ("Skill", "When it is used"), found.skills),
-        rules: page(rules, f"The {found.rules} rules in force: the rule book's {len(found.book)} and "
-                    f"{len(found.notes)} guidance notes, the notes after the book.",
-                    ("Rule", "What it says"), [*found.book, *found.notes]),
-        agents: page(agents, f"The {len(found.subagents)} sub-agents SE starts, every agent but SE "
-                     "itself, each by its name and what it does.", ("Sub-agent", "What it does"),
-                     found.subagents),
+        skills: page(skills, {"count": len(found.skills)}, found.skills),
+        rules: page(rules, {"count": found.rules, "book": len(found.book), "notes": len(found.notes)},
+                    [*found.book, *found.notes]),
+        agents: page(agents, {"count": len(found.subagents)}, found.subagents),
     }
 
 

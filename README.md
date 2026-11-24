@@ -2557,7 +2557,10 @@ both.
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `templates/rules-page.md` | The page `docs/rules.md`. |
+| `templates/skills-page.md` | The page `docs/skills.md`. |
 | `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
+| `templates/sub-agents-page.md` | The page `docs/sub-agents.md`. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
 | `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |

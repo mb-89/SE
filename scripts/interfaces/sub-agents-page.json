@@ -1,0 +1,48 @@
+{
+  "template": "se/sub-agents-page",
+  "version": "1.0.0",
+  "says": "The page `docs/sub-agents.md`.",
+  "message": "<!-- {notice} -->\n\n# Sub-agents\n\nThe {count} sub-agents SE starts, every agent but SE itself, each by its name and what it does.\n\n| Sub-agent | What it does |\n|---|---|\n{rows}",
+  "rows": {
+    "rows": "| `{name}` | {text} |"
+  },
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "notice": {
+        "type": "string",
+        "description": "The words of the page's generated-file marker, as the generated-marker template writes them, inside its HTML comment."
+      },
+      "count": {
+        "type": "string",
+        "description": "How many sub-agents the layout loads: every agent but SE."
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "description": "The sub-agents, each its name and its description, as its front matter states them. A `|` in a cell is written `\\|`."
+      }
+    },
+    "required": [
+      "notice",
+      "count"
+    ],
+    "additionalProperties": false
+  }
+}
