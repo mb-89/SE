@@ -1,4 +1,4 @@
-"""Tests of se_doctor: the read-only report of the box SE runs in (README "Doctor"). The checks get
+"""Tests of se_doctor: the read-only report of the box SE runs in (docs/start.md "Doctor"). The checks get
 fake facts; the gatherers read files under tmp_path, with git and the network replaced."""
 
 from __future__ import annotations

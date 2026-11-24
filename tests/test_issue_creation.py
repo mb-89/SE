@@ -105,7 +105,7 @@ def comment(root):
         "14 deduped: calls filed_once"]
 
 
-# The template each filing path checks with (README "Templates"), and where in the door the check runs.
+# The template each filing path checks with (docs/templating.md "Templates"), and where in the door the check runs.
 TEMPLATES = {"file_work_issue": "work", "backlog_file": "ticket", "route_outside_issue": "routed"}
 WRITES = {"filing_plan", "print", "run_plan", "relay_door", "run_gh", "run_gh_with_body"}
 

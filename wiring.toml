@@ -1,6 +1,6 @@
 # SE as an application on kern: the core the `se` binary serves in this checkout (bootstrap.sh
 # starts it, SE's docs/go-core.md "How the binary arrives") places and carries every one of SE's
-# components. SE's command groups are Python, placed in a process each (README "Commands as
+# components. SE's command groups are Python, placed in a process each (docs/start.md "Commands as
 # components"); SE's fleet, retro-due, origin and template are Go, compiled into the `se` binary with kern's
 # GitHub component (components/README.md). The `se` binary carries the Go ones, so this wiring may
 # name them; the bare `kern` could not, which is why they lived in components/wiring.toml until SE's
@@ -98,7 +98,7 @@ component = "template"
 "retro-due.issues" = "github/issues/<key>"
 "retro-due.pulls" = "github/pulls/<key>"
 "retro-due.tracker" = "origin/tracker"
-# The streamed commands' GitHub steps (README "Hand-offs through the relay").
+# The streamed commands' GitHub steps (docs/settings.md "Hand-offs through the relay").
 "integration.step" = "github.step"
 "issues.step" = "github.step"
 "delivery.step" = "github.step"
@@ -111,7 +111,7 @@ component = "template"
 # (kern's components/github README "Writes: filled templates only").
 "github.template-accept" = "template.accept"
 
-# The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
+# The Stop hooks (docs/fleet.md "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.
 [hooks]
 Stop = "work_tickets.py stop-check"

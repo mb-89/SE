@@ -1,4 +1,4 @@
-# The dispatcher (README "Dispatcher"): every four hours, one SE command reads from GitHub whether
+# The dispatcher (docs/fleet.md "Dispatcher"): every four hours, one SE command reads from GitHub whether
 # startable work waits (open `work` issues labelled `ready`, not waiting on a person, with no open
 # blocker) and whether an integrator runs; where work waits and none runs, it fires the scheduled
 # task whose session is a fresh integrator, once. No model runs here: a run that finds nothing to

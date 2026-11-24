@@ -1,4 +1,4 @@
-"""Whether a suite beside ran a test, read from its output alone (README "Test budget").
+"""Whether a suite beside ran a test, read from its output alone (docs/tests.md "Test budget").
 
 `ran(output)` takes a suite's stdout and stderr, stripped, and answers `Ran(verdict, reason)`:
 `some` where tests ran, `none` (with a short reason) where none did, `unknown` where the output

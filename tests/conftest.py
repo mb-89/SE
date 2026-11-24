@@ -35,7 +35,7 @@ network_guard.install()
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
 os.environ["SE_METRICS"] = os.devnull
 
-# The suite's commands run directly, never through a kern that serves this checkout (README "Commands
+# The suite's commands run directly, never through a kern that serves this checkout (docs/start.md "Commands
 # as components"): a test's fakes live in its own process. A test of the routing sets its own.
 os.environ["SE_KERN"] = "off"
 
@@ -398,7 +398,7 @@ def obs() -> Path:
         return directory
 
 
-# kern, the Go core, at the pin se.toml [components.kern] reads from components/go.mod (README
+# kern, the Go core, at the pin se.toml [components.kern] reads from components/go.mod (docs/modules.md
 # "Modules"): placed before collection, as tests read its files while they are collected
 # (tests/test_se_home.py TABLE, tests/test_se_components.py's import of kern's SDK).
 KERN = se_modules.kern_dir(ROOT)
@@ -442,7 +442,7 @@ def kern() -> Path:
     return KERN
 
 
-# The suite's JUnit report for `work_tickets.py suite` (README "Test budget"): where the gate names a
+# The suite's JUnit report for `work_tickets.py suite` (docs/tests.md "Test budget"): where the gate names a
 # report directory, the controller writes se.xml there with its worker count and each test's setup
 # time and worker, so the gate prints se's Parts line and its slow setups. It also names the host's
 # CPU and when each test's setup started, in seconds from the controller's session start, which

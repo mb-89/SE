@@ -1,4 +1,4 @@
-"""CI's queue bound of the platform legs (scripts/ci_queue.py, README "Platform legs and their
+"""CI's queue bound of the platform legs (scripts/ci_queue.py, docs/tests.md "Platform legs and their
 queue"), against a fake of GitHub's jobs API and a fake clock: a leg that never gets a runner is
 reported as such and its run cancelled, and a first attempt cancelled so is re-run once."""
 

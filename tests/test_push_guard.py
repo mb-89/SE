@@ -363,7 +363,7 @@ def test_a_release_commit_carries_its_parents_suite_verdict(checkout):
 
 def test_the_suite_notes_its_time_and_limit_in_the_metrics_line(checkout, tmp_path, monkeypatch,
                                                                  capsys):
-    """README "Metrics": the suite's wall time and its [tests] limit, which the report flags. One
+    """docs/running.md "Metrics": the suite's wall time and its [tests] limit, which the report flags. One
     clock that ticks a second at each reading times the command and its suite, which the process
     door's fake answers at once."""
     path = tmp_path / "metrics.jsonl"
@@ -380,7 +380,7 @@ def test_the_suite_notes_its_time_and_limit_in_the_metrics_line(checkout, tmp_pa
     assert 0 < line["suite_seconds"] <= line["wall_seconds"]
 
 
-# A push of the work branch after its delivery (README "Late push", scripts/late_push.py).
+# A push of the work branch after its delivery (docs/fleet.md "Late push", scripts/late_push.py).
 late_push = work_tickets.sibling("late_push")
 WORK_BRANCH = "fix/topic-20261114"
 
@@ -482,7 +482,7 @@ def test_an_unknown_late_push_setting_is_refused_naming_the_values(checkout, cap
     assert "deliver.late_push must be one of warn, refuse" in capsys.readouterr().err
 
 
-# Landing without CI (README "Landing without CI"): where se.toml on the pushed commit's parent sets
+# Landing without CI (docs/tests.md "Landing without CI"): where se.toml on the pushed commit's parent sets
 # [tests] ci = false, the integrator's commit status stands in for missing local verdicts.
 
 NO_CI = f"{IDENTITY}[tests]\ncommand = {SUITE}\nci = false\n"
@@ -600,7 +600,7 @@ def test_a_pushed_commit_cannot_turn_ci_off_for_itself(checkout, host, capsys):
     assert host.reads == []  # its parent keeps CI on: no status is read
 
 
-# Work publication (README "Work publication"): a work branch goes only to the repository its
+# Work publication (docs/fleet.md "Work publication"): a work branch goes only to the repository its
 # recorded work issue is for, never to whatever origin happens to be.
 def origin_has(root: Path, branch: str) -> bool:
     return git_door.run("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}",

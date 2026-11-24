@@ -1,4 +1,4 @@
-# The templates backstop (README "Templates"): a fleet issue or a marked comment whose text breaks its template
+# The templates backstop (docs/templating.md "Templates"): a fleet issue or a marked comment whose text breaks its template
 # is marked by the run its write starts, whatever wrote it: an issue gets the label off-template, a
 # comment a failed run, and the run's summary lists the findings. se_templates.py backstop reads the
 # event file and decides, by se.toml [templates] backstop on the default branch; it never calls GitHub.

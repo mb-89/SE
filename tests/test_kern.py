@@ -27,10 +27,10 @@ def test_the_required_check_vets_ses_go_components_on_kern_at_the_pin_their_go_m
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
     assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms", "kern-platforms-queue",
-                                                         "trust"], (
+                                                         "showcase", "trust"], (
         "the Go components run in the required job check, SE's start and hook on Windows in "
         "kern-platforms, which check needs and kern-platforms-queue bounds the queue of; trust "
-        "decides whether either runs (README \"Trusted landings\")"
+        "decides whether either runs (docs/tests.md \"Trusted landings\")"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
     assert len(setups) == 1, "Go is set up on Linux only, for SE's Go components"
@@ -103,7 +103,7 @@ def test_the_required_check_fails_unless_ses_start_and_hook_passed_on_windows() 
     assert ("        if: runner.os == 'Windows'\n        shell: powershell\n"
             "        run: uv run pytest -q tests/test_windows_entry.py\n") in platforms
     assert "work_tickets.py suite" not in platforms, "the Python suite and its budget stay on Linux"
-    assert "    needs: [trust, kern-platforms]\n" in check
+    assert "    needs: [trust, kern-platforms, showcase]\n" in check
     # A required check that is skipped counts as passed: check runs whatever kern-platforms answered.
     assert "    if: ${{ !cancelled() }}\n" in check
     assert re.search(r'if \[ "\$PLATFORMS" != success \]; then\n.*\n\s+exit 1', check), "check fails unless kern-platforms passed"
@@ -136,7 +136,7 @@ UNTRUSTED = "needs.trust.outputs.trusted != 'true'"
 KERN_AT_THE_PIN = {"repository": "${{ job.workflow_repository }}", "ref": "${{ job.workflow_sha }}",
                    "path": ".kern-battery"}
 INTEGRATOR_PASS = "./.kern-battery/.github/actions/integrator-pass"
-# The one action that places kern, the battery's and the release's (README "Workflows").
+# The one action that places kern, the battery's and the release's (docs/running.md "Workflows").
 KERN_AT_PIN = "./.github/actions/kern-at-pin"
 ACTION = PROJECT / KERN_AT_PIN / "action.yml"
 
@@ -156,7 +156,7 @@ def test_the_battery_holds_the_applications_tests_to_se_toml_tests() -> None:
 
 
 def test_the_battery_passes_on_the_integrators_record_through_kern_at_the_applications_pin() -> None:
-    """SE's README "Trusted landings": the job trust runs integrator-pass from the kern commit the
+    """SE's docs/tests.md "Trusted landings": the job trust runs integrator-pass from the kern commit the
     battery runs at, the tag the application pins, and the battery's vet and tests run only where
     it does not vouch for the tree."""
     battery = workflow(BATTERY)

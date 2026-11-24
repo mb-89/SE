@@ -1,4 +1,4 @@
-"""A project's own commit checks (README "Commit checks"): `se.toml` `[commit_checks]` names them as
+"""A project's own commit checks (docs/settings.md "Commit checks"): `se.toml` `[commit_checks]` names them as
 commands, and se's commit hook runs them on the staged tree, refusing the commit where one fails.
 
 git is the door's fake: in memory where the test calls the module, behind a state file

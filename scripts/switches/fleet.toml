@@ -8,7 +8,7 @@ reader = "scripts/review_gate.py"
 default = "off"
 layers = ["se.toml"]
 key = "integrate.review_gate"
-help = "README.md#review-gate"
+help = "docs/fleet.md#review-gate"
 note = "off: integrate reads no review; on: a risky change lands only with a reviewer's pass of its head"
 
 [[switch]]
@@ -18,7 +18,7 @@ reader = "scripts/limit_restart.py"
 default = "off"
 layers = ["se.toml"]
 key = "fleet.restart_after_limit"
-help = "README.md#fleet-check"
+help = "docs/fleet.md#fleet-check"
 note = "off: a worker stopped on a usage limit is reported only; on: the remedy resumes it once the limit lifts, once per issue"
 
 [[switch]]
@@ -30,7 +30,7 @@ layers = ["se.toml"]
 key = "integrate.landing"
 on = ["fast-forward"]
 off = ["squash"]
-help = "README.md#landing-on-main"
+help = "docs/settings.md#landing-on-main"
 note = "off (squash): GitHub squash-merges the landing pull request; on (fast-forward): the integrator writes the landing commit as the project identity and main moves to exactly it"
 
 [[switch]]
@@ -40,5 +40,5 @@ reader = "scripts/work_tickets.py"
 default = "off"
 layers = ["se.toml"]
 key = "fleet.ages"
-help = "README.md#fleet-check"
+help = "docs/fleet.md#fleet-check"
 note = "off: a person ask's finding names no time; on: it says how long the issue has been open (', open N days'); the Go fleet component reads its fleet instance's config ages instead"

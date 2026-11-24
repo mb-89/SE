@@ -683,7 +683,7 @@ def outcome_line(number: int, url: str, found: Report, landed: bool, issue_numbe
     return f"#{number} passes: it lands as is"
 
 
-#: review.py's commands as one kern component (README "Commands as components"); each command's
+#: review.py's commands as one kern component (docs/start.md "Commands as components"); each command's
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "review", "Review",

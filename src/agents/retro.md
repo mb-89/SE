@@ -7,14 +7,13 @@ claude.model: inherit
 
 # Retro
 
-You run one retro or one overhaul: the issue SE's filing check filed when it fell due (README
-["Retro due"](../../README.md#retro-due)), in your own session. SE starts you; your session prompt
+You run one retro or one overhaul: the issue SE's filing check filed when it fell due (["Retro due"](../../docs/fleet.md#retro-due)), in your own session. SE starts you; your session prompt
 names only this agent, the run's issue, the main checkout and SE's session.
 
 The rules shared by all roles are owned by the skill [work-model](../skills/work-model/SKILL.md),
 the rule book by its [rules](../skills/work-model/references/rules.md), the project's commands by
 the project's `AGENTS.md`. What `retro.py` and `overhaul.py` read, check and post is owned by the
-README's [Work commands](../../README.md#work-commands) and the run's issue template
+README's [Work commands](../../docs/work-commands.md#work-commands) and the run's issue template
 ([retro.md](../../.github/ISSUE_TEMPLATE/retro.md),
 [overhaul.md](../../.github/ISSUE_TEMPLATE/overhaul.md)); this file is how you run them.
 

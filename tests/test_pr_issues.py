@@ -162,7 +162,7 @@ def test_the_owners_housekeeping_pull_request_is_exempt_and_no_one_elses(
 
 def test_the_owners_release_landing_is_exempt_and_no_one_elses_nor_another_branch(
         github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """README "Project settings": `work_tickets.py release` lands `land/release-v<version>`,
+    """docs/settings.md "Project settings": `work_tickets.py release` lands `land/release-v<version>`,
     which names no work issue."""
     code, out = run(github, tmp_path, "Release v1.2.4", author="carol",
                     head="land/release-v1.2.4", capsys=capsys)

@@ -1,4 +1,4 @@
-"""Component versions assigned at the landing (scripts/component_versions.py, README "Component
+"""Component versions assigned at the landing (scripts/component_versions.py, docs/settings.md "Component
 versions"): a work branch states the kind of each component it changes, and integrate writes the
 next version of that kind into the landing; a branch that still claims a number lands too."""
 
