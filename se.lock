@@ -6,8 +6,8 @@ version = "2.1.0"
 ref = "5cc4a0103cea5d96a2e4634f77bd6c53b02bd31a"
 
 [components.obs]
-version = "10.3.2"
-ref = "a6fb0f1a4cba7a8163e747eb03178ab1b90a3436"
+version = "10.4.0"
+ref = "d6358a1c09548f77f9b67bfdb5bb16a4b484e81c"
 
 [components.obs-html]
 version = "0.5.2"

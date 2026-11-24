@@ -41,6 +41,8 @@ A template is one Markdown note in a template repository, `templates/<name>.md`:
   instruction in a comment that the fill hands the agent and the document never shows.
 - A template whose document is data only (an interface) has an empty body; its fields are the
   whole template.
+- A template imported as obs's note types is a folder instead, a template manifest with its
+  template nodes ([Template manifests](#template-manifests)).
 
 The field kinds, the rules with their severities, `extends` and the selection order carried over
 from the TOML files the notes replaced, as they were; the engine's docstring owns them, and the
@@ -60,21 +62,54 @@ reads. Nothing writes a schema by hand.
 
 ## The document
 
-A document is a filled template. Where it is a file it records, in its front matter:
+A document is a filled template. Where it is a file it records, in its front matter, the template
+it derives from, as obs reads a filled document, and the digest:
 
 ```yaml
-template: <repository>/<name>
-version: 1.2.0
-overlay: sha256:<digest of the overlay the fill applied>
+derived_from: {template: <name>, version: "1.2.0"}
+overlay: sha256:<digest of the template and the overlay the fill applied>
 ```
 
-An issue, a comment or a message records the same three in its marker line,
+An issue, a comment or a message records the same in its marker line,
 `<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`. The digest covers the template
 and the overlay the fill applied (the docstring of `scripts/templates.py`, Writing, owns it).
 
 The check reads a document against the template and version it records. Where the template has
 moved since, a new minor or patch version warns and a new major version refuses, naming both
 versions and the fill that brings the document up.
+
+When a template's version moves, `templates.py stale --path <folder>` lists each document in that
+folder whose `derived_from` names an older version, with both versions: the documents to review and
+fill again. It lists nothing while every document is at its template's version.
+
+## Template manifests
+
+The person decided on 24 Nov, in the templates deck, that an imported template becomes a template
+manifest with template nodes, obs's note types (obs `spec/design_input/input-model.md`,
+Templates). The engine reads such a template as a second source form, beside the note, and loads
+it into the same template, so resolution, overlays, the fill, the check and the gate are one code
+path for both.
+
+- **The folder.** `templates/<name>/manifest.md` is the manifest; its front matter carries
+  `obs.template`, the template's `name` (the folder's) and `version`, and its table of contents
+  lists the nodes, one note each beside it, in reading order.
+- **The nodes.** A chapter whose front matter carries `obs.guidance` is a template node: one
+  section of the document, under the chapter's title. Its guidance (`contents`, `motivation`,
+  `form`, `sources`) is the instruction the fill hands the agent, and `gate: mandatory` makes the
+  section required. Any other chapter, such as a note on how to use the template, is no section.
+- **The slot.** A node's body is its fill slot, `{{slot}}`, alone: where the agent writes. A filled
+  section that still holds it outside code is refused, naming the section, as obs refuses it.
+- **The document.** One note: its front matter `derived_from` and the digest, then one `##`
+  section per node in the template's order, and none of the guidance. obs builds it as a filled
+  document.
+- **Resolution and overlays.** A manifest resolves by its folder's name in the order of
+  [Template repositories](#template-repositories), and its overlay is `templates/<name>.overlay.md`
+  beside the folder, adding or tightening as a note's does. One name is one template: a note and a
+  manifest of the same name in one `templates/` do not load.
+
+Not picked: converting a manifest into a note on import, as it loses each node's guidance fields.
+The docstring of `scripts/templates.py` (Template manifests) owns the details; the shared cases
+hold the Go component `template` to the same result.
 
 ## Nesting
 

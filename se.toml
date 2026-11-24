@@ -130,7 +130,7 @@ go = "components/go.mod"
 # documentation (README "Documentation") with its adapter component obs-html, which obs installs at
 # the version locked here.
 [components.obs]
-version = "^10.3.2"
+version = "^10.4.0"
 
 [components.obs-html]
 version = "^0.5.2"

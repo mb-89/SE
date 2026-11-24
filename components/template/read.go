@@ -2,12 +2,13 @@ package template
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 var (
 	frontMatter         = regexp.MustCompile(`\A---\r?\n(?s:.*?)\r?\n---[ \t]*(?:\r?\n|\z)`)
-	frontTemplate       = regexp.MustCompile(`(?m)^template[ \t]*:[ \t]*['"]?(?:[\w.-]+/)*([\w-]+)['"]?[ \t]*$`)
+	derivedKey          = regexp.MustCompile(`^derived_from[ \t]*:[ \t]*(.*?)[ \t]*$`)
 	templateMarkerLine  = regexp.MustCompile(`(?m)^[ \t]*<!-- se:template [\w.-]+(?:/[\w.-]+)*/([\w-]+) [\w.+-]+ sha256:[0-9a-f]+ -->[ \t]*$`)
 	heading             = regexp.MustCompile(`^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$`)
 	fence               = regexp.MustCompile("^[ \\t]*(`{3,}|~{3,})")
@@ -310,7 +311,7 @@ func Parse(t *Template, body string, title *string) *Document {
 		}
 		return &Document{Template: t.Name, Fields: found, Source: body, Read: found.Copy(), Misses: map[string]string{}}
 	}
-	if t.IsFile() {
+	if t.writesFile() {
 		return parseFile(t, body)
 	}
 	text := body
@@ -468,14 +469,70 @@ func parseFile(t *Template, body string) *Document {
 	return doc
 }
 
-// frontMatterTemplate is the template a file's front matter names on its template: line, "" for none.
+// derivedFrom is templates.py `derived_from`: where front matter holds derived_from, from its key
+// to the end of its last line, and the template and version it names ("" for both where it is no
+// mapping of them); ok false where it holds none.
+func derivedFrom(front string) (start, end int, template, version string, ok bool) {
+	offset := 0
+	lines := splitLines(front, true)
+	for i, line := range lines {
+		bare := strings.TrimRight(line, "\r\n")
+		m := derivedKey.FindStringSubmatch(bare)
+		if m == nil {
+			offset += len(line)
+			continue
+		}
+		end := offset + len(bare)
+		text := "derived_from: " + m[1] + "\n"
+		if m[1] == "" {
+			after := offset + len(line)
+			for _, following := range lines[i+1:] {
+				if !(strings.HasPrefix(following, " ") || strings.HasPrefix(following, "\t")) || strip(following) == "" {
+					break
+				}
+				kept := strings.TrimRight(following, "\r\n")
+				text += kept + "\n"
+				end = after + len(kept)
+				after += len(following)
+			}
+		}
+		named := [2]string{}
+		if data, err := FrontData(text, "derived_from", 2); err == nil {
+			if value, isObject := data.Value("derived_from").(Object); isObject {
+				for j, key := range []string{"template", "version"} {
+					switch v := value.Value(key).(type) {
+					case string:
+						named[j] = strip(v)
+					case int:
+						named[j] = strconv.Itoa(v)
+					}
+				}
+			}
+		}
+		if named[0] == "" || named[1] == "" {
+			named = [2]string{}
+		}
+		return offset, end, named[0], named[1], true
+	}
+	return 0, 0, "", "", false
+}
+
+// lastPart is the name after a template's repository, `<repository>/<name>`'s name.
+func lastPart(name string) string {
+	if at := strings.LastIndex(name, "/"); at >= 0 {
+		return name[at+1:]
+	}
+	return name
+}
+
+// frontMatterTemplate is the template a file's front matter names in its derived_from, "" for none.
 func frontMatterTemplate(body string) (string, bool) {
 	loc := frontMatter.FindStringIndex(body)
 	if loc == nil {
 		return "", false
 	}
-	if m := frontTemplate.FindStringSubmatch(body[:loc[1]]); m != nil {
-		return m[1], true
+	if _, _, named, _, ok := derivedFrom(body[:loc[1]]); ok && named != "" {
+		return lastPart(named), true
 	}
 	return "", false
 }
@@ -488,14 +545,11 @@ func frontVersion(t *Template, front string) string {
 	if front == "" {
 		return ""
 	}
-	m := frontTemplate.FindStringSubmatch(front)
-	if m == nil || m[1] != t.Name {
+	_, _, named, version, ok := derivedFrom(front)
+	if !ok || lastPart(named) != t.Name {
 		return ""
 	}
-	if v := frontKey("version").FindStringSubmatch(front); v != nil {
-		return strip(v[1])
-	}
-	return ""
+	return version
 }
 
 func markedVersion(t *Template, body string) string {

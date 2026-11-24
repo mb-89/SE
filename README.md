@@ -2594,11 +2594,11 @@ that differs from its template.
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.
 
-`templates.py check --path <file>` checks one against the template its front matter's `template:`
-line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
+`templates.py check --path <file>` checks one against the template its front matter's
+`derived_from` names or the conditions pick, refuses one none picks and leaves unclaimed files free.
 
-The front matter and `#` title stay as they are, but for the `template`, `version` and `overlay`
-lines the front matter records its template by.
+The front matter and `#` title stay as they are, but for the `derived_from` and `overlay` lines the
+front matter records its template by.
 
 A document is checked against the template version its marker or front matter records: another
 minor or patch version warns, another major version refuses, naming both versions and the fill
