@@ -3028,7 +3028,7 @@ def test_the_worked_example_fills_two_documents_that_pass_link_the_material_and_
     assert templates.main(["list", "--root", str(repository), "--tree"]) == 0
     listed = capsys.readouterr().out
     assert "label-spec (owner): file.write: documents/label-*.md: A product label" in listed
-    assert "test-plan (owner): filled by name: One test plan per product." in listed
+    assert "test-plan (owner): a node of a document: One test plan per product." in listed
     resolved = templates.catalog(repository, tree=True)
     readme = (EXAMPLE / "README.md").read_text(encoding="utf-8")
     for document, named in (("label-pump.md", "label-spec"), ("test-plan-pump.md", "test-plan")):

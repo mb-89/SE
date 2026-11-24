@@ -2632,8 +2632,7 @@ def owned(templates: dict[str, Template]) -> list[tuple[str, str]]:
 def list_templates(templates: dict[str, Template]) -> list[str]:
     """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
-    return [f"{template.name} ({template.reader}): "
-            + f"{', '.join(template.actions) or ('filled by name' if template.manifest else 'a node of a document')}: "
+    return [f"{template.name} ({template.reader}): {', '.join(template.actions) or 'a node of a document'}: "
             + (f"{', '.join(template.paths)}: " if template.paths else "")
             + (f"{_checked_by(template)}: " if template.is_adapter else "") + template.says
             for template in sorted(templates.values(), key=lambda item: (item.order, item.name))]
