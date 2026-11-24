@@ -109,7 +109,7 @@ class = "batch"
 usage = "work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue"
 summary = "claim a ready work issue for a worker your session tool starts: ..."
 group = "Integration"
-help = "claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there; start of the issue in this checkout then takes this claim and changes its labels"
+help = "claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there, unless it is an unused claim (behind main, no commit of its own) of an issue not in progress, which it moves to the newest main; start of the issue in this checkout then takes this claim and changes its labels"
 class = "batch"
 
 [commands."work_tickets.py session-title"]

@@ -4345,26 +4345,79 @@ def newest_integration_commit(root: Path) -> str:
     return checked_git(root, "rev-parse", f"origin/{integration_branch(root)}^{{commit}}").strip()
 
 
-def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
+def claim(root: Path, number: int, repo: str, branch: str, commit: str,
+          reuse: bool = False) -> str:
     """Claim work issue #`number`: create its branch at `commit` on the remote that hosts its
     repository (`issue_remote`), as a push that holds only while the branch does not exist there,
     so of two starts the host lets the first create it and refuses the second. Only a push that
     reports the branch new claims it: git passes a branch already at `commit` as up to date before
-    it checks the lease. The remote."""
+    it checks the lease. With `reuse`, for an issue its caller read as not in progress, an unused
+    claim there (`unused_claim`) is taken instead: moved to `commit` with a lease on its tip, so
+    of two starts that both find it only the first moves it. The remote."""
     remote = issue_remote(root, repo)
     ref = f"refs/heads/{branch}"
     pushed = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:", remote,
                                  f"{commit}:{ref}"])
-    if pushed.returncode == 0 and any(
-            line.startswith("*\t") and line.split("\t")[1].endswith(f":{ref}")
-            for line in pushed.stdout.splitlines()):
+    if pushed.returncode == 0 and pushed_as(pushed.stdout, ref, "*"):
         return remote
     listed = run_git(root, "ls-remote", remote, ref)
     if listed.returncode == 0 and listed.stdout.strip():
+        unused = unused_claim(root, repo, branch) if reuse else None
+        if unused is not None and merged_into(root, remote, unused, commit):
+            moved = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:{unused}",
+                                        remote, f"{commit}:{ref}"])
+            if moved.returncode == 0 and pushed_as(moved.stdout, ref, " "):
+                return remote
         raise QueueError(f"Issue #{number} is not startable: its branch {branch} exists on "
                          f"{remote}, so another start holds its claim; nothing was changed")
     raise QueueError(f"Issue #{number} is not startable: its branch {branch} could not be "
                      f"created on {remote}: {failure_detail(pushed)}; nothing was changed")
+
+
+def pushed_as(porcelain: str, ref: str, flag: str) -> bool:
+    """Whether `git push --porcelain` reports `ref` with `flag` (`*` new, ` ` fast-forward)."""
+    return any(line.startswith(f"{flag}\t") and line.split("\t")[1].endswith(f":{ref}")
+               for line in porcelain.splitlines())
+
+
+def merged_into(root: Path, remote: str, ancestor: str, descendant: str) -> bool:
+    """Whether commit `ancestor` is an ancestor of `descendant` and not that commit itself: asked
+    of this checkout, and where it lacks either, after fetching both from `remote` by their ids,
+    which moves no ref."""
+    if ancestor == descendant:
+        return False
+    held = run_git(root, "merge-base", "--is-ancestor", ancestor, descendant)
+    if held.returncode not in (0, 1):  # an object this checkout lacks
+        if run_git(root, "fetch", "--no-write-fetch-head", remote, ancestor,
+                   descendant).returncode != 0:
+            return False
+        held = run_git(root, "merge-base", "--is-ancestor", ancestor, descendant)
+    return held.returncode == 0
+
+
+def unused_claim(root: Path, repo: str, branch: str) -> str | None:
+    """The tip of `branch` on the remote that hosts the issue's repository (`issue_remote`) where
+    it is an unused claim, a branch nobody worked on: it holds no commit beyond the integration
+    branch there and is behind it, so the claim was made at an older main and no start is taking
+    it now (a start's claim is made at the newest main). None where the branch is not there, holds
+    a commit of its own, is at the newest main, or either branch cannot be read. Whether its issue
+    is in progress is the caller's: only an issue not labelled in-progress has its claim reused."""
+    remote = issue_remote(root, repo)
+    base = f"refs/heads/{integration_branch(root)}"
+    listed = run_git(root, "ls-remote", remote, f"refs/heads/{branch}", base)
+    if listed.returncode != 0:
+        return None
+    tips = {name.strip(): sha.strip() for sha, _, name in
+            (line.partition("\t") for line in listed.stdout.splitlines())}
+    tip, newest = tips.get(f"refs/heads/{branch}"), tips.get(base)
+    if not tip or not newest or not merged_into(root, remote, tip, newest):
+        return None
+    return tip
+
+
+def local_branch(root: Path, branch: str) -> bool:
+    """Whether this checkout has a branch named `branch`."""
+    return run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
 
 
 CLAIMS = Path(".se") / "claims"  # .se/claims/<issue>: what this checkout's `claim` claimed
@@ -4408,9 +4461,11 @@ def own_claim(root: Path, number: int, repo: str, branch: str) -> str | None:
 
 
 def take_claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
-    """Claim work issue #`number` for `start` (`claim`), or take this checkout's own claim of it
-    where `claim` made one here (`own_claim`): the remote."""
-    return own_claim(root, number, repo, branch) or claim(root, number, repo, branch, commit)
+    """Claim work issue #`number` for `start` (`claim`, reusing an unused claim: `start` reads the
+    issue as ready and not in progress first), or take this checkout's own claim of it where
+    `claim` made one here (`own_claim`): the remote."""
+    return own_claim(root, number, repo, branch) or claim(root, number, repo, branch, commit,
+                                                          reuse=True)
 
 
 def forget_claim(root: Path, number: int) -> None:
@@ -4746,10 +4801,11 @@ def post_started(root: Path, number: int, repo: str, branch: str) -> None:
 
 def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
                    create: bool) -> Path:
-    """The worker's worktree of `branch`, once work issue #`number` is claimed (`claim`): with
-    `create`, the branch created at the newest integration branch on the issue's remote and the
-    worktree created from it there; without, the one the project's own script created, its branch
-    claimed at its commit; synced."""
+    """The worker's worktree of `branch`, once work issue #`number` is claimed (`claim`, reusing an
+    unused claim, as `start` read the issue ready and not in progress): with `create`, the branch
+    created at the newest integration branch on the issue's remote and the worktree created from
+    it there; without, the one the project's own script created, its branch claimed at its commit;
+    synced."""
     if create:
         sync(root)
         directory = configured_worktree_root(root, worktree_root)
@@ -4765,7 +4821,8 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
             return existing
         if path.exists():
             raise QueueError(f"Worktree path already exists: {path}")
-        remote = own or claim(root, number, repo, branch, newest_integration_commit(root))
+        remote = own or claim(root, number, repo, branch, newest_integration_commit(root),
+                              reuse=True)
         try:
             directory_path.mkdir(parents=True, exist_ok=True)
         except OSError as error:
@@ -4785,7 +4842,8 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
             raise QueueError(f"No worktree exists for branch {branch}")
         if current_branch(path) != branch:
             raise QueueError(f"Worktree {path} is not on branch {branch}")
-        claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip())
+        claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip(),
+              reuse=True)
         sync(path)
     return path
 
@@ -5004,8 +5062,7 @@ def issue_ownership(issue: dict[str, object]) -> set[str]:
 
 def branch_exists(root: Path, branch: str, repo: str) -> bool:
     """Whether `branch` exists here or on the remote that hosts the issue's repository `repo`."""
-    local = run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
-    if local.returncode == 0:
+    if local_branch(root, branch):
         return True
     origin = run_git(root, "remote", "get-url", "origin")
     if origin.returncode != 0:
@@ -5037,7 +5094,8 @@ def ready_and_claimed(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """The startable work issues: open, `work` and `ready`, not held, not waiting on a person
-    (`waiting_on_person`), unblocked, with no branch yet and no file ownership an issue in
+    (`waiting_on_person`), unblocked, with no branch yet (or only an unused claim of it on the
+    issue's remote, `unused_claim`, which `start` takes) and no file ownership an issue in
     progress holds; and the claimed ones, the open issues labelled in-progress, with their bodies
     (`claim_of`). The two listings are read at once,
     then each candidate's blockers and branch at once."""
@@ -5062,8 +5120,10 @@ def ready_and_claimed(
     def ready(candidate: dict[str, object]) -> bool:
         detail = issue_api(root, repo, f"issues/{int(candidate['number'])}")
         blockers = int((detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0))
-        return blockers == 0 and (allow_existing_branch
-                                  or not branch_exists(root, str(candidate["title"]), repo))
+        branch = str(candidate["title"])
+        return blockers == 0 and (allow_existing_branch or not branch_exists(root, branch, repo)
+                                  or (not local_branch(root, branch)
+                                      and unused_claim(root, repo, branch) is not None))
 
     def state(number: int) -> dict[str, object] | None:
         try:
@@ -12223,28 +12283,32 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
 
 @command("claim", "claim a ready work issue for a worker your session tool starts: create its "
                   "branch at the newest main on the remote that hosts the issue's repository; "
-                  "refused, changing nothing, where that branch exists there; start of the issue "
-                  "in this checkout then takes this claim and changes its labels",
+                  "refused, changing nothing, where that branch exists there, unless it is an "
+                  "unused claim (behind main, no commit of its own) of an issue not in progress, "
+                  "which it moves to the newest main; start of the issue in this checkout then "
+                  "takes this claim and changes its labels",
          WORKTREE,
          arg("issue", type=int),
          REPO,
          arg("--issue-body", type=Path, metavar="FILE",
              help="without gh, off kern's relay: the issue as your GitHub tools' issue_read "
-                  "(method get) answered it, for its branch name"))
+                  "(method get) answered it, for its branch name and its labels"))
 def run_claim(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
-    branch = issue_branch(root, args.issue, repo, args.issue_body)
-    commit = newest_integration_commit(root)
-    remote = claim(root, args.issue, repo, branch, commit)
+    issue = claimed_issue(root, args.issue, repo, args.issue_body)
+    branch, commit = str(issue["title"]), newest_integration_commit(root)
+    remote = claim(root, args.issue, repo, branch, commit,
+                   reuse=IN_PROGRESS_LABEL not in issue_labels(issue))
     record_claim_here(root, args.issue, remote, branch, commit)
     print(f"Claimed #{args.issue}: branch {branch} on {remote}; start #{args.issue} here takes "
           "this claim")
     return 0
 
 
-def issue_branch(root: Path, number: int, repo: str, issue_file: Path | None) -> str:
-    """Work issue #`number`'s branch, its title: read with gh, else through kern's relay, else from
-    `issue_file`, the GitHub tools' issue_read answer."""
+def claimed_issue(root: Path, number: int, repo: str, issue_file: Path | None) -> dict[str, object]:
+    """Work issue #`number` as `claim` reads it, for its branch (its title) and its labels: read
+    with gh, else through kern's relay, else from `issue_file`, the GitHub tools' issue_read
+    answer."""
     if not hand_off():
         issue = fetch_issue(root, number, repo)
     elif (door := relay_door(root, repo)) is not None:
@@ -12259,7 +12323,7 @@ def issue_branch(root: Path, number: int, repo: str, issue_file: Path | None) ->
     if not isinstance(issue, dict) or int(issue.get("number") or number) != number \
             or not issue.get("title"):
         raise QueueError(f"claim: the issue read is not #{number}: give issue_read's answer of it")
-    return str(issue["title"])
+    return issue
 
 
 @command("session-title", "print the title of a session a role starts: `SE`, "
@@ -12386,7 +12450,8 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
                                       "perPage": 100},
              note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS
                   | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
-                  "no branch yet and no file ownership an in-progress issue holds"),
+                  "no branch yet (or only an unused claim: a branch behind main with no commit "
+                  "of its own) and no file ownership an in-progress issue holds"),
         *([] if limit is None else [running_step(root, repo)]),
         Step("claimed", "list_issues", {**where, "state": "OPEN",
                                         "labels": ["work", "in-progress", *labels], "perPage": 100},
