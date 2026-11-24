@@ -131,8 +131,10 @@ NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "o
 #: The documents a deck is built from (deck.build): the retro's and the overhaul's one report.
 DECKS = ("retro-deck",)
 #: The interface templates with fields: the texts SE's sessions pass to each other.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
-              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref")
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover",
+              "rules-page", "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc",
+              "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart",
+              "release-trailer", "review-done", "run-closed")
 #: The templates that claim files (`file.write`): the work issue's body file.
 FILES = ("work-file",)
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
@@ -1913,8 +1915,8 @@ def unclaimed(catalog, monkeypatch) -> list[Case]:
     answer to the Started comment."""
     beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 24, 14, 50, tzinfo=timezone.utc))
     return [Case("issue.edit", "work", work_tickets.without_beat(beaten), labels=WORK_LABELS),
-            Case("comment.create", FREE, work_tickets.UNCLAIMED_COMMENT.format(
-                started=f"{ISSUE_URL}#issuecomment-1", branch="feature/example"))]
+            Case("comment.create", FREE, work_tickets.interface_message(
+                "claim-undone", started=f"{ISSUE_URL}#issuecomment-1", branch="feature/example") + "\n")]
 
 
 def without_beats(plan):
@@ -1949,7 +1951,7 @@ CONTRACT = {
     "work_tickets:start_handed_off.assign": ("start", no_body()),
     "work_tickets:unclaim": ("unclaim", unclaimed),
     "work_tickets:post_started": ("start", comment(
-        work_tickets.STARTED_COMMENT.format(branch="feature/example"))),
+        work_tickets.started_comment("feature/example"))),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
     "work_tickets:escalation_plan": ("integrate", plan_of(
         lambda: work_tickets.escalation_plan(REPO, 7, "the suite failed"), {"comment_issue": FREE})),

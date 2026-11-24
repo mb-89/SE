@@ -578,9 +578,8 @@ def what_follows(number: int, found: Report, landed: bool) -> str:
 
 
 def escalation(number: int, url: str) -> str:
-    return (f"Declined by the review of pull request #{number} ({url}): the change is "
-            "fundamentally wrong and does not land. The review comment there holds the findings; "
-            "SE re-scopes this issue or takes it to the owner.\n")
+    """The decline comment on the work issue (templates/review-declined.md)."""
+    return work_tickets.interface_message("review-declined", number=str(number), url=url) + "\n"
 
 
 def file_plan(remote: str, number: int, then: str) -> Plan:
@@ -681,8 +680,10 @@ def outcome_line(number: int, url: str, found: Report, landed: bool, issue_numbe
         return (f"#{issue_number} has {len(found.findings)} open point(s) under \"Changes after "
                 "filing\" and stays open after the landing")
     if found.verdict == DECLINE:
-        return (f"escalated #{issue_number}: the review declined pull request #{number} ({url}); "
-                "re-scope the issue or take it to the owner")
+        return work_tickets.interface_message(
+            "escalation", issue=str(issue_number),
+            question=f"the review declined pull request #{number} ({url}); re-scope the issue or take "
+                     "it to the owner")
     return f"#{number} passes: it lands as is"
 
 

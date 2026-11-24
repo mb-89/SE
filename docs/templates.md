@@ -496,6 +496,13 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/retro-part.md` | `retro-part`: the label of each part of a split retro report | interface | SE |
 | `templates/retro-doc.md` | `retro-doc`: a retro report's link to its committed retro doc | interface | SE |
 | `templates/finding-ref.md` | `finding-ref`: how a work issue names a retro's or an overhaul's finding | interface | SE |
+| `templates/started-comment.md` | `started-comment`: the Started comment `start` posts on a work issue | interface | SE |
+| `templates/claim-undone.md` | `claim-undone`: `unclaim`'s answer to a Started comment | interface | SE |
+| `templates/review-declined.md` | `review-declined`: the comment a declined review writes on the work issue | interface | SE |
+| `templates/limit-restart.md` | `limit-restart`: the comment that says a worker session was resumed after a usage limit | interface | SE |
+| `templates/release-trailer.md` | `release-trailer`: the one trailer of an integration merge, its release kind | interface | SE |
+| `templates/review-done.md` | `review-done`: a cold reviewer's end message to SE | interface | SE |
+| `templates/run-closed.md` | `run-closed`: a retro's or an overhaul's hand-back to SE | interface | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already
@@ -505,6 +512,10 @@ SE's free texts are interface templates: the worker's delivery notice, an escala
 handover, the start report, the three pages of what the layout loads (`scripts/se_plugin.py`
 `pages`) and the generated-file marker's words (`scripts/generated.py` `line`); a design note's
 outline is still to come.
+
+The fleet's fixed lines are too: the Started comment and its Claim-undone answer, a declined
+review's comment, the comment of a restart after a usage limit, every merge's `Release-kind:`
+trailer, and the reviewer's and the retro's end messages.
 
 Fixed text SE shows the person comes from a template, short snippets included (the person's
 decision of 23 Nov 2026). A snippet is a message of several lines: a `rows` field writes one line

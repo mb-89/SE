@@ -256,8 +256,9 @@ writes.
 `retro.py collect` is a retro's mechanical half.
 
 Its window is every work issue closed since the last closed retro issue (titled
-`docs/retro-...` or labelled `retro`) closed. Where none has, it starts when the oldest open retro
-issue was created; only where no retro issue exists is it the whole history.
+`docs/retro-...` or labelled `retro`) closed. Where none has, it is the whole history, from the
+project's first issue, whatever retro issue is open ([Retro due](fleet.md#retro-due): a retro
+covers everything up to its start).
 
 `--since` starts the window at a date (`YYYY-MM-DD`) or time, `--retro` where that closed retro
 issue closed, whose findings it then scores; the rule checks judge only the window.
@@ -280,9 +281,9 @@ field report's Retro section ask alike. Collect fills step 2 with what it read:
 - the field reports' answers to the standing questions, by question, and their "Not delivered"
   items, the planning misses;
 - the rule checks, each broken one with what broke it: every landing pull request names a work
-  issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
-  integration branch outside a pull request (`outside-pr`), every closed work issue has a field
-  report (`field-report`);
+  issue open when it merged (`work-issue`), its `check` passed in its last run before the merge,
+  not a later nightly one (`check`), no commit reached the integration branch outside a pull
+  request (`outside-pr`), every closed work issue has a field report (`field-report`);
 - the window's [metrics](running.md#metrics) report: the line each landing pull request's description ends
   in, merged with the lines of the local metrics file that started in the window, a run in both
   counted once (by its command and start, the local line winning);
