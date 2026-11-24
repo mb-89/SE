@@ -2048,16 +2048,17 @@ def run_file(args: argparse.Namespace) -> int:
 
 
 def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
-    """A judged finding as its decision chapter of the deck: what the person decides (their go for
-    `work`, their decision for `decision`), the finding, its class with its cause and fix, and its home."""
+    """A judged finding as its decision chapter of the deck: it opens with the finding itself, its
+    current situation as the judge wrote it, then its class with its cause and fix, its home, and last
+    what the person decides (their go for `work`, their decision for `decision`)."""
     row = next((row for row in classes if row["name"] == item["class"].strip()), None)
-    ask = (f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
-           else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue.")
-    lines = [ask, "", item["body"].strip(), "", f"Class: {item['class'].strip()}."]
+    lines = [item["body"].strip(), "", f"Class: {item['class'].strip()}."]
     if row is not None:
         lines += ["", f"Cause: {one_line(row['cause'])}", "", f"Fix: {row['fix'].strip()}"]
     check = f"; check `{item['check']}`" if item.get("check") else ""
-    lines += ["", f"Home: `{item['home'].strip()}`{check}."]
+    lines += ["", f"Home: `{item['home'].strip()}`{check}.", "",
+              f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
+              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
     return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
 
 

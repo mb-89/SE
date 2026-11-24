@@ -31,7 +31,7 @@ import deck  # noqa: E402
 import deck_look  # noqa: E402
 from fake_processes import Answer  # noqa: E402
 
-NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nThis is one case of how %s is chosen.\n"
+NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nToday %s is chosen by hand.\n"
         "\n## The problem\n\nIt is chosen by hand.\n\n## What others do\n\nOthers pick it by a rule.\n")
 
 
@@ -174,6 +174,22 @@ def test_a_clean_built_deck_has_no_findings_and_writes_nothing(decks, capsys):
     assert (code, result.out) == (0, "look: no findings in deck.html, 1 chapter(s) at phone-light, "
                                      "phone-dark, desktop-light, desktop-dark\n"), result.err
     assert sorted(path.name for path in deck_page.parent.iterdir()) == before
+
+
+@pytest.mark.parametrize("opening", ["This is one case of how storage is chosen.", "this is a case of storage."])
+def test_a_chapter_that_asks_and_opens_with_a_stock_phrase_is_refused(opening):
+    """SE#1826, requirement 10: a decision opens with its current situation, never a stock phrase."""
+    def text(words: str) -> dict:
+        return {"type": "text", "text": words, "children": []}
+
+    chapter = {"id": "store", "bless": {"state": "pending"}, "content": [
+        {"type": "section", "attrs": {"level": 2}, "children": [text("Current situation")]},
+        {"type": "paragraph", "children": [text(opening)]}]}
+    refusal = deck._refusal([chapter], recorded=False)
+    assert refusal.startswith('chapter(s) store open with a stock phrase such as "This is one case of"')
+    plain = {**chapter, "content": [chapter["content"][0], {"type": "paragraph", "children": [
+        text("Storage is chosen by hand. This is one case of many.")]}]}
+    assert deck._refusal([plain], recorded=False) is None
 
 
 def test_build_warns_of_an_option_without_success_or_a_mark_without_its_reason(decks):

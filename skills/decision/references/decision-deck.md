@@ -7,9 +7,9 @@ obs: {bless: pending}
 
 ## Current situation
 
-This is one case of how any decision reaches the person, so it decides the mechanism for every
-decision, not for one. Today SE shows each decision as one option table in a chat message, one
-decision per turn, and the person answers in the chat.
+SE shows each decision as one option table in a chat message, one decision per turn, and the
+person answers in the chat. Every decision reaches the person this way, so this decides the
+mechanism for every decision, not for one.
 
 ```mermaid
 graph TD

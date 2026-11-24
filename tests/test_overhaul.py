@@ -618,7 +618,8 @@ def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_p
     assert [heading for heading, _ in decisions] == [
         "1. Prune the three functions only tests reach", "2. Name the speed of the suite as a rule",
         "3. Add a rule that every overhaul compares itself"]
-    assert decisions[1][1].startswith("**Decision, for your decision**: it changes a rule")
+    assert decisions[1][1].startswith("The suite grows.")
+    assert decisions[1][1].endswith("**Decision, for your decision**: it changes a rule")
     assert "Rule: tst-002 (a rule change)." in decisions[1][1]
     assert "- Source: https://example.com/practice" in decisions[2][1]
     draft = tmp_path / "draft.md"

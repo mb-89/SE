@@ -24,8 +24,10 @@ it, how others solve it, and which solutions there are.
 - **Frontmatter:** `obs: {bless: pending}` when a person must bless the decision; no frontmatter
   when the note is only a record of a decision the agent took itself.
 - **The heading:** `# <the decision>`, the question in a few words.
-- **`## Current situation`:** what exists today and who uses it, in plain words. The first
-  sentence names the class the case belongs to ([one level up](#one-level-up)).
+- **`## Current situation`:** what exists today and who uses it, in plain technical English. It
+  opens with the situation itself, never with a stock phrase such as "This is one case of"
+  (`deck.py build` refuses one); a later sentence names the class the case belongs to
+  ([one level up](#one-level-up)).
 - **`## The problem`:** what is wrong with it, and what shows it: a failure, a measurement, the
   person's words.
 - **`## What others do`:** how the rest of the world solves the same problem: at least two outside
@@ -123,8 +125,8 @@ right one.
 
 Before writing the note, name the class the instance belongs to and decide the general mechanism;
 the instance is the example. An answer about the mechanism settles every later case of the class,
-an answer about the instance only this one. Write the class in the first sentence of
-`## Current situation` ("This is one case of …") and phrase every option as a rule for the class.
+an answer about the instance only this one. Name the class in `## Current situation`, after the
+situation itself, and phrase every option as a rule for the class.
 
 Worked example (5 Nov): the instance "can queries select the manifest note?" became the mechanism
 "a note can mark itself ignored, like a Python underscore name; the manifest is one such note".

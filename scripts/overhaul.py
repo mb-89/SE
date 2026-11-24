@@ -1116,15 +1116,15 @@ def report(text: str, block: dict, number: int) -> str:
 
 
 def finding_chapter(item: dict) -> tuple[str, str]:
-    """A judged finding as its decision chapter of the deck: what the person decides (their go for
-    `work`, their decision for `decision`, every rule change among them), the finding, its rule, its
-    place and its sources."""
-    ask = (f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
-           else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue.")
+    """A judged finding as its decision chapter of the deck: it opens with the finding itself, then its
+    rule, its place and its sources, and last what the person decides (their go for `work`, their
+    decision for `decision`, every rule change among them)."""
     change = " (a rule change)" if item["rule_change"] else ""
-    lines = [ask, "", item["body"].strip(), "", f"Rule: {item['rule'].strip()}{change}.", "",
+    lines = [item["body"].strip(), "", f"Rule: {item['rule'].strip()}{change}.", "",
              f"Place: `{item['place'].strip()}`."]
     lines += [f"- Source: {source.strip()}" for source in item.get("sources") or []]
+    lines += ["", f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
+              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
     return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
 
 

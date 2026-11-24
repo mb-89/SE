@@ -779,9 +779,12 @@ def test_the_deck_holds_every_step_the_retro_ran_then_one_decision_chapter_per_f
     assert [heading for heading, _ in decisions] == ["1. Refuse a landing whose work issue has no field report",
                                                      "2. Make the field report a rule of the rule book"]
     work, decision = (text for _, text in decisions)
-    assert work.startswith("**Work, for your go**: Bless sends it to SE") and "Home: `scripts/work_tickets.py`; check `field-report`." in work
-    assert decision.startswith("**Decision, for your decision**: it changes a rule\n\nA rule, not a habit.")
-    assert "Cause: a landing need not name a field report" in decision and "Class: Lost reports." in decision
+    # Each opens with its current situation, the finding as the judge wrote it, and asks last (SE#1826, 10).
+    assert work.startswith("#14 closed without one.\n\nClass: Lost reports.")
+    assert work.endswith("Home: `scripts/work_tickets.py`; check `field-report`.\n\n**Work, for your go**: Bless "
+                         "sends it to SE, which bundles it into a work issue.")
+    assert decision.startswith("A rule, not a habit.") and decision.endswith("**Decision, for your decision**: it changes a rule")
+    assert "Cause: a landing need not name a field report" in decision
 
 
 def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checkout, tmp_path, monkeypatch, capsys):

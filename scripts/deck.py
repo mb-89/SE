@@ -378,10 +378,30 @@ def _items(lines: list[str], key: str) -> int | None:
     return count
 
 
+#: Stock openings a chapter that asks the person may not start with (SE#1826, requirement 10): it opens with
+#: its current situation in plain technical English. Matched in any case at the start of its first paragraph.
+STOCK_OPENINGS = ("this is one case of", "this is one instance of", "this is a case of")
+
+
+def _text(node: dict) -> str:
+    return node.get("text", "") + "".join(_text(child) for child in node.get("children", []))
+
+
+def _opening(nodes: list[dict]) -> str:
+    """The text of the first paragraph in ``nodes``, in document order; "" without one."""
+    for node in nodes:
+        if node["type"] == "paragraph":
+            return " ".join(_text(node).split())
+        found = _opening(node.get("children", []))
+        if found:
+            return found
+    return ""
+
+
 def _refusal(chapters: list[dict], recorded: bool, asks: bool = True) -> str | None:
     """Why the deck's chapters are refused: a decision that asks for no bless, unless the build ``recorded``
-    the answers, a decision that does not explain its problem before its options, or, where it ``asks``, no
-    chapter that asks."""
+    the answers, a decision that does not explain its problem before its options, a chapter asking for a
+    bless that opens with a stock phrase (STOCK_OPENINGS), or, where it ``asks``, no chapter that asks."""
     remedy = "give each decision note `obs: {bless: pending}` in its frontmatter"
     decisions = [chapter for chapter in chapters if _holds_pugh(chapter["content"])]
     silent = [chapter["id"] for chapter in decisions if not recorded and "bless" not in chapter]
@@ -393,6 +413,11 @@ def _refusal(chapters: list[dict], recorded: bool, asks: bool = True) -> str | N
         return (f"decision(s) {', '.join(unexplained)} do not explain the problem before the options; write "
                 f"{_named_sections()} before the `pugh` fence, as the decision skill's note shape "
                 "(src/skills/decision/SKILL.md) and the decision template (templates/decision.md) say")
+    stock = [chapter["id"] for chapter in chapters if "bless" in chapter
+             and _opening(chapter["content"]).casefold().startswith(STOCK_OPENINGS)]
+    if stock:
+        return (f"chapter(s) {', '.join(stock)} open with a stock phrase such as \"This is one case of\"; open with "
+                "the current situation in plain technical English, as the decision skill's note shape says")
     if asks and not any("bless" in chapter for chapter in chapters):
         return f"no chapter asks for a bless, so the deck asks the person nothing; {remedy}"
     return None
