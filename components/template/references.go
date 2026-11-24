@@ -18,6 +18,7 @@ type ShapeFunc func(title string) string
 var References = map[string]any{
 	"work_tickets:RELEASE_KINDS":               []string{"feature", "feat", "fix", "perf", "chore", "docs", "test"},
 	"work_tickets:RELEASE_ORDER":               []string{"patch", "minor", "major"},
+	"review:VERDICTS":                          []string{"pass", "pass with open points", "decline"},
 	"work_tickets:name_refusal":                ShapeFunc(nameRefusal),
 	"work_tickets:INTEGRATION_SUBJECT_PATTERN": regexp.MustCompile(`Integrate ([^\s:()]+)`),
 }

@@ -17,10 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
               "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
               "started-comment", "claim-undone", "review-declined", "limit-restart",
-              "release-trailer")
+              "release-trailer", "review-done", "run-closed")
 MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
             "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart",
-            "release-trailer")
+            "release-trailer", "review-done", "run-closed")
 
 
 @pytest.fixture(scope="module")
@@ -271,3 +271,32 @@ def test_the_release_trailer_is_the_line_written_by_hand_its_pattern_reads_and_r
     with pytest.raises(interfaces.InterfaceError, match="se/release-trailer") as refused:
         interfaces.write("release-trailer", {"kind": "huge"})
     assert "kind" in str(refused.value)
+
+
+
+@pytest.mark.parametrize("name, stated, placeholders", [
+    ("review-done", "review of PR #<n>: <verdict>, <comment URL>",
+     {"pr": "<n>", "verdict": "<verdict>", "url": "<comment URL>"}),
+    ("run-closed", "<retro|overhaul> #<n> closed: <report link>",
+     {"kind": "<retro|overhaul>", "number": "<n>", "link": "<report link>"}),
+])
+def test_an_agent_s_end_message_is_the_line_its_agent_text_stated_and_its_example_renders_it(
+        catalog, name, stated, placeholders):
+    template = catalog[name]
+    assert interfaces.line(template.message, placeholders) == stated
+    example = template.example["fields"]
+    expected = stated
+    for field, mark in placeholders.items():
+        expected = expected.replace(mark, example[field])
+    rendered = interfaces.write(name, dict(example))
+    assert rendered == expected
+    assert interfaces.read(name, rendered) == example
+
+
+def test_the_review_s_end_message_takes_only_the_review_s_verdicts():
+    import review
+
+    assert [interfaces.write("review-done", {"pr": "5", "verdict": verdict, "url": "u"})
+            for verdict in review.VERDICTS] == [f"review of PR #5: {verdict}, u" for verdict in review.VERDICTS]
+    with pytest.raises(interfaces.InterfaceError, match="se/review-done"):
+        interfaces.write("review-done", {"pr": "5", "verdict": "fine", "url": "u"})

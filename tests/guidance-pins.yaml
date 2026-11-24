@@ -106,10 +106,16 @@ review:
 review-declined:
   - discover-cheap-load-late
   - guidance-comes-first
+review-done:
+  - discover-cheap-load-late
+  - guidance-comes-first
 routed:
   - discover-cheap-load-late
   - guidance-comes-first
 rules-page:
+  - discover-cheap-load-late
+  - guidance-comes-first
+run-closed:
   - discover-cheap-load-late
   - guidance-comes-first
 skills-page:

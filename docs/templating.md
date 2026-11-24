@@ -52,8 +52,10 @@ both.
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/review-declined.md` | A declined review's comment on the work issue: the pull request the review declined and its link. |
+| `templates/review-done.md` | A cold review's end: the reviewed pull request, the verdict and the review comment's link. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
 | `templates/rules-page.md` | The page `docs/rules.md`. |
+| `templates/run-closed.md` | A retro's or an overhaul's hand-back: the run's kind and issue number and its report's link. |
 | `templates/skills-page.md` | The page `docs/skills.md`. |
 | `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
 | `templates/started-comment.md` | A work issue's Started comment: the branch its worker works on. |
@@ -85,10 +87,11 @@ where it holds them, else the working tree (`--tree` always).
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
-The interface templates (`boot-report`, `claim-undone`, `delivery-notice`, `escalation`,
-`finding-ref`, `generated-marker`, `handover`, `limit-restart`, `release-trailer`, `retro-doc`,
-`retro-due`, `retro-part`, `review-declined`, `rules-page`, `skills-page`, `started-comment`,
-`sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each other.
+The interface templates (`kind: interface` in their front matter) shape the texts SE shows,
+writes and its sessions pass to each other.
+
+No code sends `review-done` and `run-closed`, the reviewer's and the retro's end messages: their
+agents name them.
 
 `templates.py interfaces` writes each one's schema beside the code that uses it,
 `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
