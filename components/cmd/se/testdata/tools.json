@@ -160,7 +160,7 @@
         "readOnlyHint": true,
         "title": "se overhaul"
       },
-      "description": "An overhaul: new files its issue, read writes its draft, file checks the judged draft and closes the issue with its report, and facts lists a checkout's pruning facts. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `overhaul.py facts`: Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting or judging an overhaul. Usage: `overhaul.py facts [--repo REPO] [--json]`",
+      "description": "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, from the judged draft, file checks the judged draft and closes the issue with its report, and facts lists a checkout's pruning facts. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `overhaul.py facts`: Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting or judging an overhaul. Usage: `overhaul.py facts [--repo REPO] [--json]`",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
