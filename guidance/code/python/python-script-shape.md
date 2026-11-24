@@ -1,0 +1,30 @@
+---
+name: python-script-shape
+description: 'The one shape of a Python script or module in a repository: scaffolded from its code template, run through uv, with full help and logging from the shared script library, se_script. Read it before you write, scaffold or reshape a Python script.'
+---
+
+The person's requirement of 24 Nov: every Python script looks the same, runs through uv, has proper
+help and does some logging, and a library carries what is the same so the script holds only its
+own part.
+
+- **Scaffold, never write from nothing.** A new script in a repository starts as
+  `uv run python <se>/scripts/templates.py scaffold python-script --path <file> --says "<what it
+  does>"`; a module
+  other scripts import, as `python-module`. The scaffold writes the template marker, the
+  template and version the file derives from, so SE's gate refuses any other way of creating one
+  and names the scaffold call. Scratch work outside the repository is not claimed.
+- **The shape stays.** A script keeps its first line `#!/usr/bin/env -S uv run python`, its
+  marker, `import se_script` (`<se>/scripts/se_script.py`), a parser from `se_script.parser(...)` and the entry
+  `raise SystemExit(se_script.run(main))`; the check names each line it lost. Edit everything
+  else freely: the slots are yours.
+- **Help is the docstring.** The parser's description is the docstring's first paragraph, each
+  argument has a `help`, and the epilog the library adds names the log level; `--help` is the
+  reader's manual, so keep it true.
+- **Log, do not print, what is not the answer.** stdout carries the script's answer; what it did
+  goes to `logging.getLogger(__name__)`, on stderr at WARNING unless `SE_LOG_LEVEL` says more.
+  `se_script.run` logs the start and the exit code at DEBUG for every script.
+- **`main(argv)` stays callable.** Tests call `main([...])` in-process (the guidance note
+  `tests-spawn-no-processes`); `se_script.run` is only the process entry.
+
+Not picked: a check of the shape after the fact alone, since a script written freehand then fails
+late instead of starting on its shape.

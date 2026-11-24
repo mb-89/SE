@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's workflows and actions in a project, as generated local copies (docs/running.md "Workflows").
 
 A workflow names a reusable workflow or action by a line the host reads literally, so a call of SE's
@@ -39,6 +40,7 @@ from pathlib import Path
 import generated
 import git_door
 import se_home
+import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 MODULE = "se"
@@ -360,7 +362,7 @@ def shard_mismatches(root: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="se_workflows.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="se_workflows.py", description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="the project (default: here)")
     parser.add_argument("--source", type=Path, help="the SE checkout holding the pin (default: the "
                         "project's se module, else this SE)")
@@ -390,4 +392,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """The one door to git: every git command SE runs goes through `run` (or `popen` for a stream).
 
 The rule is the rule book's des-004, one door per outside thing, and tst-001, fakes that behave:
@@ -21,6 +22,7 @@ workflow's gate), so a test that hands them the fake reaches no real git.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -30,6 +32,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
+import se_script
 
 
 class Backend(Protocol):
@@ -191,9 +194,21 @@ def set_identity(root: Path, identity: tuple[str, str]) -> subprocess.CompletedP
     return None
 
 
+def help_parser() -> argparse.ArgumentParser:
+    """The command's help: every argument is git's, so only `-h` or `--help` alone is the door's."""
+    return se_script.parser(prog="git_door.py", usage="git_door.py <git arguments>",
+                            description="Run one git command through SE's git door; its output and "
+                            "exit code are git's. `-h` or `--help` alone prints this help, any other "
+                            "arguments go to git as they stand.")
+
+
 def main(arguments: list[str] | None = None) -> int:
     """Run `git <arguments>` through the door; git's output and exit code are the command's."""
-    done = run(*(sys.argv[1:] if arguments is None else arguments), binary=True)
+    given = sys.argv[1:] if arguments is None else arguments
+    if given in (["-h"], ["--help"]):
+        help_parser().print_help()
+        return 0
+    done = run(*given, binary=True)
     sys.stdout.buffer.write(done.stdout)
     sys.stdout.buffer.flush()
     sys.stderr.buffer.write(done.stderr)
@@ -202,4 +217,4 @@ def main(arguments: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

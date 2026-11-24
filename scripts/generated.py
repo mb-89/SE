@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Generated files: every file a program writes says so, naming its generator and its source, and
 one check keeps that true (the guidance note `generated-files-are-marked`, which owns the rule).
 
@@ -38,6 +39,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -430,7 +432,7 @@ def notice(root: Path, path: str) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="generated.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="generated.py", description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=ROOT, help="the checkout (default: SE's own)")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="fail where a generated file is not marked, a marked "
@@ -464,4 +466,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

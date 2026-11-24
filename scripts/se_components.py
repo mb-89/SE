@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's script commands as kern components (docs/start.md "Commands as components").
 
 A script's command group is one component, `components/<name>/`: its `component.toml`, which
@@ -76,6 +77,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
+import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 #: Where SE's components live, under the checkout kern serves (kern's README "The host").
@@ -1029,7 +1031,7 @@ def main(argv: list[str] | None = None) -> int:
     overlay places it (se_component.py); `commands` lists every declared command (Discovered)."""
     args = sys.argv[1:] if argv is None else argv
     if args[:1] == ["commands"]:
-        parser = argparse.ArgumentParser(prog="se_components.py commands",
+        parser = se_script.parser(prog="se_components.py commands",
                                          description="List every command the checkout's components "
                                                      "declare, from their declarations alone.")
         parser.add_argument("--json", action="store_true", help="print the list as JSON")
@@ -1052,4 +1054,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(se_script.run(main))

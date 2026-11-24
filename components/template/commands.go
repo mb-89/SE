@@ -11,9 +11,9 @@ import (
 // Command discovery for the rule dangling: the subcommands a script's argument parser defines, as
 // scripts/references.py `command_tree` gives them (its argparse parser, captured where `main([])`
 // first parses). Python reads the parser by running the script; Go reads the script's source: the
-// parser `main` parses, its `add_subparsers` and `add_parser` calls, nested, and where it has none,
-// its first positional's `choices`, through the variables, the module's constants, the `for` loops
-// and the functions `main` calls; work_tickets.py's registry (`command_group` and the `@command`
+// parser `main` parses (argparse's, or se_script.parser's), its `add_subparsers` and `add_parser`
+// calls, nested, and where it has none, its first positional's `choices`, through the variables, the
+// module's constants, the `for` loops and the functions `main` calls; work_tickets.py's registry (`command_group` and the `@command`
 // decorators with their `parent=`) as its `build_parser` lays it out. The agreement test
 // (components/agreement) holds this reading to Python's tree for every script of SE's checkout.
 
@@ -61,7 +61,7 @@ func CommandTree(path string) Tree {
 
 // ScriptTree is the tree of a script's source text.
 func ScriptTree(source string) Tree {
-	if !strings.Contains(source, "argparse") {
+	if !strings.Contains(source, "argparse") && !strings.Contains(source, "se_script") {
 		return Tree{}
 	}
 	m := readModule(source)
@@ -653,8 +653,9 @@ func (m *module) callValue(e *expr, s *scope) any {
 		return nil
 	}
 	method := e.of.text
-	if method == "ArgumentParser" && e.of.of.kind == "name" && e.of.of.text == "argparse" {
-		return newParser()
+	if e.of.of.kind == "name" && (method == "ArgumentParser" && e.of.of.text == "argparse" ||
+		method == "parser" && e.of.of.text == "se_script") {
+		return newParser() // argparse's, or the one se_script.parser makes (scripts/se_script.py)
 	}
 	receiver := m.eval(e.of.of, s)
 	switch r := receiver.(type) {

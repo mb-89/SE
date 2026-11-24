@@ -26,6 +26,7 @@ both.
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/generated-marker.md` | A generated file's marker words. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
@@ -33,6 +34,9 @@ both.
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
 | `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
+| `templates/python-component.md` | An ad hoc Python component: its component.toml with one command, and its __init__.py answering it. |
+| `templates/python-module.md` | A Python module other scripts import: its template marker, its docstring, and a slot for its code. |
+| `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |

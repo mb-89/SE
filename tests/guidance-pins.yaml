@@ -24,6 +24,10 @@ field-report:
 generated-marker:
   - discover-cheap-load-late
   - guidance-comes-first
+go-module:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - go-module-shape
 handover:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -45,6 +49,18 @@ overhaul-questions:
 pugh:
   - discover-cheap-load-late
   - guidance-comes-first
+python-component:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - python-script-shape
+python-module:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - python-script-shape
+python-script:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - python-script-shape
 raid-entry:
   - discover-cheap-load-late
   - guidance-comes-first

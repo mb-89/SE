@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """The shell door: every shell SE's Python starts, `sh`, `bash`, PowerShell or a command line, starts through `run`.
 
 The shell is a door, like git, gh and the network (the rule book's des-004, one door per outside
