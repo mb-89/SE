@@ -2055,15 +2055,19 @@ def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkey
 
 
 
-def missing_from_readme(readme: str) -> list[str]:
-    """The files under `templates/` that README's "Templates" section does not name with their `says`."""
-    start = readme.index("\n### Templates\n")
+def missing_from_readme(readme: str, heading: str = "\n### Templates\n", code: bool = False) -> list[str]:
+    """The files under `templates/` that README's "Templates" section does not name with their `says`;
+    with `code`, the code templates that `heading`'s section (docs/templates.md "Code templates") does
+    not, as README is a landing page that names none of them (the person's rule, #1796)."""
+    start = readme.index(heading)
     after = re.search(r"\n#{1,3} ", readme[start + 1:])
     section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
     missing = []
     for path in sorted((ROOT / "templates").iterdir()):
         text = path.read_text(encoding="utf-8")
         data = tomllib.loads(text) if path.suffix == ".toml" else templates.note_data(text, path.name)
+        if (data.get("kind") == templates.CODE) != code:
+            continue
         says = " ".join(data["says"].split())
         if f"`templates/{path.name}`" not in section or says not in section:
             missing.append(path.name)
@@ -2074,6 +2078,12 @@ def test_readme_templates_names_every_file_under_templates_with_its_says():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert missing_from_readme(readme) == []
     assert "No command checks with them yet" not in readme
+
+
+def test_docs_code_templates_names_every_code_template_with_its_says():
+    docs = (ROOT / "docs" / "templates.md").read_text(encoding="utf-8")
+    assert missing_from_readme(docs, "\n## Code templates\n", code=True) == []
+    assert len(CODE_TEMPLATES) == 4
 
 
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():

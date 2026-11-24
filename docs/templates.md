@@ -206,6 +206,15 @@ everything, so code has templates of the same engine and no scaffolder of its ow
 - **The guidance.** The code templates' tags (`code`, `python` or `go`) reach the guidance notes
   `python-script-shape` and `go-module-shape` ([Tags and guidance](#tags-and-guidance)).
 
+SE's code templates, each with what it shapes:
+
+| Template | What it shapes |
+|---|---|
+| `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
+| `templates/python-component.md` | An ad hoc Python component: its component.toml with one command, and its __init__.py answering it. |
+| `templates/python-module.md` | A Python module other scripts import: its template marker, its docstring, and a slot for its code. |
+| `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
+
 The Go engine loads a code template and checks a claimed file by its lines as Python does, held to
 the same cases; it scaffolds nothing. The docstring of `scripts/code_templates.py` owns the
 format.

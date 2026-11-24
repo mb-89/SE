@@ -8,7 +8,7 @@ name: python-script
 version: 1.0.0
 kind: code
 reader: fleet
-says: "A Python script: uv entry, help, logging."
+says: "A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part."
 tags: ["code", "python", "script"]
 applies:
   actions: ["file.write"]

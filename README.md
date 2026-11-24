@@ -2543,7 +2543,6 @@ both.
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
-| `templates/go-module.md` | A Go module: go.mod, its package and a test. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
@@ -2551,9 +2550,6 @@ both.
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
 | `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
-| `templates/python-component.md` | An ad hoc Python component. |
-| `templates/python-module.md` | A Python module scripts import. |
-| `templates/python-script.md` | A Python script: uv entry, help, logging. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
@@ -2565,7 +2561,13 @@ both.
 | `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
 | `templates/work-file.md` | A work issue's body file, `.se/issues/<name>.md`. |
 
-[Templates nest](docs/templates.md#nesting).
+Templates nest ([docs/templates.md "Nesting"](docs/templates.md#nesting)):
+
+- a field `node: <template>@<version>` is a part another template checks, such as the decision's
+  options, the `pugh` block;
+- a field `entries: <template>@<version>` is a register whose every entry that template checks,
+  such as the RAID register's raid-entry;
+- a finding of a part names its field, and of an entry also the entry's heading.
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the
@@ -2589,8 +2591,7 @@ that differs from its template.
 `work_tickets.py deliver` and `escalate` write their messages through `scripts/interfaces.py`, and
 `se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
 
-A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps;
-[code templates](docs/templates.md#code-templates) claim scripts, which `templates.py scaffold` writes.
+A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.
 
 `templates.py check --path <file>` checks one against the template its front matter's
@@ -2616,8 +2617,7 @@ refusal names the file, the template and each finding.
   checks nothing.
 - Under Copilot the Stop hook only advises.
 - SE's template gate parses the file each file tool's write leaves, never the edit text, and
-  denies one that breaks its template, naming each finding and `templates.py fill <template> --path`
-  (or `scaffold`).
+  denies one that breaks its template, naming each finding and `templates.py fill <template> --path`.
   - SE's start writes `.se/.runtime/templates-files` where a template claims a path, `claimed`
     and each owned glob, so `scripts/se_hook.sh` picks with builtins only calls on a path a glob
     matches; a template added during a session is guarded from the next session's start. `scripts/se_templates.py`'s docstring (The

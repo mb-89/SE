@@ -7,7 +7,7 @@ name: python-module
 version: 1.0.0
 kind: code
 reader: fleet
-says: "A Python module scripts import."
+says: "A Python module other scripts import: its template marker, its docstring, and a slot for its code."
 tags: ["code", "python"]
 applies:
   actions: ["file.write"]

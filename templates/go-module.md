@@ -7,7 +7,7 @@ name: go-module
 version: 1.0.0
 kind: code
 reader: fleet
-says: "A Go module: go.mod, its package and a test."
+says: "A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content."
 tags: ["code", "go"]
 applies:
   actions: ["file.write"]

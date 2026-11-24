@@ -6,7 +6,7 @@ name: python-component
 version: 1.0.0
 kind: code
 reader: fleet
-says: "An ad hoc Python component."
+says: "An ad hoc Python component: its component.toml with one command, and its __init__.py answering it."
 tags: ["code", "python"]
 applies:
   actions: ["file.write"]
