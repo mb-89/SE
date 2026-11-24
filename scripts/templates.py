@@ -2185,6 +2185,31 @@ def stamped(template: Template, body: str) -> str:
     return f"{FLEET_MARKER}\n{template.marker_line}\n{gap}{body}"
 
 
+def named_template(templates: dict[str, Template], action: str, body: str) -> Template | None:
+    """The template a document's own text names for `action` (docs/templates.md "Which template a
+    write is judged by"): the first template marker naming a template that shapes `action`, else
+    the template of the lowest order that shapes `action` and whose own marker the body carries
+    (`marker`, `marker_pattern`); None where it names none. Labels and the order of the templates
+    without a marker never decide here: that is `select`'s guess for a new document."""
+    for name in TEMPLATE_MARKER_PATTERN.findall(body):
+        template = templates.get(name)
+        if template is not None and action in template.actions:
+            return template
+    lines = {line.strip() for line in body.splitlines()}
+    return next((template for template in sorted(templates.values(),
+                                                  key=lambda item: (item.order, item.name))
+                 if action in template.actions and (template.marker or template.marker_pattern)
+                 and _carries(template, lines)), None)
+
+
+def marker_of(template: Template, body: str) -> str:
+    """The line of `body` that names `template`: its template marker, else its own marker; ""."""
+    for match in TEMPLATE_MARKER_PATTERN.finditer(body):
+        if match.group(1) == template.name:
+            return match.group(0).strip()
+    return template.marker if template.marker and template.marker in body else ""
+
+
 def marked_version(template: Template, body: str) -> str:
     """The version the body's template marker naming `template` records, else ""."""
     for match in TEMPLATE_MARKER_PATTERN.finditer(body):

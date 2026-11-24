@@ -263,6 +263,9 @@ GATE_TOOLS = {
     "add_comment_to_pending_review": ("comment.create", "body", None, None, None),
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
 }
+#: The edits whose template is the document's own, read from the document they leave behind
+#: (Which template, in the module docstring).
+DOCUMENT_EDITS = ("issue.edit", "comment.edit")
 GATE_FAILED = "SE's template gate failed on this write ({kind}), so it was not sent"
 #: The file tools (the module docstring: The file tools), guarded wherever a template claims a
 #: path: Claude Code's own, by their whole name, and the GitHub tools that write files.
@@ -527,6 +530,9 @@ class ShellWrite:
         self.labels: list[str] | None = None
         self.base: str | None = None
         self.number: int | None = None
+        self.comment: int | None = None
+        self.add_labels: list[str] = []
+        self.remove_labels: list[str] = []
         self.unread: str | None = None
         self.remedy = "--body-file <file>"
         self.default_base = False
@@ -571,6 +577,9 @@ def gh_write(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite
         elif name in ("-l", "--label"):
             call.labels = (call.labels or []) + [label.strip() for label in value.split(",")
                                                  if label.strip()]
+        elif name in ("--add-label", "--remove-label"):
+            changed = call.add_labels if name == "--add-label" else call.remove_labels
+            changed += [label.strip() for label in value.split(",") if label.strip()]
         elif name in ("-B", "--base"):
             call.base = call.text(value, "base")
         elif name in ("-b", "--body"):
@@ -612,6 +621,8 @@ def gh_api(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite |
     call.remedy = "-F body=@<file>"
     number = re.fullmatch(r"issues/(\d+)", where.group(2))
     call.number = int(number.group(1)) if number else None
+    comment = re.fullmatch(r"issues/comments/(\d+)", where.group(2))
+    call.comment = int(comment.group(1)) if comment else None
     for value in given:
         text, call.unread = read_file(value, write.cwd, stdin)
         try:
@@ -1194,8 +1205,14 @@ class Write:
         self.labels = self.listed(labels)
         self.base = self.text(base)
         self.repo = "/".join(str(self.input.get(key) or "").strip() for key in ("owner", "repo"))
-        number = self.input.get("issue_number")
-        self.number = number if isinstance(number, int) and not isinstance(number, bool) else None
+        self.number = self.whole("issue_number")
+        self.comment = self.whole("comment_id") if action == "comment.edit" else None
+        self.add_labels: list[str] = []
+        self.remove_labels: list[str] = []
+
+    def whole(self, key: str) -> int | None:
+        value = self.input.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
 
     def text(self, key: str | None) -> str | None:
         value = self.input.get(key) if key else None
@@ -1299,8 +1316,115 @@ def gate_template(catalog: dict, write: Write, root: Path):
     return selection.template, selection.findings
 
 
-def instead(write: Write) -> str:
-    if write.files:
+def current_document(write, root: Path) -> dict | None:
+    """The issue or comment `write` edits as it stands on GitHub (Which template, in the module
+    docstring): `body`, and for an issue `title` and `labels`. kern's snapshot of the issue where a
+    fresh one stands (`se_relay`, younger than its MAX_AGE_SECONDS), else one REST read through
+    gh (`work_tickets.issue_api`); None where the write names no number or neither answers, the
+    reason one line in GATE_LOG."""
+    work_tickets = sibling("work_tickets")
+    comment = getattr(write, "comment", None)
+    if write.action == "issue.edit" and write.number is not None:
+        found = snapshot_issue(write, root)
+        path = f"issues/{write.number}"
+    elif write.action == "comment.edit" and comment is not None:
+        found, path = None, f"issues/comments/{comment}"
+    else:
+        return None
+    try:
+        found = found or work_tickets.issue_api(root, write.repo, path)
+    except Exception as error:  # GitHub cannot be read: no document, and the log says why
+        log_line(root, f"{write.action} in {write.repo}: the document it edits cannot be read "
+                       f"({type(error).__name__}: {(str(error).splitlines() or [''])[0][:160]})")
+        return None
+    if not isinstance(found, dict) or not isinstance(found.get("body") or "", str):
+        return None
+    document: dict = {"body": str(found.get("body") or "")}
+    if write.action == "issue.edit":
+        document["title"] = str(found.get("title") or "")
+        document["labels"] = [str(label.get("name") if isinstance(label, dict) else label)
+                              for label in found.get("labels") or ()]
+    return document
+
+
+def snapshot_issue(write, root: Path) -> dict | None:
+    """The issue `write` edits as kern's snapshot holds it, where one younger than se_relay's
+    MAX_AGE_SECONDS stands; None otherwise, also where no kern serves `root`."""
+    try:
+        relay = sibling("se_relay")
+        door = relay.relay(root)
+        owner, _, name = write.repo.partition("/")
+        found = door.snapshot("issues", owner, name, write.number) if door is not None else None
+        if found is None:
+            return None
+        read = relay.parse_time(found.get("read"))
+        age = (door.now() - read).total_seconds() if read else None
+        return found["data"] if age is not None and age <= relay.MAX_AGE_SECONDS else None
+    except Exception:  # no snapshot: the REST read answers
+        return None
+
+
+def edited(catalog: dict, write, root: Path, project: Path | None):
+    """An edit's template, its findings so far and, where the document names no template, the
+    refusal that says so (Which template, in the module docstring). `write` becomes the document
+    the edit leaves behind: the current one (`current_document`) with the call's body, title and
+    labels in place, gh's `--add-label` and `--remove-label` applied."""
+    templates, work_tickets = sibling("templates"), sibling("work_tickets")
+    current = current_document(write, project or root)
+    given = write.body
+    named = templates.named_template(catalog, write.action, given) if given is not None else None
+    before = templates.named_template(catalog, write.action, current["body"]) if current else None
+    if current is not None:
+        if write.body is None and not getattr(write, "unread", None):
+            write.body = current["body"]
+        if write.action == "issue.edit":
+            write.title = write.title if write.title is not None else current["title"]
+            labels = write.labels if write.labels is not None else current["labels"]
+            removed = {label.casefold() for label in write.remove_labels}
+            write.labels = [*(label for label in labels if label.casefold() not in removed),
+                            *(label for label in write.add_labels
+                              if label.casefold() not in {item.casefold() for item in labels})]
+    template = named or before
+    if template is None:
+        if current is None:  # nothing names a template, and the document cannot be read
+            return None, [], ""
+        guess = templates.select(catalog, write.action, write.body or "", write.title,
+                                 labels=write.labels or (),
+                                 integration=work_tickets.integration_branch(root)).template
+        return None, [], "" if guess is None else unmarked_refusal(write, guess)
+    found = []
+    if before is not None and given is not None and named is None:
+        found.append(templates.Finding("body", "template", templates.REFUSE,
+                                       f"the edit drops the line that names its template ({before.name}); "
+                                       f"keep `{templates.marker_of(before, current['body'])}`"))
+    have = {label.casefold() for label in write.labels or ()}
+    if write.labels is not None and not all(label.casefold() in have for label in template.labels):
+        found.append(templates.Finding("labels", "template", templates.REFUSE,
+                                       templates._why_not(template, write.action)
+                                       + ", and the edit leaves it without them: keep them"))
+    return template, found, ""
+
+
+def unmarked_refusal(write, guess) -> str:
+    """The refusal of an edit whose document names no template (Which template, in the module
+    docstring): it names the stamp, with `guess` the template a new document would get, and the fill."""
+    target = (f"#{write.number}" if write.action == "issue.edit"
+              else f"comment {getattr(write, 'comment', '')}")
+    stamp = (f"uv run python {HERE / 'work_tickets.py'} stamp {write.number} --repo {write.repo} "
+             f"--template {guess.name}" if write.action == "issue.edit" else "")
+    lines = [f"{write.action} in {write.repo}: {target} names no template: its body carries no "
+             "`<!-- se:template <repository>/<name> <version> <digest> -->` line, so SE does not know "
+             "which template it derives from and judges the edit against none."]
+    if stamp:
+        lines.append(f"Stamp it with its template once it passes that template's check: {stamp} "
+                     f"(the {guess.name} template is what a new document like it would take; name "
+                     "another with --template), then send the edit again.")
+    lines.append(f"Or {instead(write)}, through the fill, which writes the marker.")
+    return "\n".join(lines)
+
+
+def instead(write) -> str:
+    if getattr(write, "files", False):
         return f"write it with uv run python {HERE / 'templates.py'} fill <template> --path <file>"
     if write.action in sibling("templates").ISSUE_ACTIONS:
         return (f"file it with uv run python {HERE / 'work_tickets.py'} file (backlog file for a "
@@ -1334,9 +1458,12 @@ def judge_one(write, project: Path | None, switch: str | None) -> str:
     """The answer for one write, a GitHub tool's or one gh command's of a shell call."""
     templates = sibling("templates")
     unread = getattr(write, "unread", None)
+    edit = write.action in DOCUMENT_EDITS
+    changes = (write.body, write.title, write.labels) if edit else (write.body,)
     try:
-        if (write.body is None and unread is None) or write.repo.startswith("/") \
-                or write.repo.endswith("/"):
+        if (all(value is None for value in changes) and unread is None
+                and not (edit and (write.add_labels or write.remove_labels))) \
+                or write.repo.startswith("/") or write.repo.endswith("/"):
             return ""
         if switch is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == templates.OFF:
             return ""
@@ -1350,7 +1477,10 @@ def judge_one(write, project: Path | None, switch: str | None) -> str:
         if getattr(write, "default_base", False):  # gh's default base, taken as the integration
             write.base = sibling("work_tickets").integration_branch(root)
         catalog = templates.load(templates.ROOT)
-        template, met = gate_template(catalog, write, root)
+        template, met, unmarked = (edited(catalog, write, root, project) if edit
+                                   else (*gate_template(catalog, write, root), ""))
+        if unmarked:
+            return context(unmarked) if switch == templates.WARN else deny(unmarked)
         if template is None:
             if unread:
                 log_line(project, f"{write.said} in {write.repo}: SE cannot read its body "
