@@ -30,8 +30,9 @@ writes the file (`se_plugin.py build`); the source is what to edit instead.
   `<path> linguist-generated generated-by=<generator>`, the generator's spaces written `:`, as an
   attribute's value holds none (`generated-by=se_plugin.py:build`). GitHub folds such a file in a
   diff.
-- **One writer.** `<se>/scripts/generated.py` writes the line (`line`, `mark`) and reads it
-  (`marker_at`); a generator calls it rather than spelling the wording itself.
+- **One writer.** `<se>/scripts/generated.py` writes the line (`line`, `mark`), its words
+  through the interface template `generated-marker`, and reads it (`marker_at`); a generator calls
+  it rather than spelling the wording itself.
 
 Not picked: a bare `@generated` flag, which names no generator.
 
