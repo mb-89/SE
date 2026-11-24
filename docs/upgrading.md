@@ -59,9 +59,9 @@ For a component, the same reader prints its sections from the guide it keeps, `s
   must act may add its own section (`kern 2.1`). [scripts/upgrade_guide.py](../scripts/upgrade_guide.py)
   owns the shape and reads it.
 - **In the landing that makes the change.** A landing whose release kind is major adds its change
-  to the section of the next major, with its steps and its check. `work_tickets.py release`
-  refuses a major release, below 1.0 a breaking minor, while `docs/upgrading.md` has no section for
-  it, naming the heading to add.
+  to the section of the next major, with its steps and its check. `work_tickets.py integrate`
+  refuses such a landing, and `release` a major release, below 1.0 a breaking minor, while
+  `docs/upgrading.md` has no section for it, naming the heading to add.
 - **Each component keeps its own.** obs, obs-html and kern each keep a `docs/upgrading.md` in this
   shape, and this guide links it rather than copying it. Until a component's own guide lands, its
   sections stand at the end of this guide under its name, and move out when it does.
@@ -355,6 +355,36 @@ On main, released as 15.0.0 at the next release.
     <file> --says "<what it does>"`.
 - **Check:** `uv run python <se>/scripts/se_templates.py check-files $(git ls-files 'scripts/*.py' go.mod '**/go.mod')`
   passes.
+
+## SE 16
+
+On main, released as 16.0.0 at the next release.
+
+### Every pull request into the integration branch states its release kind
+
+- **Change:** CI's release-kind gate refuses a pull request into the integration branch whose
+  description states no release kind: a field report's `**Release kind:** <kind> — <reason>`, or a
+  line `Release-kind: <patch|minor|major>` ([Release kind](../src/skills/work-model/SKILL.md#release-kind)).
+  - The owner's housekeeping pull request is not exempt.
+  - SE ships the gate as the action `release-kind`, which every project holds:
+    `se_workflows.py check` fails while a project holding SE's copies lacks it.
+  - SE's hook refuses a merge call whose message, or the description GitHub takes, states none.
+- **Steps:** run `uv run python <se>/scripts/se_workflows.py write`, then add to the project's
+  required check job, after its checkout, a step that runs on pull requests
+  (`if: github.event_name == 'pull_request'`) with `uses: ./.github/actions/release-kind`; write a
+  `Release-kind: <kind>` line into each open housekeeping pull request's description.
+- **Check:** `uv run python <se>/scripts/se_workflows.py check` passes, and
+  `grep -n 'uses: ./.github/actions/release-kind' .github/workflows/*.yml` names the check job.
+
+### A major landing writes its upgrade section
+
+- **Change:** `work_tickets.py integrate` refuses a landing whose kind is major, below 1.0 a
+  breaking minor, while its tree has no section `## <repository> <version>` for the next release,
+  naming the heading to add; `release` refuses the same.
+- **Steps:** a branch whose release kind is major adds its change to the next major's section of
+  `docs/upgrading.md`, with its steps and its check, before it is delivered.
+- **Check:** `uv run python <se>/scripts/upgrade_guide.py show --guide docs/upgrading.md --name <repository> --from <released> --to <next>`
+  names the section.
 
 ## obs 6
 
