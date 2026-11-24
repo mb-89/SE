@@ -48,6 +48,7 @@ UNLISTED = {
     "docs/obs-3-range-trial-2026-11.md": "a dated record",
     "docs/retro-2026-11-12-to-13.md": "a dated record",
     "docs/retro-2026-11-13-to-24.md": "a dated record",
+    "docs/what-should-be-templates.md": "a dated record: a discovery's findings, kept until its work is filed",
     "components/README.md": "a guide read beside SE's Go components",
 }
 
