@@ -148,10 +148,11 @@ A deck may also carry record chapters, notes without a bless request and without
 what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
 
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
-   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html --host <host>`, the
-   host the answers go back to: `claude-app`, `claude-code` or `copilot` (`local` for any other).
-   Its chapters and their versions are in `<deck>.document.json` beside it, the obs Document it was
-   built from; never decode the built page for them.
+   `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html --host <host>`.
+   - `<host>` is the host the answers go back to: `claude-app`, `claude-code` or `copilot`
+     (`local` for any other).
+   - Its chapters and their versions are in `<deck>.document.json` beside it, the obs Document it
+     was built from; never decode the built page for them.
 2. Hand the deck to the person where they are, and end your turn; their answers arrive later, and
    nothing waits on them:
    - **The Claude app** (cloud and mobile), `--host claude-app`: publish `<deck>.html` with the

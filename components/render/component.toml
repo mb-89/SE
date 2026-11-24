@@ -11,7 +11,7 @@ help = "Build the Timeline: one obs table of the repositories in se.toml `[timel
 class = "batch"
 
 [commands."deck.py build"]
-usage = "deck.py build --destination DESTINATION folder"
+usage = "deck.py build --destination DESTINATION [--host {claude-app,claude-code,copilot,local}]\n              folder"
 summary = "build a folder of decision notes into one deck"
 group = "Render"
 help = "build a folder of decision notes into one deck"
