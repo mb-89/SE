@@ -468,3 +468,71 @@ def guard_repository(tmp_path: Path) -> Path:
     git_ok("-C", str(repo), "add", "-A")
     assert git_door.run("commit", "-q", "-m", "kern 0.15.0", root=repo, env=identity).returncode == 0
     return repo
+
+
+# A generator of template cases, as tests/template_cases.py writes them: one file per template and
+# one file of every template together, which every template's change rewrites, as the real
+# se-select-*.json and repositories.json are.
+CASES = "components/template/testdata/cases"
+WRITE_CASES = (
+    "import json, pathlib\n"
+    "def cases(templates):\n"
+    "    out = {f'" + CASES + "/se-{name}.json': json.dumps({'template': text}) + '\\n'\n"
+    "           for name, text in templates.items()}\n"
+    "    out['" + CASES + "/se-select-fill.json'] = json.dumps(templates) + '\\n'\n"
+    "    return out\n"
+    "if __name__ == '__main__':\n"
+    "    found = {path.stem: path.read_text() for path in sorted(pathlib.Path('templates').glob('*.md'))}\n"
+    "    for name, text in cases(found).items():\n"
+    "        pathlib.Path(name).parent.mkdir(parents=True, exist_ok=True)\n"
+    "        pathlib.Path(name).write_text(text)\n")
+
+
+def fresh_cases(templates: dict[str, str]) -> dict[str, str]:
+    """What the generator writes for `templates`, by name: a fresh generation."""
+    namespace: dict[str, object] = {"__name__": "cases"}
+    exec(compile(WRITE_CASES, "<cases>", "exec"), namespace)
+    return namespace["cases"](templates)
+
+
+def test_two_branches_that_each_change_a_template_land_with_fresh_cases_and_no_conflict(
+        main_checkout, monkeypatch, github, capsys, fake_processes):
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    command = [work_tickets.sys.executable, "-c", WRITE_CASES]
+    code = compile(WRITE_CASES, "<string>", "exec")
+    fake_processes.on(lambda invocation: invocation.words == command, lambda invocation: fakes.run_main(
+        lambda _arguments: exec(code, {"__name__": "__main__"}), invocation))
+    git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
+    git_ok("-C", str(main_checkout), "reset", "-q", "--hard", "origin/main")
+    base = {"a": "Alpha, the first.\n", "b": "Beta, the first.\n"}
+    files = {
+        "generated.yaml": ("generators:\n  - generator: tests/template_cases.py\n    source: templates/\n"
+                           f"    outputs:\n      - {CASES}/*.json\n    held_by: generated.yaml\n"
+                           f"    regenerate: {json.dumps(command)}\n"),
+        ".gitattributes": f"/{CASES}/*.json linguist-generated merge=se-generated\n",
+        **{f"templates/{name}.md": text for name, text in base.items()}, **fresh_cases(base)}
+    for name, text in files.items():
+        (main_checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (main_checkout / name).write_text(text, encoding="utf-8", newline="\n")
+    git_ok("-C", str(main_checkout), "add", "-A")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "templates")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+    # Both branches start from the same main; each changes its template and keeps its cases fresh.
+    first, second = {**base, "a": "Alpha, the second.\n"}, {**base, "b": "Beta, the second.\n"}
+    first_head = work_branch(main_checkout, "feat/alpha", {"templates/a.md": first["a"], **fresh_cases(first)})
+    second_head = work_branch(main_checkout, "feat/beta", {"templates/b.md": second["b"], **fresh_cases(second)})
+    assert squashed_onto_origin(main_checkout, land(main_checkout, monkeypatch, "feat/alpha", first_head, 7))
+    capsys.readouterr()
+
+    # The second's cases conflict with the first's landed ones in se-select-fill.json: the landing
+    # takes main's and regenerates them on the merged templates.
+    commit = land(main_checkout, monkeypatch, "feat/beta", second_head, 8)
+
+    assert squashed_onto_origin(main_checkout, commit)
+    out = capsys.readouterr().out
+    assert f"Merge: {CASES}/se-select-fill.json conflicted; took main's, which the merge regenerates" in out
+    assert f"Merge: tests/template_cases.py regenerated {CASES}/se-select-fill.json" in out
+    merged = {"a": "Alpha, the second.\n", "b": "Beta, the second.\n"}
+    landed = {path: git_run(main_checkout, "show", f"origin/main:{path}", check=True).stdout
+              for path in fresh_cases(merged)}
+    assert landed == fresh_cases(merged)

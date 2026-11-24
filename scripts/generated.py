@@ -14,7 +14,16 @@ one check keeps that true (the guidance note `generated-files-are-marked`, which
   source and the tracked paths it writes (`outputs`, globs: `*` within a folder, `**` across), and
   how a fresh run is compared: `check`, a command that fails where a fresh run does not reproduce
   its outputs byte for byte; `held_by`, the test or workflow that reruns it; or `unchecked`, why no
-  fresh run can be compared. Exactly one of the three.
+  fresh run can be compared. Exactly one of the three. `regenerate`, where a merge can run it, is
+  the command that writes its outputs afresh in the checkout, offline.
+- **The merge** (`regenerate`, `regenerable`): a merge never stops on a generated file. Each
+  output of a generator with `regenerate` carries `merge=se-generated` in `.gitattributes`, the
+  merge driver SE's setup installs (`DRIVER`), which keeps our side; then the hooks run every
+  `regenerate`, as `integrate`'s merge does (scripts/work_tickets.py `regenerate_merge`):
+  `.githooks/post-merge` after a merge that committed by itself, committing what they rewrote as
+  its own commit (`COMMIT_MESSAGE`; git writes a merge commit's tree before any hook could stage
+  into it), and `pre-commit` while a merge that stopped on a conflict is committed, staging it into
+  that commit. A hook warns where one fails and goes on; `integrate` stops.
 - **The lock files** (`LOCKS`): third-party lock files, by name, with the tool that writes them,
   are exempt from the marker; a single line a program edits in a hand-written file (a release's
   version line) is no generated file and is declared nowhere.
@@ -27,8 +36,11 @@ one check keeps that true (the guidance note `generated-files-are-marked`, which
 `generated.py check [--root DIR] [--no-rerun]` runs the check on the tracked files (a folder that
 is no git checkout, such as the commit hook's copy of the staged tree, on every file in it);
 `--no-rerun` leaves out the fresh runs, as the commit hook does. `generated.py notice PATH` prints a
-file's notice. Exit code 0 passed (or the notice printed), 1 findings (or the file is not
-generated), 2 a declaration that cannot be read.
+file's notice. `generated.py regenerate [--merging] [--warn] [--commit]` runs every declared
+`regenerate` and stages what it rewrote; `--merging` does nothing unless a merge is in progress, as
+pre-commit calls it, `--warn` makes a failing one a warning, as both hooks do, and `--commit`
+commits what it staged, as post-merge does. Exit code 0 passed (or the notice printed, or regenerated), 1 findings (or the file is not
+generated, or a `regenerate` failed), 2 a declaration that cannot be read.
 """
 
 from __future__ import annotations
@@ -48,6 +60,13 @@ DECLARATIONS = "generated.yaml"
 ATTRIBUTES = ".gitattributes"
 ATTRIBUTE = "generated-by"
 LINGUIST = "linguist-generated"
+MERGE = "merge"
+#: The merge driver of a regenerable output (`.gitattributes` `merge=se-generated`): it keeps our
+#: side, as the hooks regenerate the file after the merge. scripts/setup.sh and setup.ps1 install it
+#: as git config `merge.se-generated.driver`, the command `true`.
+DRIVER = "se-generated"
+#: The commit post-merge makes of what it regenerated.
+COMMIT_MESSAGE = "Regenerate the generated files on the merge"
 
 # Each comment syntax: what opens and what closes a comment line.
 SYNTAXES = {
@@ -109,6 +128,15 @@ class Generator:
     check: tuple[str, ...] = ()
     held_by: str = ""
     unchecked: str = ""
+    regenerate: tuple[str, ...] = ()
+
+
+class RegenerateError(Exception):
+    """A `regenerate` failed: `what` names it and its command, `output` what it said."""
+
+    def __init__(self, what: str, output: str) -> None:
+        super().__init__(f"{what} failed:\n{output}")
+        self.what, self.output = what, output
 
 
 # The marker.
@@ -225,7 +253,8 @@ def load(root: Path) -> list[Generator]:
         where = f"{DECLARATIONS}: generator {number}"
         if not isinstance(entry, dict):
             raise DeclarationError(f"{where} is no mapping")
-        unknown = set(entry) - {"generator", "source", "outputs", "check", "held_by", "unchecked"}
+        unknown = set(entry) - {"generator", "source", "outputs", "check", "held_by", "unchecked",
+                                "regenerate"}
         if unknown:
             raise DeclarationError(f"{where}: unknown keys {sorted(unknown)}")
         name, source, outputs = entry.get("generator"), entry.get("source"), entry.get("outputs")
@@ -239,17 +268,20 @@ def load(root: Path) -> list[Generator]:
         check = entry.get("check", [])
         if not isinstance(check, list) or not all(isinstance(word, str) for word in check):
             raise DeclarationError(f"{where} ({name}): `check` is a command, a list of words")
+        regenerate = entry.get("regenerate", [])
+        if not isinstance(regenerate, list) or not all(isinstance(word, str) and word for word in regenerate):
+            raise DeclarationError(f"{where} ({name}): `regenerate` is a command, a list of words")
         ways = [key for key in ("check", "held_by", "unchecked") if entry.get(key)]
         if len(ways) != 1:
             raise DeclarationError(f"{where} ({name}): name exactly one of `check`, `held_by` and "
                                    "`unchecked`, how a fresh run is compared")
         found.append(Generator(name, source, tuple(outputs), tuple(check), str(entry.get("held_by", "")),
-                               str(entry.get("unchecked", ""))))
+                               str(entry.get("unchecked", "")), tuple(regenerate)))
     return found
 
 
 def attributes(root: Path) -> list[tuple[re.Pattern[str], dict[str, str], int]]:
-    """Each line of `.gitattributes` that sets `linguist-generated` or `generated-by`: its pattern
+    """Each line of `.gitattributes` that sets `linguist-generated`, `generated-by` or `merge`: its pattern
     (one without a `/` matches a name at any depth, as git's does), its attributes, its line."""
     path = root / ATTRIBUTES
     if not path.is_file():
@@ -263,7 +295,7 @@ def attributes(root: Path) -> list[tuple[re.Pattern[str], dict[str, str], int]]:
         for word in words[1:]:
             key, _, value = word.partition("=")
             values[key] = value or ("unset" if key.startswith("-") else "set")
-        if LINGUIST in values or ATTRIBUTE in values:
+        if LINGUIST in values or ATTRIBUTE in values or MERGE in values:
             pattern = words[0].lstrip("/") if "/" in words[0] else "**/" + words[0]
             found.append((glob(pattern), values, number))
     return found
@@ -274,7 +306,7 @@ def attributes_of(path: str, lines: list[tuple[re.Pattern[str], dict[str, str], 
     given: dict[str, str] = {}
     for pattern, values, _ in lines:
         if pattern.match(path):
-            given.update({key: value for key, value in values.items() if key in (LINGUIST, ATTRIBUTE)})
+            given.update({key: value for key, value in values.items() if key in (LINGUIST, ATTRIBUTE, MERGE)})
     return given
 
 
@@ -367,10 +399,38 @@ def marker_findings(root: Path, files: list[str], generators: list[Generator]) -
         elif given.get(ATTRIBUTE):
             found.append(f"{path}: {ATTRIBUTES} marks it as generated by {given[ATTRIBUTE]}, which "
                          f"{DECLARATIONS} does not declare it of; declare it, or remove the attribute")
+    found += merge_findings(files, generators, lines, by_file)
     for generator in generators:
         if generator.held_by and not (root / generator.held_by).is_file():
             found.append(f"{DECLARATIONS}: {generator.generator} is held by {generator.held_by}, which "
                          "does not exist; name the test or workflow that reruns it")
+    return found
+
+
+def merge_findings(files: list[str], generators: list[Generator],
+                   lines: list[tuple[re.Pattern[str], dict[str, str], int]],
+                   by_file: dict[str, list[Generator]]) -> list[str]:
+    """Each output of a generator with `regenerate` whose files `.gitattributes` does not give the
+    merge driver DRIVER, one finding per output; and each file that has it but no generator a
+    merge can rerun writes."""
+    found = []
+    for generator in generators:
+        if not generator.regenerate:
+            continue
+        for output in generator.outputs:
+            pattern = glob(output)
+            lacking = [path for path in files if pattern.match(path)
+                       and attributes_of(path, lines).get(MERGE) != DRIVER]
+            if lacking:
+                found.append(f"{ATTRIBUTES}: {generator.generator} regenerates {output} on a merge, "
+                             f"but {lacking[0]}{f' and {len(lacking) - 1} more' if len(lacking) > 1 else ''} "
+                             f"lack the merge driver; add `/{output} {MERGE}={DRIVER}`")
+    for path in files:
+        if attributes_of(path, lines).get(MERGE) == DRIVER and not any(
+                owner.regenerate for owner in by_file.get(path, [])):
+            found.append(f"{path}: {ATTRIBUTES} gives it the merge driver {DRIVER}, but no generator "
+                         f"{DECLARATIONS} declares it of has `regenerate`, so a merge would keep one side; "
+                         "declare its `regenerate`, or remove the attribute")
     return found
 
 
@@ -412,6 +472,95 @@ def findings(root: Path, rerun: bool = True, files: list[str] | None = None, run
     return found
 
 
+# The merge.
+
+
+def regenerable(root: Path) -> list[Generator]:
+    """The generators under `root` a merge reruns: those `generated.yaml` gives a `regenerate`;
+    none where it cannot be read, as a merge that conflicts in it has nothing to rerun by."""
+    try:
+        return [generator for generator in load(root) if generator.regenerate]
+    except DeclarationError:
+        return []
+
+
+def regenerated_by(generators: list[Generator], path: str) -> Generator | None:
+    """The generator of `generators` whose outputs hold `path`, if any."""
+    return next((generator for generator in generators
+                 if any(glob(output).match(path) for output in generator.outputs)), None)
+
+
+def unstaged(root: Path) -> set[str]:
+    """The paths whose working-tree file differs from the index, untracked ones included."""
+    import git_door
+
+    status = git_door.run("status", "--porcelain=v1", "-z", "--untracked-files=all", root=root)
+    if status.returncode != 0:
+        raise RegenerateError(f"git status in {root}", status.stderr.strip())
+    entries, paths, index = status.stdout.split("\0"), set(), 0
+    while index < len(entries):
+        entry = entries[index]
+        if entry and (entry[:2] == "??" or entry[1] != " "):
+            paths.add(entry[3:])
+        if entry[:1] in ("R", "C"):
+            index += 1  # a rename's or copy's source follows it
+        index += 1
+    return paths
+
+
+def regenerate(root: Path, commands: list[tuple[str, tuple[str, ...]]],
+               failed: list[RegenerateError] | None = None) -> list[tuple[str, list[str]]]:
+    """Run each `(label, command)` in `root`, through the process door, and stage what it rewrote:
+    the files it left differing from the index that differed from it before (an edit the checkout
+    held already stays out). Each label with the paths it staged; RegenerateError, naming the
+    command and its output, where one fails, or, given `failed`, that error added to it and the
+    next command run."""
+    done = []
+    for label, command in commands:
+        try:
+            done.append((label, regenerate_one(root, label, command)))
+        except RegenerateError as error:
+            if failed is None:
+                raise
+            failed.append(error)
+    return done
+
+
+def regenerate_one(root: Path, label: str, command: tuple[str, ...]) -> list[str]:
+    """`regenerate` of one command: the paths it staged."""
+    import git_door
+    import process_door
+
+    before = unstaged(root)
+    try:
+        result = process_door.run(list(command), cwd=root, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", check=False,
+                                  timeout=RERUN_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RegenerateError(f"{label} ({' '.join(command)})", f"did not run: {error}") from None
+    if result.returncode != 0:
+        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise RegenerateError(f"{label} ({' '.join(command)})", output)
+    paths = sorted(unstaged(root) - before)
+    if paths:
+        added = git_door.run("add", "--", *paths, root=root)
+        if added.returncode != 0:
+            raise RegenerateError(f"git add in {root}", added.stderr.strip())
+    return paths
+
+
+def declared_commands(root: Path) -> list[tuple[str, tuple[str, ...]]]:
+    """Each regenerable generator's name and its `regenerate`, in declaration order."""
+    return [(generator.generator, generator.regenerate) for generator in regenerable(root)]
+
+
+def merging(root: Path) -> bool:
+    """Whether a merge is in progress in the checkout at `root` (its MERGE_HEAD exists)."""
+    import git_door
+
+    return git_door.run("rev-parse", "-q", "--verify", "MERGE_HEAD", root=root).returncode == 0
+
+
 # The notice.
 
 
@@ -440,8 +589,18 @@ def main(argv: list[str] | None = None) -> int:
     checking.add_argument("--no-rerun", action="store_true", help="leave out the fresh runs")
     noticing = commands.add_parser("notice", help="print what an editor shows on a generated file")
     noticing.add_argument("path", help="the file, relative to the root")
+    regenerating = commands.add_parser("regenerate", help="run every declared regenerate and stage "
+                                       "what it rewrote")
+    regenerating.add_argument("--merging", action="store_true",
+                              help="do nothing unless a merge is in progress (pre-commit)")
+    regenerating.add_argument("--warn", action="store_true",
+                              help="a failing regenerate is a warning, and the rest run (the hooks)")
+    regenerating.add_argument("--commit", action="store_true",
+                              help="commit what it staged as its own commit (post-merge)")
     args = parser.parse_args(argv)
     root = args.root.resolve()
+    if args.command == "regenerate":
+        return run_regenerate(root, args.merging, args.warn, args.commit)
     try:
         if args.command == "notice":
             said = notice(root, PurePosixPath(args.path).as_posix())
@@ -462,6 +621,39 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"generated.py: every generated file is marked and declared in {root}"
           + ("" if args.no_rerun else ", and each fresh run reproduces it"))
+    return 0
+
+
+def run_regenerate(root: Path, only_merging: bool, warn: bool, commit: bool) -> int:
+    """`generated.py regenerate`: each declared `regenerate`, its rewritten files staged, and with
+    `commit` committed. With `warn`, as the hooks run it, a failing one is a warning and the rest
+    run: the merge keeps our side of its outputs, which the check then names stale, and a
+    generator that cannot run in this checkout (a fresh clone without kern's) does not hold up a
+    worker's merge."""
+    if only_merging and not merging(root):
+        return 0
+    failed: list[RegenerateError] = []
+    try:
+        done = regenerate(root, declared_commands(root), failed if warn else None)
+    except RegenerateError as error:
+        print(f"generated.py: {error}", file=sys.stderr)
+        return 1
+    for label, paths in done:
+        if paths:
+            print(f"generated.py: {label} regenerated {', '.join(paths)}")
+    if commit and any(paths for _, paths in done):
+        import git_door
+
+        committed = git_door.run("commit", "-q", "-m", COMMIT_MESSAGE, root=root)
+        if committed.returncode != 0:
+            print(f"generated.py: the regenerated files stay staged, as git commit failed: "
+                  f"{(committed.stdout + committed.stderr).strip()}", file=sys.stderr)
+            return 1
+        print(f"generated.py: committed them: {COMMIT_MESSAGE}")
+    for error in failed:
+        tail = " | ".join(error.output.splitlines()[-3:])
+        print(f"generated.py: warning: {error.what} failed, so its outputs keep our side of the merge: "
+              f"{tail}; run it once it runs here and commit what it writes", file=sys.stderr)
     return 0
 
 

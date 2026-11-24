@@ -13,3 +13,19 @@ RUNME.conf text eol=lf
 /tests/recorded/*.txt linguist-generated generated-by=tests/recorded.py
 /components/template/testdata/cases/*.json linguist-generated generated-by=tests/template_cases.py
 /components/cmd/se/testdata/tools.json linguist-generated generated-by=mcp_surface_test.go:-golden
+# The outputs a merge regenerates (generated.yaml `regenerate`): the merge driver se-generated,
+# which scripts/setup.sh and setup.ps1 install, keeps our side, and the merge's commit hooks
+# regenerate them (scripts/generated.py "The merge"), so a merge never stops on them.
+/agents/*.md merge=se-generated
+/skills/** merge=se-generated
+/.claude-plugin/*.json merge=se-generated
+/.github/hooks/se.json merge=se-generated
+/.github/plugin/*.json merge=se-generated
+/.github/mcp.json merge=se-generated
+/docs/skills.md merge=se-generated
+/docs/rules.md merge=se-generated
+/docs/sub-agents.md merge=se-generated
+/components/*/component.toml merge=se-generated
+/scripts/interfaces/*.json merge=se-generated
+/tests/guidance-pins.yaml merge=se-generated
+/components/template/testdata/cases/*.json merge=se-generated
