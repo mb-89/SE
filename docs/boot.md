@@ -19,7 +19,9 @@ SE 12.0.1 started
 | component | loaded | newest |
 |---|---|---|
 | SE | 12.0.1 | 13.0.0 |
+| kern | 2.1.0 | 2.1.0 |
 | obs | 10.3.2 | 10.3.2 |
+| obs-html | 0.5.2 | 0.5.2 |
 
 To update: /se:update
 ```
@@ -31,9 +33,15 @@ To update: /se:update
   [Skills](skills.md), guidance notes aside; [Rules](rules.md), the rule book's and every guidance
   note; [Sub-agents](sub-agents.md), every agent but SE. `se_plugin.py build` writes the three pages
   from the layout it builds.
-- **The table** holds SE first, then every component of the project's tree that `se.lock` holds,
-  nested ones included. `loaded` is the version in use; `newest` the newest release the last update
-  check read, `unknown` before one has, `local` for a local path.
+- **The table** holds SE first, then SE's [required components](#required-components) as they
+  answered, then every component of the project's tree that its `se.lock` holds, nested ones
+  included, but one a required row already shows.
+  - `loaded` is the version in use: for a required component the version that answered at this
+    start, never the locked one, and `none` where it did not load; for the project's own, its lock.
+  - `newest` is the newest release the last update check read, `unknown` before one has, `local`
+    for a local path.
+  - Where the project locks a required component at another version than the one SE loaded, the
+    session is told in one line.
 
 The last line is one of three. `To update: /se:update` where a newer release than one loaded is
 known; `Everything is current.` where none is; `Newest versions not read yet; the next start shows
@@ -45,6 +53,34 @@ appears in the report.
   plugin, a check that failed, the project's component listing, a skill the session lacks, a retro
   or overhaul due and the fleet's findings.
 - **The person sees the report alone**, a stop of the start (`SE cannot start`) above it.
+
+## Required components
+
+SE cannot work without kern, obs and obs-html (the person, 24 Nov 2026), so they are SE's required
+components: every component SE's own `se.toml` declares and does not mark `optional`, each locked
+in SE's `se.lock`, apart from any project's tree.
+
+- **Every start loads each from SE's root**, wherever the session starts: inside a project, in
+  SE's own checkout, or in a folder that is no repository, as a cloud session's `/home/user`. The
+  start hook does it, and `se_start.py status --greeting` by hand the same.
+  - **SE's tree** is placed at its lock first, from what is placed, as
+    [docs/components.md](components.md#required-and-optional-at-start) places a project's.
+  - **kern** is installed at its pin and running: `bootstrap.sh` fetches or builds the binary,
+    starts the core and hands it the session's start, for the project where it lies inside a git
+    checkout, else for SE's root (README [Kern](../README.md#kern)).
+    - A first fetch or build runs in the background, and the start waits for it up to
+      `SE_KERN_WAIT` seconds, 45 by default.
+    - The core answers `status`; its row is the kern version the running binary is built on.
+  - **obs** answers by importing in its own environment, from its clone; its row is the version of
+    the obs that imported.
+  - **Every other** is a component obs installs (obs-html, its adapter): where obs has none or
+    another version, `obs-components install <name> <version>` installs SE's locked one, and an
+    adapter then runs its command with `--help`. Its row is the version obs has installed.
+- **One that does not load stops the start**: one line each above the report, naming the component
+  and the cause, `SE cannot start: the required component <name> did not load: <cause>`, and its row
+  says `none`. A tree that cannot be placed is one line naming every required component.
+- **A core switched off** on the machine (`SE_HOOK_CORE=off`, or `[hooks] core = "off"`) is the
+  person's choice, no failure: kern's row says `off`, and the session is told.
 
 ## The boot
 
