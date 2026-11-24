@@ -3531,6 +3531,22 @@ def release(root: Path, branch: str,
     return tag, packages
 
 
+def major_guide_gate(root: Path, trailer: str) -> None:
+    """Refuse a landing whose kind (`trailer`, `Release-kind: <kind>`) is major unless the landing's
+    tree in `root` holds the upgrade guide's section for the version the next release takes
+    (released_version from project.version), naming the section to write: the release would
+    refuse it there (release), so the landing that makes the breaking change writes it."""
+    kind = trailer.partition(":")[2].strip()
+    version = project_version(root)
+    if kind != "major" or version is None:
+        return
+    name = origin_repository_name(root) or root.name
+    refusal = sibling("upgrade_guide").missing(root, name, released_version(version, kind),
+                                               then="deliver it and integrate again")
+    if refusal is not None:
+        raise QueueError(f"Cannot land a major release kind: {refusal}; nothing was merged")
+
+
 def origin_repository_name(root: Path) -> str | None:
     """The repository name origin names: its `<owner>/<repo>`'s `<repo>` (remote_repo), else, for a
     path, its last part without `.git`; None without an origin."""
@@ -9350,6 +9366,7 @@ def integrate(
     trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
     try:
+        major_guide_gate(root, kind)
         review_gate(root, branch, base, head, kind, str(work_issue.get("body") or ""), pull_number,
                     remote, relay, handing_off, pr_comments)
     except Exception:
