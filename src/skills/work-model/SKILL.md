@@ -954,6 +954,9 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
   - Where a [worker limit](../../../README.md#workers) holds, it refuses once that many run. It
     reads them through kern's relay, else from `--running <file>`, their `list_issues` answer.
+  - It refuses, as `claim` does, while more delivered pull requests wait than `[workers]
+    queue_limit`. It reads the open pull requests through kern's relay, else from `--delivered
+    <file>`, their `list_pull_requests` answer, and refuses until it has them.
   - It refuses while a blocker holds the issue: a link its answer counts, or an issue its
     Blocked by names. It reads those through kern's relay, else from `--blockers <file>`, their
     `issue_read` (method `get`) answers saved as one JSON list, and refuses until it knows them.
