@@ -432,6 +432,10 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/boot-report.md` | `boot-report`: SE's start report, a snippet | interface | SE |
+| `templates/skills-page.md` | `skills-page`: the page `docs/skills.md`, a snippet | interface | SE |
+| `templates/rules-page.md` | `rules-page`: the page `docs/rules.md`, a snippet | interface | SE |
+| `templates/sub-agents-page.md` | `sub-agents-page`: the page `docs/sub-agents.md`, a snippet | interface | SE |
+| `templates/generated-marker.md` | `generated-marker`: the words of a generated file's marker | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
 | `templates/python-script.md` | `python-script`: a script, `scripts/*.py` with a `__main__` entry | code | SE |
 | `templates/python-module.md` | `python-module`: a module other scripts import, `scripts/*.py` | code | SE |
@@ -448,7 +452,9 @@ An adapter (`checker` and `adapter`) stays one: its template names the check its
 owns.
 
 SE's free texts are interface templates: the worker's delivery notice, an escalation, the
-handover and the start report; a design note's outline is still to come.
+handover, the start report, the three pages of what the layout loads (`scripts/se_plugin.py`
+`pages`) and the generated-file marker's words (`scripts/generated.py` `line`); a design note's
+outline is still to come.
 
 Fixed text SE shows the person comes from a template, short snippets included (the person's
 decision of 23 Nov 2026). A snippet is a message of several lines: a `rows` field writes one line
