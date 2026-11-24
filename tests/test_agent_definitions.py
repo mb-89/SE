@@ -810,13 +810,11 @@ def test_the_work_model_states_the_test_rules_once_and_issues_point_to_it():
     assert "(../../skills/work-model/SKILL.md#tests)" in template
 
 
-def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests():
+def test_the_worker_names_slow_new_tests_without_timing_the_suite():
     worker = normalized(AGENTS / "worker.md")
     assert "(../skills/work-model/SKILL.md#tests)" in worker
-    assert "work_tickets.py suite" in worker
-    template = normalized(REPORT_TEMPLATE)
-    assert "**Suite time:**" in template
-
+    assert "never runs the suite to time it" in worker
+    assert "A new test over 2 s in the focused run gets its own row" in normalized(REPORT_TEMPLATE)
 
 
 def test_the_worker_delivery_measures_not_slower_with_one_command():
@@ -1248,4 +1246,12 @@ def test_a_red_integration_branch_is_the_integrators_to_fix_or_file():
     wrk_007 = normalized(ROOT / "skills" / "work-model" / "references" / "rules.md").split(
         "### wrk-007", 1)[1].split("### wrk-008", 1)[0]
     assert "a red integration branch" in wrk_007
+
+
+def test_no_worker_step_times_the_suite():
+    built = [*BUILT_PROSE, REPORT_TEMPLATE]
+    for path in built:
+        text = normalized(path)
+        for asked in ("`work_tickets.py suite` before and after", "measures the suite", "**Suite time:**"):
+            assert asked not in text, (path.relative_to(ROOT).as_posix(), asked)
 

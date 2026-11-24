@@ -260,8 +260,7 @@ def _report(header: dict[str, str | None] | None = None, sections: dict[str, str
     body = {
         "User requirement (quoted back)": "> Titles say what changes.",
         "Delivered": "| Work issue item | Result | Commits | Evidence |\n|---|---|---|---|\n"
-                     "| 1 | done | abcdef1 | `pytest` passed |\n\n**Commit groupings:** None\n\n"
-                     "**Suite time:** None",
+                     "| 1 | done | abcdef1 | `pytest` passed |\n\n**Commit groupings:** None",
         "Not delivered": "None",
         "Removed behaviour, deleted or weakened tests, and authored prose": "None",
         "Review responses": "None",
@@ -319,7 +318,7 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
     """The bodies each of SE's adapters is checked on, with their titles."""
     review, retro, overhaul = "<!-- se:review -->", "<!-- se:retro-yaml -->", "<!-- se:overhaul-yaml -->"
     if template.name == "field-report":
-        bad_rows = "| Item | Result |\n|---|---|\n| 1 | done | extra |\n\n**Commit groupings:** None\n\n**Suite time:** None"
+        bad_rows = "| Item | Result |\n|---|---|\n| 1 | done | extra |\n\n**Commit groupings:** None"
         return [(text, None) for text in (
             "Free text.\n", "<!-- se:field-report -->\n<!-- se:field-report:end -->\n",
             "<!-- se:field-report:end -->\n<!-- se:field-report -->\n",
@@ -358,7 +357,7 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
             _report(sections={"Retro": _questions(answer="TBD", rename="stale_process")}),
             _report(sections={"Retro": _questions(answer="We ran `review.py brief` by hand twice.")}),
             _report(sections={"Delivered": "| work issue ITEM | Result | Commits | Evidence |\n|---|---|---|---|\n"
-                                           "| 1 \\| 2 | done | a | b |\n\n**Commit groupings:** a\n\n**Suite time:** 3 s"}),
+                                           "| 1 \\| 2 | done | a | b |\n\n**Commit groupings:** a"}),
             _report().replace("## Decisions", "## DECISIONS"),
             _report().replace("\n## Spec gaps", "\n##   Spec gaps  "),
         )]
