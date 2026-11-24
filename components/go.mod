@@ -7,7 +7,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.41.0
-	kern v2.1.0+incompatible
+	kern v2.2.0+incompatible
 )
 
 require (

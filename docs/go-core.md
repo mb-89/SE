@@ -538,16 +538,31 @@ file (step 6):
 
 No token reaches code in a cloud session; the session's GitHub tools reach GitHub, and `git`
 and `gh api` reach it through the session's proxy, which signs REST calls and refuses GraphQL.
-SE's Python commands take that REST path first, so they need neither backend below (the work
-model's [Without gh](../src/skills/work-model/SKILL.md#without-gh)). The GitHub component is one
-I/O component with two backends, chosen at start:
+SE's Python commands take that REST path first, so they need none of the backends below (the
+work model's [Without gh](../src/skills/work-model/SKILL.md#without-gh)). The GitHub component is
+one I/O component with three backends, chosen at start; its output `backend` names the choice
+(kern's components/github/README.md "The backends" owns the details):
 
-- **token**, where `gh auth token` or `GH_TOKEN` gives one: the Go line's REST client, in process,
-  with ETags, a refresh every 2 minutes and the rate-limit pacing of SE#750.
-- **relay**, where none does: a request going out becomes an entry of `github/outbox`, with the
+- **token**, where `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token` gives one outside a cloud session:
+  the Go line's REST client, in process, with ETags, a refresh every 2 minutes and the rate-limit
+  pacing of SE#750.
+- **proxy**, where no token is, or in a cloud session, and `GET /rate_limit` through the
+  environment's HTTPS proxy answers 200 without one (kern 2.2.0): the same REST client, sending no
+  Authorization, as the proxy adds the credentials. Nothing enters `github/outbox`, the verb `step`
+  is refused and the hook tells no tool call, so a command takes no relay step.
+- **relay**, where neither is: a request going out becomes an entry of `github/outbox`, with the
   same tool names and arguments as today's hand-off plan. The agent runs it with its GitHub tools.
   The PostToolUse hook hands the tool's response to the core, which matches it to the entry,
   answers the request and runs the command's continuation.
+
+`auto`, the default, takes them in that order. In a Claude Code cloud session
+(`CLAUDE_CODE_REMOTE=true`) it looks for no token, since the session's `GH_TOKEN` is the proxy's
+stand-in, and takes the proxy where REST answers through it, else the relay.
+
+SE's callers ask the backend (`se_relay.py` `backend`): only on `relay` does a streamed command run
+as one call through kern with its GitHub steps relayed. On `token` and `proxy` it runs directly,
+reaches GitHub itself and says so on stderr
+([Hand-offs through the relay](settings.md#hand-offs-through-the-relay)).
 
 Every GitHub tool answer the session receives, a plan's or not, lands in the snapshot
 (`github/issues/<key>`, `github/pulls/<key>`, `github/checks/<key>`, `github/comments/<key>`) or
