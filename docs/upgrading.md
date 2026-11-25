@@ -421,8 +421,8 @@ On main, released as 17.0.0 at the next release.
   SE and integrator titles are unchanged.
 - **Steps:** add `--number <issue>` to worker and retro launch commands. For reviewers, pass the
   PR branch as the topic and `--number <pr>`; rename live sessions to the printed titles.
-- **Check:** `uv run python <se>/scripts/work_tickets.py session-title worker obs-polarion fill-into-polarion-template --number 35`
-  prints `SE/obs-polarion/worker/35/fill-into-polarion-template`.
+- **Check:** `uv run python <se>/scripts/work_tickets.py session-title worker SE example-ticket --number 35`
+  prints `SE/SE/worker/35/example-ticket`.
 
 ## obs 6
 
