@@ -130,7 +130,7 @@ Every template is one of four kinds, and the kinds nest.
   entry template has a `type` field with the choices risk, assumption, issue and dependency, and
   fields for owner, status and the text; the register's view lists them.
 - **interface**: a message or a contract whose schema code uses: a delivery notice from a worker
-  to its integrator, an escalation, the handover, kern's component declaration, a message on
+  to its integrator, an escalation, kern's component declaration, a message on
   kern's bus. Its schema is generated into the code that sends and reads it, so the code and the
   agent both follow one template.
 
@@ -473,7 +473,7 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/merge-message.md` | `merge-message` | interface | SE |
 | `templates/delivery-notice.md` | `delivery-notice`: a worker's message to its integrator | interface | SE |
 | `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
-| `templates/handover.md` | `handover`: the open handover issue | interface | SE |
+| `templates/handover.md` | `handover`: the local file `.se/handover.md` | document | SE |
 | `templates/boot-report.md` | `boot-report`: SE's start report, a snippet | interface | SE |
 | `templates/skills-page.md` | `skills-page`: the page `docs/skills.md`, a snippet | interface | SE |
 | `templates/rules-page.md` | `rules-page`: the page `docs/rules.md`, a snippet | interface | SE |
@@ -508,8 +508,8 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already
 owns.
 
-SE's free texts are interface templates: the worker's delivery notice, an escalation, the
-handover, the start report, the three pages of what the layout loads (`scripts/se_plugin.py`
+SE's free texts are interface templates: the worker's delivery notice, an escalation, the start
+report, the three pages of what the layout loads (`scripts/se_plugin.py`
 `pages`) and the generated-file marker's words (`scripts/generated.py` `line`); a design note's
 outline is still to come.
 

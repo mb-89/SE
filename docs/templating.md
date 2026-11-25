@@ -29,7 +29,7 @@ both.
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
 | `templates/finding-ref.md` | A finding's reference in a work issue: the run's kind and number and the finding's number in its report. |
 | `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
-| `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
+| `templates/handover.md` | Where the work stands for the next session on this machine: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, only its release kind. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report, and states its release kind. |
 | `templates/limit-restart.md` | A restart after a usage limit: the worker session the integrator resumed. |

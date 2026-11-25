@@ -326,6 +326,32 @@ def test_the_handover_file_is_named_for_the_session_where_the_checkout_holds_one
     assert not any("Handover" in line for line in se_start.greeting(report(setup), setup["se"]))
 
 
+def test_the_close_on_a_local_device_writes_the_ignored_handover_file_and_files_nothing(
+        setup, fake_git_door, fake_processes, capsys, monkeypatch):
+    """The catch-up's Close (src/skills/catch-up/SKILL.md) writes .se/handover.md with the fill it
+    names, from templates/handover.md: git ignores the file, nothing goes to GitHub, and the next
+    start names it."""
+    import git_door
+    import templates
+    project = setup["project"]
+    assert git_door.run("init", "-q", "-b", "main", str(project)).returncode == 0
+    shutil.copyfile(ROOT / ".gitignore", project / ".gitignore")
+    monkeypatch.chdir(project)  # the main checkout, where the Close runs
+    fields = {"state": "All integrated, 25 Nov.", "open_issues": ["None"], "branches": ["None"],
+              "decisions": ["None"], "resume": "Catch up."}
+    code = templates.main(["fill", "handover", "--tree", "--path", ".se/handover.md", "--root", str(project),
+                           "--input", str(ROOT / "templates" / "handover.md"),
+                           "--fields-json", json.dumps(fields)])
+    assert code == 0, capsys.readouterr()
+    handover = project / ".se" / "handover.md"
+    assert "## How to resume\n\nCatch up.\n" in handover.read_text(encoding="utf-8")
+    assert git_door.run("check-ignore", "-q", ".se/handover.md", root=project).returncode == 0
+    assert [call.words for call in fake_processes.calls] == []  # no gh, no kern filing
+    assert se_start.handover_lines(project) == [
+        f"Handover: {handover.as_posix()}, written by the previous SE session on this machine; read "
+        "it first: where the work stands and how to resume"]
+
+
 # Requirement 4: errors say where they come from and the remedy; the greeting still appears.
 
 
