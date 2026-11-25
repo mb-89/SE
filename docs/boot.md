@@ -64,6 +64,9 @@ no per-component line appears in the report.
   the session, not part of the report:`: the bootstrap's notes, kern's state (no pid), a stale
   plugin, a check that failed, the project's component listing, a skill the session lacks, a retro
   or overhaul due and the fleet's findings.
+- **The handover**, where the project's checkout holds `.se/handover.md`, is one line of it: the
+  previous SE session on this machine wrote it
+  ([catch-up's Close](../src/skills/catch-up/SKILL.md#procedure)).
 - **The person sees the report alone**, a stop of the start (`SE cannot start`) above it.
 
 ## Required components

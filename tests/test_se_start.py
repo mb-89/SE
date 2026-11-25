@@ -314,6 +314,18 @@ def test_a_plugin_older_than_the_se_checkout_it_works_on_is_named_in_one_line(se
         assert se_start.session_lines(report(setup), setup["se"]) == []
 
 
+def test_the_handover_file_is_named_for_the_session_where_the_checkout_holds_one(setup):
+    """The catch-up's Close writes .se/handover.md on a local device; the next start names it."""
+    setup["remotes"].tags = {SE_URL: ["v1.2.0"], LIB_URL: ["v1.2.0"], TOOL_URL: ["v2.0.3"]}
+    report(setup, "check")
+    assert se_start.session_lines(report(setup), setup["se"]) == []
+    handover = write(setup["project"] / ".se" / "handover.md", "## State\n\nAll integrated.\n")
+    assert se_start.session_lines(report(setup), setup["se"]) == [
+        f"Handover: {handover.as_posix()}, written by the previous SE session on this machine; read "
+        "it first: where the work stands and how to resume"]
+    assert not any("Handover" in line for line in se_start.greeting(report(setup), setup["se"]))
+
+
 # Requirement 4: errors say where they come from and the remedy; the greeting still appears.
 
 
