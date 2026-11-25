@@ -48,20 +48,24 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
    [templates/overhaul-questions.md](../templates/overhaul-questions.md)), and each class with
    its cause, its fix and its home, the first of the home order that holds. The collected reports
    and records are the sources.
+   Apply and record clear fixes within your authority; ask the person only real choices, as the
+   decision skill's [Ask only real choices](../skills/decision/SKILL.md#ask-only-real-choices) says.
+   An option leaving another problem unsolved is not a loss of that option.
 3. **The deck, the run's one report.** Build it from the judged draft: `retro.py deck <issue>
    --draft <draft> --destination <deck>.html --host <host>` (`overhaul.py deck` for an overhaul),
    the host whose adapter takes the answers back (`claude-app`, `claude-code` or `copilot`). It
-   holds a title page, every step the run ran, one decision chapter per finding, and, for a retro,
-   the final `Anything else?` chapter with `Nothing else` as its sole default answer; it is the one
-   file the person reads, so write no other report or deck for them.
+   holds a title page, every step the run ran, records of fixes applied, decision chapters for
+   real choices, and, for a retro, the final `Anything else?` chapter with `Nothing else` as its
+   sole default answer; it is the one file the person reads, so write no other report or deck for
+   them.
 4. **Hand it over and end your turn.** Hand the deck to the person as the decision skill's
    [Bringing decisions to the person](../skills/decision/SKILL.md#bringing-decisions-to-the-person)
    says, step 2, and end your turn: never wait on their answers (no `deck.py serve --wait`, no
    polling). Their answers come back later: the comment that wakes this session in the Claude
    app, or `answers.json` beside the deck, which you read when the person says they sent.
-5. **Record outcomes.** Run `deck.py answers <answers.json>`: each `decision` finding needs
-   their decision, each `work` finding their go. Record each answer in the finding and the
-   decisions in the draft's last step; a finding the person declines leaves the block. A finding
+5. **Record outcomes.** Run `deck.py answers <answers.json>` for findings that need their
+   decision; clear fixes are records, not approval requests. Record each answer in the finding
+   and the decisions in the draft's last step; a finding the person declines leaves the block. A finding
    still open (a comment, no verdict) is answered and asked again in a new deck.
 6. **Land and report.** Build the deck once more with `--answers <answers.json>`, the record of
    its answers. Land the judged draft on the integration branch as the run's doc, then

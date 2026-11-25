@@ -1869,14 +1869,16 @@ def result_event(cost: float | None, input_tokens: int, output_tokens: int) -> d
     return {"id": f"event-{input_tokens}", "data": record}
 
 
+@pytest.mark.parametrize("numbered", [False, True])
 def test_sessions_adds_each_cloud_session_s_cost_by_its_title_per_issue_role_and_repository(
-        checkout, tmp_path):
+        checkout, tmp_path, numbered):
     plain = retro.draft(collected(checkout))
     titles = {item.number: item.title for item in collected(checkout).issues}
     sessions = [
-        {"id": "session_w1", "title": f"SE/SE/worker/{titles[11]}",
+        {"id": "session_w1", "title": f"SE/SE/worker/{'11/' if numbered else ''}{titles[11]}",
          "events": [result_event(1.25, 1000, 200), result_event(0.75, 500, 100)]},
-        {"id": "session_r1", "title": "SE/SE/reviewer/22", "events": [result_event(0.5, 300, 50)]},
+        {"id": "session_r1", "title": "SE/SE/reviewer/22" + ("/reviewed-branch" if numbered else ""),
+         "events": [result_event(0.5, 300, 50)]},
         {"id": "session_i1", "title": "SE/SE/integrator", "events": [result_event(2.0, 4000, 800)]},
         {"id": "session_k1", "title": "SE/kern/integrator", "events": [result_event(None, 40, 8)]},
         {"id": "session_x1", "title": "an unrelated session", "events": [result_event(9.0, 1, 1)]},
