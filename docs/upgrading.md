@@ -412,6 +412,17 @@ On main, released as 17.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/upgrade_guide.py show --guide docs/upgrading.md --name <repository> --from <released> --to <next>`
   names the section.
 
+## SE 18
+
+### Retros no longer wait for field feedback
+
+- **Change:** The retro no longer asks for field feedback, and its deck cover is `<name>: Retro #<n>`
+  and `Retro report`; the deck ends with `Anything else?` and `Nothing else`.
+- **Steps:** For an open retro, regenerate its draft and deck with the updated `retro.py collect`
+  and `retro.py deck`. Carry forward the judgment block, and leave the person's decisions to the
+  deck; do not ask for field feedback.
+- **Check:** `uv run pytest -q <se>/tests/test_retro.py <se>/tests/test_retro_deck.py` passes.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

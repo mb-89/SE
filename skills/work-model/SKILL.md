@@ -75,16 +75,25 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   person ([dec-011](references/rules.md#dec-011-persons-decide-agents-execute)).
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
-  script it changes.
-  - A retro takes the six steps of its template: field feedback, collect, the table of what
-    happened, the standing questions, classes and homes, and the person's decisions.
+  script it changes. The retro agent prepares the report and deck; SE presents them to the person.
+  - A retro takes the five steps of its template: collect, the table of what happened, the standing
+    questions, classes and homes, and the person's decisions. Its deck ends with "Anything else?",
+    whose sole default answer is "Nothing else".
   - The standing questions are one block, asked alike by the retro, the overhaul and every field
-    report; the overhaul adds its own. The retro's report closes the retro issue and files nothing; SE bundles its
-  findings into work issues ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+    report; the overhaul adds its own.
+
+    The retro report moves the issue to report state: SE may file only its findings with
+    `work_tickets.py file --finding`, or record declined/merged outcomes with `retro.py outcome`.
+    The issue closes when every finding has an outcome.
+    SE files no issue by itself before then
+    ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
-  any new issue: `work_tickets.py file` files a due one first and refuses every other filing while
-  one is open, until the person has decided its findings; running work goes on. Each runs in a
-  session of SE's [retro agent](../../agents/retro.md), which
+  any new issue: `work_tickets.py file` files a due one first.
+
+  A running retro refuses filing; in report state, only its findings may be filed; it is done once
+  every finding has an outcome. An open overhaul refuses all filing; running work goes on.
+
+  Each runs in a session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
   (["Retro due"](../../docs/fleet.md#retro-due)).
 

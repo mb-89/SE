@@ -1174,7 +1174,7 @@ def run_file(args: argparse.Namespace) -> int:
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
     steps = retro.file_steps(tracker, args.overhaul, [report(text, block, args.overhaul)],
-                             "overhaul")
+                             findings=0, what="overhaul")
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
