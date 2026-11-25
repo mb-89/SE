@@ -120,13 +120,13 @@ help = "undo claims no worker took"
 class = "batch"
 
 [commands."work_tickets.py session-title"]
-usage = "work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike}\n                              [project] [topic]"
+usage = "work_tickets.py session-title [--number NUMBER]\n                              {se,integrator,worker,reviewer,retro,researcher,spike}\n                              [project] [topic]"
 summary = "print the title of a session a role starts: `SE`, ..."
 group = "Integration"
-help = "print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions)"
+help = "print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<number>/<topic>` (work model, Visible sessions)"
 class = "batch"
 read-only = true
-mcp = "Prints the title of a session a role starts, by the scheme SE/<project>/<role>/<topic>. Use it before starting a session, to give the host's session tool its title."
+mcp = "Prints the title of a session a role starts, by the scheme SE/<project>/<role>/[<number>/]<topic>. Use it before starting a session, to give the host's session tool its title."
 
 [commands."work_tickets.py ready"]
 usage = "work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos] [--claimed FILE]"

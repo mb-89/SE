@@ -414,6 +414,16 @@ On main, released as 17.0.0 at the next release.
 
 ## SE 18
 
+### Session titles put the issue or pull request number before the name
+
+- **Change:** `work_tickets.py session-title` requires `--number` for workers, reviewers and
+  retros, printing `SE/<project>/<role>/<number>/<name>`. A reviewer's name is its PR branch.
+  SE and integrator titles are unchanged.
+- **Steps:** add `--number <issue>` to worker and retro launch commands. For reviewers, pass the
+  PR branch as the topic and `--number <pr>`; rename live sessions to the printed titles.
+- **Check:** `uv run python <se>/scripts/work_tickets.py session-title worker SE example-ticket --number 35`
+  prints `SE/SE/worker/35/example-ticket`.
+
 ### Retros no longer wait for field feedback
 
 - **Change:** The retro no longer asks for field feedback, and its deck cover is `<name>: Retro #<n>`

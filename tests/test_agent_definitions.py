@@ -400,7 +400,7 @@ def test_the_comment_footer_rule_is_said_once():
 
 def test_integrator_leaves_a_branch_the_host_refuses_to_delete():
     integrator = normalized(AGENTS / "integrator.md")
-    assert "automatic head-branch deletion removes it. Never retry the deletion." in integrator
+    assert "read back its absence rather than retry" in integrator
 
 
 def test_the_commit_trailer_is_one_setting_the_roles_point_to():
@@ -1045,15 +1045,16 @@ def test_both_copilot_start_lines_name_the_session_by_its_title():
     text = between(WORK_MODEL, "- **Where it has none**", "- `<list>` holds")
     assert "-n <title> -p '<prompt>'" in text
     assert "'-n','<title>','-p','<prompt>'" in text
-    assert "`<title>` is the worker's title, `session-title worker <project> <branch>`" in text
+    assert "`<title>` is the worker's title, `session-title worker <project> <branch> --number <issue>`" in text
 
 
 def test_visible_sessions_states_the_scheme_and_how_sessions_are_named_found_and_renamed():
     text = between(WORK_MODEL, "### Visible sessions", "### Suite at a moved pin")
-    for rule in ("`work_tickets.py session-title <role> [<project>] [<topic>]`",
+    for rule in ("`work_tickets.py session-title <role> [<project>] [<topic>] [--number <number>]`",
                  "the SE agent's own session is `SE`", "`SE/<project>/integrator`",
-                 "`SE/<project>/worker/<ticket name>`", "`SE/<project>/integrator/<area>`",
-                 "`SE/<project>/reviewer/<pull request number>`", "`SE/<project>/researcher/<topic>`",
+                 "`SE/<project>/worker/<number>/<ticket name>`", "`SE/<project>/integrator/<area>`",
+                 "`SE/<project>/reviewer/<number>/<pr-branch-name>`", "`SE/<project>/researcher/<topic>`",
+                 "`SE/<project>/retro/<number>/<run's issue name>`",
                  "`SE/<project>/spike/<topic>`", "no other tag of its own",
                  "`set_session_tags` with `add: [\"SE\"]`", "It removes no tag.",
                  "`children: true`", "Never by tag", "never another, such as the host's `config:*`",
@@ -1061,6 +1062,35 @@ def test_visible_sessions_states_the_scheme_and_how_sessions_are_named_found_and
         assert rule in text, rule
     assert "`session-title`" in between(WORK_MODEL, "- **Commands that still run**",
                                         "- **Commands that hand off**")
+
+
+def test_accepted_sessions_have_one_immediate_cleanup_rule_and_role_references():
+    text = between(WORK_MODEL, "### Visible sessions", "### Suite at a moved pin")
+    for rule in ("integrator that lands", "archives its session", "local and remote branch at once",
+                 "SE archives a reviewer's session once its review is posted",
+                 "retro's session once the person has answered", 'Never keep a session "in case"'):
+        assert rule in text
+    for path in (AGENTS / "se.md", AGENTS / "integrator.md", SKILL):
+        assert "immediate cleanup rule" in normalized(path)
+
+
+def test_worker_acknowledges_refreshed_comments_and_quotes_replaced_sentences():
+    text = normalized(AGENTS / "worker.md")
+    assert "comments-read --count <current count> --newest <current newest id> --worktree <worktree>" in text
+    assert "Keep the unread-comment gate" in text
+    assert "Quote each replaced authored sentence contiguously as `<path>: <sentence>`" in text
+
+
+def test_retro_and_decks_ask_only_real_choices_not_permission_for_clear_fixes():
+    decision = normalized(DECISION)
+    assert "A retro or deck asks the person only real choices" in decision
+    assert "the agent applies it within its authority and records it" in decision
+    assert "leaves some other problem unsolved is not a loss" in decision
+    retro = normalized(AGENTS / "retro.md")
+    assert "Apply and record clear fixes within your authority" in retro
+    assert "decision chapters for real choices" in retro
+    assert "clear fixes are records, not approval requests" in retro
+    assert "each `work` finding their go" not in retro
 
 
 def test_integrator_starts_the_next_startable_issue_after_each_landing_and_records_it():

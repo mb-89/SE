@@ -88,8 +88,9 @@ project's commands and hot files by the project's `AGENTS.md`.
      pull request with a complete field report. `queue` cannot see it: ask the integrator to
      integrate the branch, in shared-file order.
    - **Stale, superseded**: its work is merged or reimplemented elsewhere (check `git branch --no-merged`,
-     `git log --grep`, the files on `main`). Leave it; list it for a removal decision, or feed its
-     prototype into the package that now owns the topic.
+     `git log --grep`, the files on `main`). Apply the work model's
+     [immediate cleanup rule](../work-model/SKILL.md#visible-sessions) where its work was accepted;
+     otherwise feed its prototype into the package that now owns the topic.
 3. **Report briefly**: what is done (with commits and tags), what is open, which worktrees are live,
    stale or superseded.
 4. **Sort every open item** into exactly one bucket:
