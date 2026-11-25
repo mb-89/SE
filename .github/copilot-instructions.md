@@ -9,3 +9,6 @@
 - Check the publication path before working without a work issue: `work_tickets.py push` requires
   an intake snapshot even when the person authorized issue-free work. Report that gate upstream;
   never invent an issue snapshot or bypass the gate with a raw push.
+- Prefer `work_tickets.py guard` when checking a report's removed tests and prose, rather than
+  composing long inline probes. If introspection is necessary, read the helper's actual name
+  first: the test-removal helper is `deleted_test_places`, not `deleted_tests`.
