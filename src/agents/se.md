@@ -137,8 +137,8 @@ its tools.
     name>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
     session.
 
-    It does not wait for field feedback: it runs `retro.py collect`, judges and prepares the deck,
-    then files the report with `retro.py file`.
+    It runs `retro.py collect`, judges and prepares the deck, then files the report with
+    `retro.py file`.
 
     When the report is in, file each accepted work finding with `work_tickets.py file --finding`;
     record declined or merged findings with `retro.py outcome`. A work issue names each finding it takes as the message

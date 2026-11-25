@@ -268,9 +268,11 @@ issue closed, whose findings it then scores; the rule checks judge only the wind
 Each issue comes with the field report of the work pull request its landing pull request names
 (`<!-- se:field-report-in <n> -->`).
 
-The draft is a document of the retro template ([templates/retro.md](../templates/retro.md)), the
-person's decision of 22 Nov. Its six steps are the field feedback, collect, the table of what
-happened, the standing questions with their matrix, classes and homes, and the person's decisions.
+The draft is a document of the retro template ([templates/retro.md](../templates/retro.md)). Its
+five steps are collect, the table of what happened, the standing questions with their matrix and
+answers, classes and homes, and the person's decisions. The agent prepares the draft and deck
+without asking for or waiting on field feedback; the deck ends with "Anything else?" and "Nothing
+else" as its only default answer.
 
 The standing questions are one block
 ([templates/standing-questions.md](../templates/standing-questions.md)), which the overhaul and every
@@ -327,9 +329,9 @@ answers are still missing, round by round, and reads the answers from the files 
 into `--answers <dir>` ([Without gh](../src/skills/work-model/SKILL.md#without-gh)).
 
 `retro.py file` files a judged retro, the draft committed as the retro doc on the integration
-branch. The judge writes the person's field feedback into step 1, fills what steps 3 and 4 leave
-open, answers every standing question, records the person's decisions in step 6, and fills the
-draft's block:
+branch. The judge completes the collected facts, timeline, matrix, answers to the standing
+questions, and classes and homes; the decisions step leaves findings open for the deck. The judge
+also fills the draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
@@ -351,26 +353,27 @@ It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
 it posts the report proper as the retro issue's closing comment and closes the issue.
 
-The report opens with `<!-- se:retro-report -->` and is a document of the retro template: the
-draft's steps 1, 3 and 4, and step 2 as the link to the retro doc. In step 5 come the classes,
-strongest home first, each with its cause, fix, home and state against the tree, and its findings,
-numbered, each with its home and its kind:
+The report opens with `<!-- se:retro-report -->` and is a document of the retro template. It links
+the committed retro doc for the collected facts and block, and carries the drafted timeline,
+standing-question matrix and answers, and the judged classes, strongest home first, each with its
+cause, fix, home and state against the tree, and its findings, numbered, each with its home and its
+kind:
 
 - `work`: SE bundles these into as few work issues as the work needs, each naming
   `retro #<n> finding <k>` for every finding it takes;
 - `decision`: for the owner's decision list.
 
-Then what went well, and in step 6 the person's decisions, the classes still open and what
-follows. The facts and the block stay in the retro doc, which the report links at the integration
-branch's commit (the message `templates/retro-doc.md`), where the next collect and overhaul read
-them.
+It then records what went well and leaves each finding open until its outcome is recorded. The
+standalone deck carries the person's decisions. The facts and the block stay in the retro doc,
+which the report links at the integration branch's commit (the message `templates/retro-doc.md`),
+where the next collect and overhaul read them.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
 without its markers, so no part is checked as a whole report: `file` checked the whole first.
 Without gh it prints the comments and the close as a plan.
 
 `retro.py deck` builds the retro's one report, a deck, from the judged draft into the one HTML
-file `--destination` names, the person's decision of 24 Nov: the person reads one file, never a
+file `--destination` names, the person's decisions of 24 and 25 Nov: the person reads one file, never a
 Markdown report beside a separate decision deck. It checks the draft as
 `file` does and refuses, building nothing, what `file` refuses.
 
@@ -378,14 +381,14 @@ The deck is a document of the retro-deck template
 ([templates/retro-deck.md](../templates/retro-deck.md)), built with obs
 (`scripts/retro_deck.py`):
 
-- a title page: `Retro #<n>`, the report's kind and the window with its number of findings;
+- a title page with exactly two lines: `<repository name>: Retro #<n>` and `Retro report`;
 - every step the retro ran, one chapter each, each thing once: what was collected, the table of
   what happened (its one table, the chapters of the window), the standing questions with their one
-  matrix and the field feedback answered in it, and the classes with their causes, fixes and
+  matrix and the field reports' answers, and the classes with their causes, fixes and
   homes, each naming its findings;
 - then, on the last pages, one decision chapter per finding, each opening with its current
   situation and asking the person for a bless: their go for a `work` finding, their decision for
-  a `decision` finding.
+  a `decision` finding; finally, `Anything else?` with `Nothing else` as its only default answer.
 
 A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
 

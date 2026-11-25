@@ -13,16 +13,17 @@ import pytest
 import retro_deck
 import templates
 
-STEPS = [("1. Field feedback", "> The integrator stalled twice."),
-         ("4. The standing questions", "| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |\n\n"
+STEPS = [("2. Table of what happened", "| chapter | steps |\n|---|---|\n| 1 | #11 |"),
+         ("3. The standing questions", "| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |\n\n"
                                        "## Answers to the standing questions\n\n### Has the process gone stale?\n\nNo.\n\n"
                                        "```sh\n# not a heading\n```")]
 DECISIONS = [("1. Refuse a landing without a field report", "**Work, for your go**: Bless sends it to SE."),
-             ("2. Make the field report a rule", "**Decision, for your decision**: it changes a rule.")]
+             ("2. Make the field report a rule", "**Decision, for your decision**: it changes a rule."),
+             ("Anything else?", "Nothing else")]
 
 
 def deck_text(decisions=DECISIONS) -> str:
-    return retro_deck.text("Retro #30", "2026-11-01 to 2026-11-12: 2 findings", STEPS, decisions)
+    return retro_deck.text("example: Retro #30", "Retro report", STEPS, decisions)
 
 
 def test_the_deck_is_a_document_of_the_retro_deck_template_steps_first_decisions_last():
@@ -30,10 +31,10 @@ def test_the_deck_is_a_document_of_the_retro_deck_template_steps_first_decisions
     template = retro_deck.template()
     assert templates.select(templates.load(templates.ROOT, tree=True), "deck.build", text).template.name == "retro-deck"
     fields = templates.parse(template, text).fields
-    assert (fields["title"], fields["subtitle"]) == ("Retro #30", "2026-11-01 to 2026-11-12: 2 findings")
-    assert text.index("\n## Steps\n") < text.index("\n### 1. Field feedback\n") < text.index(
+    assert (fields["title"], fields["subtitle"]) == ("example: Retro #30", "Retro report")
+    assert text.index("\n## Steps\n") < text.index("\n### 2. Table of what happened\n") < text.index(
         "\n#### Answers to the standing questions\n") < text.index("\n## Decisions\n") < text.index(
-        "\n### 1. Refuse a landing without a field report\n")
+        "\n### 1. Refuse a landing without a field report\n") < text.index("\n### Anything else?\n")
     assert "\n# not a heading\n" in text  # a fence's lines are no headings
 
 
@@ -54,19 +55,22 @@ def test_a_run_without_a_step_or_with_an_empty_heading_is_refused():
 
 def test_the_vault_has_the_title_page_every_step_and_each_decision_last_asking_a_bless(tmp_path):
     asked = retro_deck.vault(deck_text(), tmp_path)
-    assert asked == ["decision-01", "decision-02"]
+    assert asked == ["decision-01", "decision-02", "decision-03"]
     manifest = (tmp_path / "manifest.md").read_text(encoding="utf-8")
     front = manifest.split("---")[1]
-    assert 'title: "Retro #30"' in front and 'subtitle: "2026-11-01 to 2026-11-12: 2 findings"' in front
+    assert 'title: "example: Retro #30"' in front and 'subtitle: "Retro report"' in front
     assert f'document type: "{retro_deck.DOCUMENT_TYPE}"' in front
     assert "obsHtml: {layout: paged, pages: [{page: cover}]}" in front
     assert re.findall(r"^- \[\[([\w-]+)\|", manifest, re.MULTILINE) == [
-        "step-01", "step-02", "decision-01", "decision-02"]
+        "step-01", "step-02", "decision-01", "decision-02", "decision-03"]
     step = (tmp_path / "step-02.md").read_text(encoding="utf-8")
-    assert step.startswith("# 4. The standing questions\n\n| question | 1 |")
+    assert step.startswith("# 3. The standing questions\n\n| question | 1 |")
     assert "\n## Answers to the standing questions\n\n### Has the process gone stale?\n" in step
     decision = (tmp_path / "decision-02.md").read_text(encoding="utf-8")
     assert decision.startswith("---\nobs: {bless: pending}\n---\n# 2. Make the field report a rule\n")
+    anything_else = (tmp_path / "decision-03.md").read_text(encoding="utf-8")
+    assert anything_else.startswith("---\nobs: {bless: pending}\n---\n# Anything else?\n\nNothing else\n")
+    assert "obs: {bless: pending}" in anything_else
     assert "bless" not in step
 
 
@@ -88,7 +92,7 @@ def test_the_build_machines_home_is_written_as_a_tilde(text, home, written):
 
 
 def test_the_vault_writes_the_home_folder_as_a_tilde(tmp_path):
-    text = retro_deck.text("Retro #30", "x", [("1. Field feedback", "It read /srv/box/.cache.")], [])
+    text = retro_deck.text("Retro #30", "x", [("1. Collect", "It read /srv/box/.cache.")], [])
     retro_deck.vault(text, tmp_path, home="/srv/box")
     assert "It read ~/.cache." in (tmp_path / "step-01.md").read_text(encoding="utf-8")
 

@@ -266,7 +266,9 @@ def test_the_marker_names_the_repository_the_template_its_version_and_its_digest
     work = catalog["work"]
     texts = [(ROOT / "templates" / f"{name}.md").read_text(encoding="utf-8") for name in ("work", "ticket")]
     digest = hashlib.sha256("".join(text + "\0" for text in texts).encode("utf-8")).hexdigest()
-    requirement = hashlib.sha256((ROOT / "templates" / "requirement.md").read_bytes() + b"\0").hexdigest()
+    requirement = hashlib.sha256(
+        (ROOT / "templates" / "requirement.md").read_text(encoding="utf-8").encode("utf-8") + b"\0"
+    ).hexdigest()
     nested = hashlib.sha256(f"sha256:{digest}\0sha256:{requirement}\0".encode("utf-8")).hexdigest()
     assert work.marker_line == f"<!-- se:template se/work 1.2.0 sha256:{nested} -->"
     assert templates.render(work, work_fields(catalog)).splitlines()[1] == work.marker_line
@@ -1658,10 +1660,11 @@ def test_the_retro_report_is_a_document_of_the_retro_template_and_passes(catalog
                                         home=HOME)
     assert template.name == "retro"
     assert [finding for finding in found if finding.severity == templates.REFUSE] == []
-    unfilled = retro_report().replace("> The integrator stalled twice on a red suite.", "")
+    unfilled = re.sub(r"(## 1\. Collect\n\n).*?(?=\n## 2\.)", r"\1", retro_report(),
+                      flags=re.DOTALL)
     _, found = templates.verdict(catalog, "comment.create", unfilled, repo=REPO, home=HOME)
     assert [(finding.field, finding.rule) for finding in found
-            if finding.severity == templates.REFUSE] == [("field_feedback", "required")]
+            if finding.severity == templates.REFUSE] == [("collect", "required")]
 
 
 def overhaul_block(**changes: object) -> dict:
@@ -1907,12 +1910,25 @@ def overhaul_report() -> str:
 
 def retro_steps(catalog, monkeypatch) -> list[Case]:
     cases = []
-    for text, template in ((retro_report(), "retro"), (overhaul_report(), "overhaul")):
-        cases += step_cases(retro.file_steps(REPO, 30, [text]), {"comment_issue": template})
+    for text, template, marker, findings in (
+            (retro_report(), "retro", retro.REPORT_MARKER, 2),
+            (overhaul_report(), "overhaul", overhaul.REPORT_MARKER, 0)):
+        plan = retro.file_steps(REPO, 30, [text], findings, what=template)
+        for step in plan.steps:
+            body = step.arguments.get("body")
+            selected = template if isinstance(body, str) and body.startswith(marker) else FREE
+            cases += step_cases(work_tickets.Plan(plan.title, (step,)),
+                                {step.action: selected})
     parts = retro.parts(retro_report(), 30, limit=400)
-    cases += step_cases(retro.file_steps(REPO, 30, parts[:1]), {"comment_issue": FREE})
-    cases += step_cases(retro.file_steps(REPO, 30, parts[1:2]), {"comment_issue": FREE})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[:1], 2), {"comment_issue": FREE})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[1:2], 2), {"comment_issue": FREE})
     return cases
+
+
+def retro_outcome(catalog, monkeypatch) -> list[Case]:
+    return [Case("comment.create", FREE, retro.outcome_comment(1, "declined", "not needed")),
+            Case("comment.create", FREE, retro.report_state_comment("done", 1)),
+            Case("issue.edit", NO_BODY)]
 
 
 def tracker_comment(catalog, monkeypatch) -> list[Case]:
@@ -2020,6 +2036,7 @@ CONTRACT = {
     "review:file_steps": ("review.py file", review_steps),
     "review:run_file": ("review.py file", review_run),
     "retro:file_steps": ("retro.py file and overhaul.py file", retro_steps),
+    "retro:record_outcome": ("retro.py outcome and work_tickets.py file --finding", retro_outcome),
 }
 
 

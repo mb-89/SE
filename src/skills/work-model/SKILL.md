@@ -74,9 +74,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   person ([dec-011](references/rules.md#dec-011-persons-decide-agents-execute)).
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
-  script it changes. They prepare the report and deck without waiting for field feedback.
-  - A retro takes the six steps of its template: available field feedback, collect, the table of
-    what happened, the standing questions, classes and homes, and the person's decisions.
+  script it changes. The retro agent prepares the report and deck; SE presents them to the person.
+  - A retro takes the five steps of its template: collect, the table of what happened, the standing
+    questions, classes and homes, and the person's decisions. Its deck ends with "Anything else?",
+    whose sole default answer is "Nothing else".
   - The standing questions are one block, asked alike by the retro, the overhaul and every field
     report; the overhaul adds its own.
 

@@ -46,11 +46,11 @@ both.
 | `templates/release-trailer.md` | An integration merge's release kind, its one trailer. |
 | `templates/requirement.md` | One requirement: one checkable statement, how it is checked and where it comes from. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
-| `templates/retro-deck.md` | A retro's or an overhaul's deck: a title page, every step it ran as a chapter, then the decisions. |
+| `templates/retro-deck.md` | A retro's deck ends with Anything else? and Nothing else as its single selectable default. |
 | `templates/retro-doc.md` | A retro report's link to its committed retro doc: the commit and the doc's path in the checkout. |
 | `templates/retro-due.md` | The retro and overhaul countdowns: per kind what it counted since where it starts, the days, and whether it is due or open. |
 | `templates/retro-part.md` | The label a part of a split retro report ends in: which part of how many, of which retro's report. |
-| `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
+| `templates/retro.md` | A retro's report and its draft: the five steps, the standing questions nested in step 3. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/review-declined.md` | A declined review's comment on the work issue: the pull request the review declined and its link. |
 | `templates/review-done.md` | A cold review's end: the reviewed pull request, the verdict and the review comment's link. |

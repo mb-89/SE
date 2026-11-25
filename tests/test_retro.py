@@ -116,18 +116,15 @@ def answered(**answers: str) -> str:
 
 
 def steps() -> str:
-    """The six steps of the retro template, filled from its example."""
+    """The five steps of the retro template, filled from its example."""
     template = retro.retro_template()
     return retro.templates().render(template, template.example["fields"])
 
 
 def fill_steps(text: str) -> str:
-    """The draft `text` with what the judge writes into the steps: the field feedback, every
-    standing question answered None, the person's decisions."""
-    text = re.sub(r"^(<!-- field_feedback: [^\n]*-->)$", r"\1\n\n> The integrator stalled twice.",
-                  text, count=1, flags=re.MULTILINE)
+    """The draft `text` with every standing question answered None and decisions left open."""
     text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
-    return re.sub(r"^(<!-- decisions: [^\n]*-->)$", r"\1\n\nThe person accepted every finding.",
+    return re.sub(r"^(<!-- decisions: [^\n]*-->)$", r"\1\n\nOpen: The deck carries the person's answer.",
                   text, count=1, flags=re.MULTILINE)
 
 
@@ -1027,11 +1024,8 @@ def built_deck(checkout: Path, tmp_path: Path, monkeypatch, text: str, *extra: s
     return code, asked
 
 
-def test_the_deck_holds_every_step_the_retro_ran_then_one_decision_chapter_per_finding(checkout):
-    """The acceptance of SE#1826: the retro's one output is a deck of the retro-deck template, its title
-    page, every step (what was collected, the table, the standing questions with their full matrix and
-    answers, the field feedback among them, the classes with their causes, fixes and homes), then the
-    decisions; one table of what happened, one matrix, nothing twice (requirements 8 and 9)."""
+def test_the_deck_holds_every_step_then_finding_decisions_and_anything_else(checkout):
+    """The retro's deck carries each report step once, its finding decisions, then one final default."""
     text = judged_draft(checkout)
     block = retro.judged(text, 30)
     steps, decisions = retro.deck_parts(block, text)
@@ -1048,36 +1042,49 @@ def test_the_deck_holds_every_step_the_retro_ran_then_one_decision_chapter_per_f
     matrix = body["The standing questions"]
     assert matrix.startswith("| question |") and matrix.count("| question |") == 1
     assert ("\n## Answers to the standing questions\n\n### What came back from real use since the last retro?\n\n"
-            "The person's field feedback:\n\n> The integrator stalled twice.\n\nNone.") in matrix
+            "None.") in matrix
     classes = body["Classes and homes"]
     assert "### Lost reports (2)\n\nCause: a landing need not name a field report" in classes
     assert "Home: refusal (home 2 of 8), `scripts/work_tickets.py`" in classes and "### What went well" in classes
     assert ("Findings, each a decision at the end: 1. Refuse a landing whose work issue has no field report; "
             "2. Make the field report a rule of the rule book.") in classes
     assert "#14 closed without one." not in classes and "A rule, not a habit." not in classes
-    assert [heading for heading, _ in decisions] == ["1. Refuse a landing whose work issue has no field report",
-                                                     "2. Make the field report a rule of the rule book"]
-    work, decision = (text for _, text in decisions)
+    assert [heading for heading, _ in decisions] == [
+        "1. Refuse a landing whose work issue has no field report",
+        "2. Make the field report a rule of the rule book",
+        "Anything else?"]
+    work, decision, anything_else = (text for _, text in decisions)
     # Each opens with its current situation, the finding as the judge wrote it, and asks last (SE#1826, 10).
     assert work.startswith("#14 closed without one.\n\nClass: Lost reports, its cause and fix under Classes and homes.")
     assert work.endswith("Home: `scripts/work_tickets.py`; check `field-report`.\n\n**Work, for your go**: Bless "
                          "sends it to SE, which bundles it into a work issue.")
     assert decision.startswith("A rule, not a habit.") and decision.endswith("**Decision, for your decision**: it changes a rule")
     assert "Cause:" not in decision
+    assert anything_else == "Nothing else"
+
+
+def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
+    text = judged_draft(checkout)
+    block = retro.read_block(text)
+    block["findings"] = []
+    block["classes"] = []
+    _, decisions = retro.deck_parts(block, text)
+    assert decisions == [("Anything else?", "Nothing else")]
 
 
 def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checkout, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "repository_name", lambda _root: "example")
     code, asked = built_deck(checkout, tmp_path, monkeypatch, judged_draft(checkout), "--host", "copilot")
     assert code == 0
     assert asked["host"] == "copilot" and asked["answers"] is None
     template = templates.own("retro-deck")
     fields = templates.parse(template, asked["written"]).fields
-    assert fields["title"] == "Retro #30" and fields["subtitle"] == "2026-11-01 to 2026-11-12: 2 findings"
+    assert fields["title"] == "example: Retro #30" and fields["subtitle"] == "Retro report"
     assert [finding.fix for finding in templates.check(template, templates.parse(template, asked["written"]))
             if finding.severity == templates.REFUSE] == []
     assert [path.name for path in (tmp_path / "out").iterdir()] == ["retro-30.html"]
     out = capsys.readouterr().out
-    assert "the report is the deck" in out and "a title page, 4 steps and 2 decision chapter(s)" in out
+    assert "the report is the deck" in out and "a title page, 4 steps and 3 decision chapter(s)" in out
 
 
 def test_deck_with_the_answers_builds_the_record(checkout, tmp_path, monkeypatch, capsys):
@@ -1093,7 +1100,8 @@ def test_deck_refuses_an_incomplete_judgment_or_an_open_step_and_builds_nothing(
     code, asked = built_deck(checkout, tmp_path, monkeypatch, judged_draft(checkout, went_well=[]))
     assert (code, asked) == (1, {})
     assert "The judgment of retro #30 is not complete" in capsys.readouterr().err
-    text = judged_draft(checkout).replace("> The integrator stalled twice.", "")
+    text = re.sub(r"(## 2\. Table of what happened\n\n).*?(?=\n## 3\. The standing questions)",
+                  r"\1", judged_draft(checkout), flags=re.DOTALL)
     code, asked = built_deck(checkout, tmp_path, monkeypatch, text)
     assert (code, asked) == (1, {})
     assert "leaves a step of the retro template" in capsys.readouterr().err
@@ -1801,28 +1809,28 @@ def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_measures
     assert retro.read_block(text)["previous"]["classes"][0]["matches"] == 3
 
 
-def test_a_retro_built_from_the_fixtures_shows_the_six_steps_the_matrix_and_a_class_with_its_home(
+def test_a_retro_built_from_the_fixtures_shows_the_five_steps_the_matrix_and_a_class_with_its_home(
         checkout, monkeypatch):
     """The acceptance of SE#1678: the draft collect writes from the fixtures and the report file
-    posts from it are documents of the retro template, its six steps in order, the standing
-    questions against the timeline's chapters in step 4's matrix, and in step 5 each class with
+    posts from it are documents of the retro template, its five steps in order, the standing
+    questions against the timeline's chapters in step 3's matrix, and in step 4 each class with
     its home in the home order and its state against the tree."""
     template = retro.retro_template()
     headings = [item.heading for item in template.fields]
-    assert headings == ["1. Field feedback", "2. Collect", "3. Table of what happened",
-                        "4. The standing questions", "Answers to the standing questions",
-                        "5. Classes and homes", "6. The person decides"]
+    assert headings == ["1. Collect", "2. Table of what happened", "3. The standing questions",
+                        "Answers to the standing questions", "4. Classes and homes",
+                        "5. The person decides"]
     text = retro.draft(collected(checkout))
     at = [text.index(f"\n## {heading}\n") for heading in headings]
     assert at == sorted(at)
-    # Step 3: #11 landed 10:00 on 2 Nov, #12 10:00 on 3 Nov, #13 and #14 within six hours of it.
+    # The timeline: #11 landed 10:00 on 2 Nov, #12 10:00 on 3 Nov, #13 and #14 within six hours of it.
     assert ("| chapter | from | to | steps |\n|---|---|---|---|\n"
             "| 1 | 2026-11-02T10:00:00Z | 2026-11-02T10:00:00Z | #11 |\n"
             "| 2 | 2026-11-03T10:00:00Z | 2026-11-03T13:00:00Z | #12, #13 |\n"
             "| 3 | 2026-11-04T12:00:00Z | 2026-11-04T12:00:00Z | #14 |") in text
     assert ("| #11 feat/a | 1 | the fake door | landed; 1 refused, 1 escalated, suite 35.4 s |  |"
             in text)
-    # Step 4: the matrix names the issue whose field report answers a question in its chapter.
+    # The matrix names the issue whose field report answers a question in its chapter.
     assert ("| question | 1 (2026-11-02 10:00) | 2 (2026-11-03 10:00) | 3 (2026-11-04 12:00) |"
             in text)
     assert "| What goes well, and what makes it go well? | #11 |  |  |" in text
@@ -1832,8 +1840,9 @@ def test_a_retro_built_from_the_fixtures_shows_the_six_steps_the_matrix_and_a_cl
     assert "Home order, strongest first: check, refusal, gate, prefill, checklist line, command, " \
            "setting, sentence." in text
 
-    unfilled = judged_draft(checkout).replace("> The integrator stalled twice.", "")
-    assert any(problem.startswith("1. Field feedback is empty")
+    unfilled = re.sub(r"(## 1\. Collect\n\n).*?(?=\n## 2\.)", r"\1",
+                      judged_draft(checkout), flags=re.DOTALL)
+    assert any(problem.startswith("1. Collect is empty")
                for problem in retro.steps_problems(unfilled))
     with pytest.raises(work_tickets.QueueError, match="leaves a step of the retro template"):
         retro.run_file(retro.make_parser().parse_args(
@@ -1842,7 +1851,7 @@ def test_a_retro_built_from_the_fixtures_shows_the_six_steps_the_matrix_and_a_cl
     comment = filed(checkout, monkeypatch, judged_draft(checkout))[0][1]["body"]
     at = [comment.index(f"\n## {heading}\n") for heading in headings]
     assert at == sorted(at)
-    assert "## 1. Field feedback\n\n> The integrator stalled twice.\n" in comment
+    assert "## 1. Collect\n\nThe facts" in comment
     assert "| What goes well, and what makes it go well? | #11 |  |  |" in comment
     assert ("Home: refusal (home 2 of 8), `scripts/work_tickets.py`; tree: open" in comment)
     assert "Open classes: Lost reports." in comment

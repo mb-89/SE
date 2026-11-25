@@ -6498,13 +6498,14 @@ def template_check(root: Path, repo: str, command: str, title: str, body: str, t
 
 def filed_once(root: Path, repo: str, command: str, title: str, body: str, filing: Step,
                existing: int | None = None, *, template: str, hold: bool = False,
-               given: str | None = None) -> Filed:
+               given: str | None = None, prechecked: bool | None = None) -> Filed:
     """Run the dedupe plan around `filing` through gh, or print it where gh is not signed in; a
     body naming a missing se command is refused first (`refuse_dangling`), then the title and the
     body are checked against `template` (`template_check`), before anything is printed or written. Held
     (`--hold`), the text as `given` is filed instead, labelled OFF_TEMPLATE_LABEL and not ready."""
     refuse_dangling(repo, command, body)
-    held = template_check(root, repo, command, title, body, template, existing, hold, given)
+    held = (template_check(root, repo, command, title, body, template, existing, hold, given)
+            if prechecked is None else prechecked)
     if held and given is not None and given != body:
         refuse_dangling(repo, command, given)
         body = given
@@ -6666,7 +6667,10 @@ def file_work_issue(
         if match is None or (int(match[1]), int(match[2])) != (finding.retro, finding.finding):
             raise QueueError(f"file --finding {finding}: the work issue body must name exactly "
                              f"`retro #{finding.retro} finding {finding.finding}`")
-    check_door = filing_door(root, repo) if gate or finding is not None else None
+    refuse_dangling(repo, "file", body)
+    prechecked = template_check(root, repo, "file", title.strip(), body, "work", hold=hold,
+                                given=given)
+    check_door = filing_door(root, repo) if finding is not None else None
     if gate or finding is not None:
         filing_check(root, repo, "file", door=check_door, finding=finding)
     first = [label for label in labels if not blockers or label != "ready"]
@@ -6678,7 +6682,7 @@ def file_work_issue(
             "signed in")
     outcome = filed_once(root, repo, "file", title.strip(), body,
                          work_issue_filing(repo, title.strip(), body, first), template="work",
-                         hold=hold, given=given)
+                         hold=hold, given=given, prechecked=prechecked)
     if finding is not None:
         issue_number = outcome.twin or outcome.lower or outcome.number
         if issue_number is not None:

@@ -130,7 +130,7 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
   first issue; its counters reset when it starts (its issue's creation), so a late retro never
   makes the next one due at once.
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
-  session; it prepares the report and deck without waiting for field feedback.
+  session; SE presents the completed report deck to the person.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
   `retro.py due` prints both countdowns. It reads back to the newest run's start, all with no
   retro yet (`recent_reads`). The [start greeting](start.md#start-and-refresh) names a run due or
