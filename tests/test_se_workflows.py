@@ -272,6 +272,31 @@ def test_a_project_holding_only_the_batterys_copy_is_named_and_regenerated_with_
     assert se_workflows.plan(project, [BATTERY], ref=before, source=se).paths == (BATTERY,)
 
 
+RELEASE_KIND = ".github/actions/release-kind/action.yml"
+
+
+def test_every_project_gets_the_release_kind_gate_once_its_pin_ships_it(world, capsys) -> None:
+    """The release-kind gate a project's check calls (the work model's "Release kind"): a project
+    that holds any copy gets it beside them where the pin ships it; check names it missing."""
+    se, project, first, _ = world
+    se_workflows.write(project, se_workflows.plan(project, [RELEASE], source=se))
+    write(se / RELEASE_KIND, (ROOT / RELEASE_KIND).read_text(encoding="utf-8"))
+    git_door.run("add", "-A", root=se)
+    git_door.run("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "gate", root=se)
+    pin = git_door.run("rev-parse", "HEAD", root=se).stdout.strip()
+    write(project / "se.toml", f'[components.se]\nref = "{pin}"\n')
+    assert se_workflows.plan(project, [], source=se).paths == (RELEASE, RELEASE_KIND)
+    assert f"{RELEASE_KIND}: missing, though every project holds it for its check to call; run " \
+           "se_workflows.py write" in se_workflows.check(project, se_workflows.plan(project, [], source=se))
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "write"]) == 0
+    copy = (project / RELEASE_KIND).read_text(encoding="utf-8")
+    assert se_workflows.read_header(copy) == (RELEASE_KIND, pin, PLACE)
+    assert f'"$GITHUB_WORKSPACE/{se_workflows.CHECKOUT}/scripts/pr_issues.py" --release-kind' in copy
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "check"]) == 0
+    # A pin that ships no gate adds none.
+    assert se_workflows.plan(project, [RELEASE], ref=first, source=se).paths == (RELEASE,)
+
+
 # The shards CI runs against se.toml's `[tests] shards` (docs/tests.md "Test budget").
 
 CHECK = ".github/workflows/check.yml"

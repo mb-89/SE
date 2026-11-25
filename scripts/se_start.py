@@ -14,6 +14,7 @@ is missing. What each command does and where SE runs it is docs/start.md "Start 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import importlib.util
 import json
@@ -971,17 +972,19 @@ class Loaded:
     note: str = ""  # what the session alone is told, such as a core switched off
 
 
-def run_command(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str, str]:
+def run_command(argv: list[str], cwd: Path, timeout: float, stdin: Path | None = None) -> tuple[int, str, str]:
     """A loader's command through the process door: its exit code, stdout and stderr; a command that
     does not start or takes too long answers 127 and why. uv's deprecated UV_NATIVE_TLS becomes
-    UV_SYSTEM_CERTS and the caller's VIRTUAL_ENV is dropped, as the documentation build runs obs."""
+    UV_SYSTEM_CERTS and the caller's VIRTUAL_ENV is dropped, as the documentation build runs obs.
+    With `stdin`, the command reads that file on its standard input, else nothing."""
     environment = dict(os.environ)
     environment.pop("VIRTUAL_ENV", None)
     if environment.pop("UV_NATIVE_TLS", None):
         environment.setdefault("UV_SYSTEM_CERTS", "1")
     try:
-        result = process_door.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                                  errors="replace", stdin=subprocess.DEVNULL, timeout=timeout, env=environment)
+        with (stdin.open("rb") if stdin is not None else contextlib.nullcontext(subprocess.DEVNULL)) as given:
+            result = process_door.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                                      errors="replace", stdin=given, timeout=timeout, env=environment)
     except subprocess.TimeoutExpired:
         return 127, "", f"{argv[0]} took more than {timeout:g} s"
     except OSError as error:
@@ -1910,6 +1913,48 @@ def move_pins(root: Path, pins) -> tuple[list[str], list[str]]:
     return moved, left
 
 
+#: How long one of kern's own commands may take in the restart: `stop` waits for the core's exit.
+RESTART_WAIT = 60.0
+
+
+def restart_cores(se_root: Path, root: Path | None, world: World) -> tuple[list[str], bool]:
+    """Once the update moved SE: restart each core that runs SE's components, the session's
+    (`kern_root`) and SE's root's, so no component answers with the code it loaded before the move
+    (docs/boot.md "The update"). Each is stopped and started again with the binary bootstrap.sh
+    named in its checkout (`.se/.runtime/kern.path`), and handed the session's start it saved
+    there, as bootstrap.sh hands it; a checkout where no core stands is left alone. One line per
+    core, and whether a restart failed."""
+    lines, failed = [], False
+    for core_root in dict.fromkeys([kern_root(se_root, root), se_root]):
+        runtime = core_root / ".se" / ".runtime"
+        binary = kern_binary(Kern(), core_root)
+        if binary is None or not (runtime / "standing.json").is_file():
+            continue
+        where = core_root.as_posix()
+        code, out, err = world.run([str(binary), "stop", "--root", str(core_root)], core_root, RESTART_WAIT)
+        if code:
+            lines.append(f"kern: the core of {where} did not stop, so its components may still run the code "
+                         f"they loaded: {_last(out, err, code)}")
+            failed = True
+            continue
+        if "not running" in out:
+            continue
+        code, out, err = world.run([str(binary), "start", "--root", str(core_root), "--home", str(se_root)],
+                                   core_root, RESTART_WAIT)
+        if code:
+            lines.append(f"kern: the core of {where} stopped and did not start again: {_last(out, err, code)}; "
+                         f"see {(runtime / 'kern-start.err').as_posix()}")
+            failed = True
+            continue
+        start = runtime / "kern-session-start.json"
+        if start.is_file():
+            world.run([str(binary), "hook", "SessionStart", "--root", str(core_root)], core_root, RESTART_WAIT,
+                      stdin=start)
+        lines.append(f"kern: restarted the core of {where} with {binary.name}, so its components load the "
+                     "moved SE")
+    return lines, failed
+
+
 def guide_sections(guide: Path, name: str, old: Version | None, new: Version | None) -> list:
     """The sections of the guide at `guide` that lead `name` from `old` to `new` (scripts/upgrade_guide.py)."""
     if old is None or new is None or new <= old:
@@ -1958,6 +2003,9 @@ def update(se_root: Path, root: Path | None, local_config: Path | None, world: W
         lines.append(moved)
         if not broke:
             new_se = se.newest
+            restarted, broke = restart_cores(se_root, root, world)
+            lines += restarted
+            failed |= broke
     else:
         lines.append(f"SE: {_v(old_se)}, " + (se.stays if se.stays and se.newest and se.newest > (old_se or (0, 0, 0))
                                               else "current"))

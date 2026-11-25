@@ -96,7 +96,8 @@ fi
 bin=""
 $core && read -r bin 2>/dev/null <"$project/.se/.runtime/kern.path"
 GATE_TOOLS=(issue_write add_issue_comment update_issue_comment create_pull_request update_pull_request
-  pull_request_review_write add_comment_to_pending_review add_reply_to_pull_request_comment)
+  pull_request_review_write add_comment_to_pending_review add_reply_to_pull_request_comment
+  merge_pull_request)
 # Whether the payload's tool is a guarded GitHub write: its last part after `__` (Claude Code,
 # a plugin's server too), else `/` (VS Code) or `-` (Copilot CLI), one of GATE_TOOLS, and its server
 # part, or the payload's mcp_server.name, holding github. Builtins only.

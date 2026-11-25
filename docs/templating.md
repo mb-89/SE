@@ -30,10 +30,10 @@ both.
 | `templates/finding-ref.md` | A finding's reference in a work issue: the run's kind and number and the finding's number in its report. |
 | `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
-| `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
-| `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
+| `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, only its release kind. |
+| `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report, and states its release kind. |
 | `templates/limit-restart.md` | A restart after a usage limit: the worker session the integrator resumed. |
-| `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
+| `templates/merge-message.md` | A merge into the integration branch: `Integrate <branch>` (a release's `Release v<version>`) and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
 | `templates/overhaul-judgment.md` | An overhaul's judged block: a verdict on every rule, what it looked at, the findings and what went well, as JSON under its marker. |
 | `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |

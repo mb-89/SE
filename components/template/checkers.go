@@ -673,14 +673,28 @@ func oneLine(text string) string {
 	return cut + "..."
 }
 
-// mergeReleaseKind is work_tickets.py `merge_release_kind`: the merge states one release kind in
-// its trailer, or it is refused.
-func mergeReleaseKind(_ any, kw map[string]any) (any, error) {
-	commit, subject, message := str(kw["commit"]), str(kw["subject"]), str(kw["message"])
+// statedReleaseKinds is work_tickets.py `stated_release_kinds`: each Release-kind trailer line, else
+// the kind of a field report's **Release kind:**; HTML comments are no statement.
+func statedReleaseKinds(text string) []string {
+	text = htmlComment.ReplaceAllString(text, "")
 	var kinds []string
-	for _, m := range trailerLine.FindAllStringSubmatch(message, -1) {
+	for _, m := range trailerLine.FindAllStringSubmatch(text, -1) {
 		kinds = append(kinds, m[1])
 	}
+	if len(kinds) > 0 {
+		return kinds
+	}
+	if m := releaseKind.FindStringSubmatch(text); m != nil && m[1] != "" {
+		return []string{m[1]}
+	}
+	return nil
+}
+
+// mergeReleaseKind is work_tickets.py `merge_release_kind`: the merge states one release kind, its
+// trailer or a field report's Release kind (statedReleaseKinds), or it is refused.
+func mergeReleaseKind(_ any, kw map[string]any) (any, error) {
+	commit, subject, message := str(kw["commit"]), str(kw["subject"]), str(kw["message"])
+	kinds := statedReleaseKinds(message)
 	if len(kinds) == 1 && in(kinds[0], releaseOrder) {
 		return kinds[0], nil
 	}
@@ -692,11 +706,15 @@ func mergeReleaseKind(_ any, kw map[string]any) (any, error) {
 		}
 		stated = "states " + strings.Join(shown, ", ")
 	}
-	if r := []rune(commit); len(r) > 7 {
-		commit = string(r[:7])
+	which := "this merge"
+	if r := []rune(commit); len(r) > 0 {
+		if len(r) > 7 {
+			r = r[:7]
+		}
+		which = "merge " + string(r)
 	}
-	return nil, refuseWith("Cannot release merge %s (%s): it %s; nothing was written. Before it lands, reword the merge to end with one trailer %s: %s, as %s; one already on the integration branch stays as it is: set project.version by hand in a pull request, which the release then tags as it is",
-		commit, oneLine(subject), stated, releaseTrailer, "major|minor|patch", releaseTrailerHelp)
+	return nil, refuseWith("Cannot release %s (%s): it %s; nothing was written. Before it lands, reword the merge to end with one trailer %s: %s, as %s; one already on the integration branch stays as it is: set project.version by hand in a pull request, which the release then tags as it is",
+		which, oneLine(subject), stated, releaseTrailer, "major|minor|patch", releaseTrailerHelp)
 }
 
 // review.py: the review report.

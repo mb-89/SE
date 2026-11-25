@@ -45,6 +45,10 @@ routes there, the plugin's as much as the checkout's own (`serves`).
   request ports through `requests`. A call kern refuses before it says anything runs
   directly, the file-based hand-off, and says that it fell back (`fell_back`); one that fails on
   the way is reported, never run twice.
+- **Fresh:** a component answers only with the code on disk (`Code`): before each call it compares
+  SE's version and the digest of each script it imported with the files; where one changed, it
+  reloads them and says so in one line, and where it cannot (another of its calls still runs, or
+  this run loop itself changed) it refuses with `STALE`, and the command runs directly, saying so.
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
   kern's Python SDK and `scripts/` on the path and runs `python -m kern run components/<name>`.
 - **Discovered:** `se_components.py commands [--json] [--root DIR]` lists every command the
@@ -725,44 +729,192 @@ def run_main(main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
 
 def attach(name: str, scripts: str | Iterable[str], folder: Path):
     """The component of that name in `folder`, each declared command answered by the main of the
-    script it names first (`timeline.py`, `deck.py build`), one of `scripts`."""
+    script it names first (`timeline.py`, `deck.py build`), one of `scripts`, as that script stands
+    on disk at the call (`Code`)."""
     sdk()
     import kern
 
     comp = kern.component(name, folder)
     scripts = (scripts,) if isinstance(scripts, str) else tuple(scripts)
 
-    def stepped(module, words: list[str]):
+    def stepped(script_name: str, words: list[str]):
         def run(args: list[str], inputs, say):
             cwd = None
             if args and args[0].startswith(CWD):
                 cwd, args = args[0][len(CWD):], args[1:]
-            return Stepped(comp, module.main, [*words, *args], cwd, say, " ".join(words)).result()
+            module = code.enter(script_name, say)
+            try:
+                step = Stepped(comp, module.main, [*words, *args], cwd, say, " ".join(words),
+                               code.leave)
+            except BaseException:
+                code.leave()
+                raise
+            return step.result()
         return run
 
-    def answer(module, words: list[str]):
+    def answer(script_name: str, words: list[str]):
         def run(args: list[str], inputs, say):
             cwd = None
             if args and args[0].startswith(CWD):
                 cwd, args = args[0][len(CWD):], args[1:]
-            code, out, err = run_main(module.main, [*words, *args], cwd, abandon=kern.abandoned())
-            if code:  # the core answers a failed step's error alone, without its lines
-                raise kern.KernError(f"exit code {code}\n" + json.dumps({"stdout": out, "stderr": err}))
+            module = code.enter(script_name, say)
+            try:
+                code_, out, err = run_main(module.main, [*words, *args], cwd,
+                                           abandon=kern.abandoned())
+            finally:
+                code.leave()
+            if code_:  # the core answers a failed step's error alone, without its lines
+                raise kern.KernError(f"exit code {code_}\n" + json.dumps({"stdout": out, "stderr": err}))
             for line in err.splitlines():
                 say(line)
             return out.rstrip("\n")
         return run
 
+    attached = []
     for command in comp.decl.commands:
         first, *words = command.split()
         if first.removesuffix(".py") not in scripts or not first.endswith(".py"):
             raise kern.KernError(f"component {name} declares {command!r}, which "
                                  f"{' nor '.join(s + '.py' for s in scripts)} does not run")
-        module = importlib.import_module(first.removesuffix(".py"))
+        script_name = first.removesuffix(".py")
+        module = importlib.import_module(script_name)
+        attached.append(module)
         streamed = " ".join(words) in {*getattr(module, "STREAMED_COMMANDS", ()),
                                        *getattr(module, "WRITING_COMMANDS", ())}
-        comp.command(command)((stepped if streamed else answer)(module, words))
+        comp.command(command)((stepped if streamed else answer)(script_name, words))
+    code = Code(name, attached)
     return comp
+
+
+# Fresh.
+
+#: The first words of a component's refusal to answer with code older than the code on disk:
+#: routed and streamed_call run the command directly with the code on disk (`Code`).
+STALE = "SE's code changed"
+#: Where a scripts folder's SE version lives: [project] version of the se.toml beside it.
+VERSION_FILE = "se.toml"
+
+
+def se_version(folder: Path) -> str:
+    """SE's version for a scripts folder: `[project] version` of the se.toml in its parent, or
+    "" where there is none."""
+    import tomllib
+
+    try:
+        with (folder.parent / VERSION_FILE).open("rb") as file:
+            return str(tomllib.load(file).get("project", {}).get("version", ""))
+    except (OSError, ValueError):
+        return ""
+
+
+def digest(path: Path) -> str:
+    """The SHA-256 of a file's bytes, or "" where it cannot be read (removed)."""
+    import hashlib
+
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+class Code:
+    """The code one component's process answers with: SE's version and the digest of each script
+    it imported from its scripts' folders, recorded as it loaded them. Before each call (`enter`)
+    it compares them with the files on disk; where one differs, it drops every module of that
+    folder, imports the component's scripts anew and says so in one line, so the call answers with
+    the code on disk. kern places a component's process once and never restarts it, so the reload
+    happens in the process. Where it cannot reload, it refuses the call (`STALE`) and the command
+    runs directly with the code on disk: another call of the component still runs on the old code,
+    whose modules a reload would swap under it, or the run loop itself changed (se_components.py,
+    which holds the running calls). `se_start.py update` restarts the core once it moves SE."""
+
+    def __init__(self, name: str, modules: Iterable):
+        self.name = name
+        modules = tuple(modules)
+        self.scripts = tuple(dict.fromkeys(m.__name__ for m in modules))
+        self.folders = tuple(dict.fromkeys(Path(m.__file__).resolve().parent for m in modules))
+        self.lock = threading.RLock()
+        self.calls = 0
+        self.versions = {folder: se_version(folder) for folder in self.folders}
+        self.files: dict[Path, str] = {}
+        self.note()
+
+    def loaded(self) -> dict[str, Path]:
+        """Each module this process imported from the component's folders, by name."""
+        found = {}
+        for name, module in list(sys.modules.items()):
+            file = getattr(module, "__file__", None)
+            if file and Path(file).resolve().parent in self.folders:
+                found[name] = Path(file).resolve()
+        return found
+
+    def note(self) -> None:
+        """Record the digest of each module first seen since the last record: those the
+        component's scripts imported later, inside a function."""
+        for path in self.loaded().values():
+            if path not in self.files:
+                self.files[path] = digest(path)
+
+    def changes(self) -> list[str]:
+        """What differs on disk from what this process loaded: each script by its name, and SE's
+        version as `SE <old> -> <new>`."""
+        said = [f"SE {self.versions[folder] or '?'} -> {now or '?'}" for folder in self.folders
+                if (now := se_version(folder)) != self.versions[folder]]
+        return said + [path.name for path, was in self.files.items() if digest(path) != was]
+
+    def enter(self, script_name: str, say: Callable[[str], None]):
+        """Before a call: the script's module as it stands on disk, reloaded first where it, a
+        script it imported or SE's version changed (said in one line); a refusal (`STALE`) where
+        it cannot reload. Each enter is ended by one `leave`."""
+        import kern
+
+        with self.lock:
+            self.note()
+            changed = self.changes()
+            if changed:
+                what = ", ".join(changed)
+                if any(Path(name).name == Path(__file__).name for name in changed):
+                    raise kern.KernError(f"{STALE} under component {self.name} ({what}), and its "
+                                         "run loop cannot reload itself: the command runs "
+                                         "directly; se_start.py update restarts the core")
+                if self.calls:
+                    raise kern.KernError(f"{STALE} under component {self.name} ({what}) while "
+                                         f"{self.calls} of its calls still run on the old code: "
+                                         "the command runs directly")
+                self.reload()
+                line = f"se: component {self.name} reloaded SE's code before answering: {what}"
+                print(line, file=sys.stderr, flush=True)
+                say(line)
+            self.calls += 1
+            return sys.modules.get(script_name) or importlib.import_module(script_name)
+
+    def leave(self) -> None:
+        """After a call: one call fewer runs, and what it imported is recorded."""
+        with self.lock:
+            self.calls -= 1
+            self.note()
+
+    def reload(self) -> None:
+        """Drop every module of a folder whose code changed, except this run loop's own, delete
+        the bytecode of each changed file (an edit of the same size within the same second would
+        load it), import the component's scripts anew and record the code they loaded."""
+        changed = {path.parent for path, was in self.files.items() if digest(path) != was}
+        changed |= {folder for folder in self.folders if se_version(folder) != self.versions[folder]}
+        own = Path(__file__).resolve()
+        with _LOADING:
+            for path in [p for p, was in self.files.items() if digest(p) != was]:
+                with contextlib.suppress(OSError, ValueError):
+                    Path(importlib.util.cache_from_source(str(path))).unlink()
+            for name, path in self.loaded().items():
+                if path.parent in changed and path != own and name != "__main__":
+                    sys.modules.pop(name, None)
+            importlib.invalidate_caches()
+            self.files = {p: was for p, was in self.files.items() if p.parent not in changed}
+            for folder in changed:
+                self.versions[folder] = se_version(folder)
+            for name in self.scripts:
+                importlib.import_module(name)
+        self.note()
 
 
 # Routed.
@@ -842,6 +994,8 @@ def routed(script: Path, words: list[str], argv: list[str], interactive: bool,
     failed = str(answer.get("error") or "")
     exit_ = EXIT_ERROR.match(failed)
     if failed and not exit_:  # kern refused the call: no such command, no attach, a timeout
+        if failed.startswith(STALE):  # said: a component never answers with code older than disk's
+            print(f"se: {name} runs directly: {failed}", file=sys.stderr)
         if switch == "on":
             print(f"error: {SWITCH}=on: kern: {failed}", file=sys.stderr)
             return 1
@@ -963,15 +1117,16 @@ class Stepped:
     one waits for a step's answer it lets go of the working directory (`Directory.released`).
     Where kern gives the call up (its stop word, `kern.abandoned`), the step waiting for an answer
     fails at once, and so does each step the command asks after, so its thread ends;
-    `STEP_ANSWER_WAIT` only bounds a wait kern never ends."""
+    `STEP_ANSWER_WAIT` only bounds a wait kern never ends. `ended` runs once its thread ends,
+    before its answer goes: its component's `Code` counts the call out."""
 
     def __init__(self, comp, main: Callable[[list[str]], int], argv: list[str], cwd: str | None,
-                 say: Callable[[str], None], key: str):
+                 say: Callable[[str], None], key: str, ended: Callable[[], None] = lambda: None):
         import queue
 
         import kern
 
-        self.comp, self.say, self.key = comp, say, key
+        self.comp, self.say, self.key, self.ended = comp, say, key, ended
         self.out: queue.Queue = queue.Queue()  # ("ask", value) or ("done", (code, out, err))
         self.answers: queue.Queue = queue.Queue()
         self.abandon = kern.abandoned()  # the call this step thread runs
@@ -1011,6 +1166,7 @@ class Stepped:
                 done = run_main(main, argv, cwd, self.say, self.abandon)
         except BaseException as error:  # noqa: BLE001 - the command's thread reports, never dies
             done = (1, "", f"{error}\n")
+        self.ended()  # its component's Code counts it out before its answer goes
         self.out.put(("done", done))
 
     def result(self):

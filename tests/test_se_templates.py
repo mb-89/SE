@@ -1591,3 +1591,79 @@ def test_the_engine_s_fill_with_repo_is_the_tool_s_fill(monkeypatch):
                            "--input-text", "raw", "--fields-json", "{}"]) == 0
     assert handed == [["fill", "work", "--repo", "alice/demo", "--label", "work", "--input-text",
                        "raw", "--fields-json", "{}", "--tree"]]
+
+
+# Merges (se_templates.py's docstring, Merges): every merge into the integration branch states its
+# release kind, the merge call without a message judged as the description GitHub takes.
+
+UNKINDED = "Integrate fix/retro-doc-size-exemption: retro reports are exempt from the size cap.\n"
+KINDED_REPORT = "<!-- se:field-report -->\n**Release kind:** patch — a fix\n<!-- se:field-report:end -->\n"
+KIND_LINE = "Release-kind: major|minor|patch"
+
+
+@pytest.fixture
+def pull(gh):
+    """Pull request #5 into main as GitHub holds it; a test sets its description."""
+    def held(body: str, base: str = "main", title: str = "Integrate feat/x: a change") -> None:
+        gh.documents["pulls/5"] = {"number": 5, "title": title, "body": body, "base": {"ref": base}}
+    return held
+
+
+def merge_payload(project: Path, **given) -> str:
+    return payload("mcp__github__merge_pull_request", project, pullNumber=5, merge_method="squash",
+                   **given)
+
+
+def test_a_merge_without_a_message_is_judged_by_the_description_github_takes(capsys, monkeypatch,
+                                                                             project, gh, pull):
+    pull(UNKINDED)
+    reason = denial(gate(capsys, monkeypatch, merge_payload(project), "--gate", "refuse"))
+    assert "the merge-message template refuses" in reason and f"pr.merge in {OWNER}/{REPO_NAME}" in reason
+    assert "it states no kind" in reason and f"end with one trailer {KIND_LINE}" in reason
+    assert ["api", f"repos/{OWNER}/{REPO_NAME}/pulls/5"] in gh.calls
+    pull(KINDED_REPORT)  # a field report stating its kind: its own marker is no finding
+    assert gate(capsys, monkeypatch, merge_payload(project), "--gate", "refuse") == ""
+
+
+def test_a_merge_with_a_message_is_judged_by_it_and_one_elsewhere_is_free(capsys, monkeypatch,
+                                                                          project, gh, pull):
+    pull(UNKINDED)
+    given = {"commit_title": "Integrate feat/x: a change", "commit_message": "Release-kind: minor"}
+    assert gate(capsys, monkeypatch, merge_payload(project, **given), "--gate", "refuse") == ""
+    given["commit_message"] = "Squashed."
+    assert "it states no kind" in denial(gate(capsys, monkeypatch, merge_payload(project, **given),
+                                              "--gate", "refuse"))
+    pull(UNKINDED, base="next")
+    assert gate(capsys, monkeypatch, merge_payload(project), "--gate", "refuse") == ""
+
+
+def test_a_merge_whose_pull_request_cannot_be_read_is_refused_without_a_message(capsys, monkeypatch,
+                                                                                project, gh):
+    reason = denial(gate(capsys, monkeypatch, merge_payload(project), "--gate", "refuse"))
+    assert "it states no kind" in reason and KIND_LINE in reason
+    log = (project / se_templates.GATE_LOG).read_text(encoding="utf-8")
+    assert "the pull request it merges cannot be read" in log
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr merge 5 --squash",
+    "gh pr merge 5 --squash --subject 'Integrate feat/x' --body-file {file}",
+    f"gh api -X PUT repos/{OWNER}/{REPO_NAME}/pulls/5/merge -f commit_title='Integrate feat/x' "
+    "-F commit_message=@{file}",
+], ids=["gh-pr-merge-bare", "gh-pr-merge-with-body", "gh-api-merge"])
+def test_a_gh_merge_is_judged_like_the_tools_merge(command, capsys, monkeypatch, project, gh, pull):
+    pull(UNKINDED)
+    path = body_file(project, "Squashed.\n", "thin.md")
+    reason = denial(gate(capsys, monkeypatch, shell_payload(command.replace("{file}", path.as_posix()),
+                                                            project), "--gate", "refuse"))
+    assert "the merge-message template refuses" in reason and "it states no kind" in reason
+    if "{file}" in command:
+        path = body_file(project, "Release-kind: patch\n", "good.md")
+        assert gate(capsys, monkeypatch, shell_payload(command.replace("{file}", path.as_posix()),
+                                                       project), "--gate", "refuse") == ""
+
+
+def test_the_hooks_list_of_guarded_tools_is_the_gates():
+    text = HOOK.read_text(encoding="utf-8")
+    listed = text[text.index("GATE_TOOLS=(") + len("GATE_TOOLS=("):]
+    assert listed[:listed.index(")")].split() == list(se_templates.GATE_TOOLS)

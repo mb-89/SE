@@ -350,6 +350,21 @@ kind, which the worker keeps or replaces by what changed.
 - **Public** is what a user of the project relies on: its command-line interfaces, its file formats
   and schemas, and its documented module APIs.
 - Otherwise new behaviour is minor and a fix that changes no public interface is patch.
+- **Every way in states the kind, and nothing defaults it**: nothing lands on the integration
+  branch without stating its kind, whichever way it is merged.
+  - A work pull request states it in its field report's Release kind; a landing pull request
+    (`integrate`) and a release pull request (`release`) in a `Release-kind: <patch|minor|major>`
+    line of their descriptions; the merge itself in its message's one `Release-kind:` trailer.
+  - CI's required `check` refuses a pull request into the integration branch whose description
+    states none, naming the line to add (`<se>/scripts/pr_issues.py --release-kind`, the action
+    `release-kind` every project's check calls, docs/running.md "Workflows"), so GitHub's merge
+    button cannot land it either.
+  - SE's hook judges every merge call against the template `merge-message`, a call without a
+    message as the description GitHub takes (`<se>/scripts/se_templates.py`, Merges).
+  - A landing whose kind is major is refused unless its tree holds the upgrade guide's section for
+    the next major version, naming the section to write; `release` refuses the same.
+  - No command defaults a kind: `release` refuses an integration that states none and takes a kind
+    for it only from `release --kind`, stated with its reason.
 - **A change to these rules declares its own kind**: a package that changes how release kinds are
   derived states its kind in its work issue's "Package kind", because its integration runs under
   the rules it replaces (SE#792 was major by its own new rule, but the old `release-trailer` would

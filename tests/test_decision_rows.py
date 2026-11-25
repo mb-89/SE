@@ -95,7 +95,7 @@ def pull(number: int, body_text: str, merged: str | None, head: str, base: str =
 def landing(number: int, work_pull: int, issue: int, merged: str) -> dict:
     text = work_tickets.landing_description(
         f"https://github.com/owner/repo/pull/{work_pull}", work_pull,
-        f"https://github.com/owner/repo/issues/{issue}")
+        f"https://github.com/owner/repo/issues/{issue}", "minor")
     return pull(number, text, merged, f"land/feat/{issue}")
 
 

@@ -3049,6 +3049,9 @@ RELEASE_TRAILER_HELP = (
     "it from the field report in the pull request description"
 )
 INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
+#: The subject of every merge into the integration branch (templates/merge-message.md's title rule):
+#: an integration's, or the release landing's `Release v<version>` (land_release).
+MERGE_SUBJECT_PATTERN = re.compile(r"Integrate [^\s:()]+|Release v\d+\.\d+\.\d+")
 
 
 def breaking_kind(version: tuple[int, int, int] | None) -> str:
@@ -3230,16 +3233,44 @@ def check_branch_tip(root: Path, report_body: str, branch: str, head: str,
     return late
 
 
+RELEASE_KIND_LINE = f"{RELEASE_TRAILER}: {'|'.join(reversed(RELEASE_ORDER))}"
+
+
+def stated_release_kinds(text: str) -> list[str]:
+    """The release kinds `text` states (work model, "Release kind"): each `Release-kind: <kind>`
+    trailer line, else the kind of a field report's `**Release kind:** <kind> — <reason>`; [] where
+    it states none. HTML comments are no statement. The one reader of a stated kind for every way
+    into the integration branch: a merge's message (merge_release_kind), CI's gate on a pull
+    request's description (pr_issues.py --release-kind) and the hook's judgment of a merge call."""
+    text = HTML_COMMENT_PATTERN.sub("", text)
+    kinds = RELEASE_TRAILER_PATTERN.findall(text)
+    if kinds:
+        return kinds
+    report = RELEASE_KIND_PATTERN.search(text)
+    return [report[1]] if report is not None and report[1] else []
+
+
+def stated_release_kind(text: str) -> str | None:
+    """The one known release kind `text` states (stated_release_kinds), None where it states none,
+    two, or one that is none of patch, minor and major."""
+    kinds = stated_release_kinds(text)
+    return kinds[0] if len(kinds) == 1 and kinds[0] in RELEASE_ORDER else None
+
+
 def merge_release_kind(commit: str, subject: str, message: str) -> str:
-    """The release kind an integration merge states in its trailer; refused where it states none."""
-    kinds = RELEASE_TRAILER_PATTERN.findall(message)
-    if len(kinds) == 1 and kinds[0] in RELEASE_ORDER:
-        return kinds[0]
+    """The release kind a merge into the integration branch states (stated_release_kind), its
+    Release-kind trailer or, where GitHub took a field report as the message, the report's Release
+    kind; refused where it states none, naming the line to add. There is no default."""
+    kind = stated_release_kind(message)
+    if kind is not None:
+        return kind
+    kinds = stated_release_kinds(message)
     stated = f"states {', '.join(map(repr, kinds))}" if kinds else "states no kind"
+    which = f"merge {commit[:7]}" if commit else "this merge"
     raise QueueError(
-        f"Cannot release merge {commit[:7]} ({one_line(subject)}): it {stated}; nothing was "
-        f"written. Before it lands, reword the merge to end with one trailer {RELEASE_TRAILER}: "
-        f"{'|'.join(reversed(RELEASE_ORDER))}, as {RELEASE_TRAILER_HELP}; one already on the "
+        f"Cannot release {which} ({one_line(subject)}): it {stated}; nothing was "
+        f"written. Before it lands, reword the merge to end with one trailer {RELEASE_KIND_LINE}, "
+        f"as {RELEASE_TRAILER_HELP}; one already on the "
         "integration branch stays as it is: set project.version by hand in a pull request, which "
         "the release then tags as it is"
     )
@@ -3325,7 +3356,8 @@ def integrated_packages(root: Path, tip: str, released: str,
 
     An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
     integrate writes: the merge it builds, or the one commit that merge landed as; its kind is its
-    Release-kind trailer, and one that states an unknown kind or two is refused. One that states
+    Release-kind trailer, or where GitHub took a field report as its message the report's Release
+    kind (stated_release_kinds), and one that states an unknown kind or two is refused. One that states
     none takes the kind `stated` names for it; without a statement for each such commit the
     release is refused, naming each, as is a statement for a commit that is none of them. Other
     merges release nothing and are named."""
@@ -3348,7 +3380,7 @@ def integrated_packages(root: Path, tip: str, released: str,
             if len(parents.split()) > 1:
                 print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
             continue
-        if RELEASE_TRAILER_PATTERN.findall(message):
+        if stated_release_kinds(message):
             packages.append((match[1], merge_release_kind(commit, subject, message)))
         elif commit in by_commit:
             used.add(commit)
@@ -3499,6 +3531,22 @@ def release(root: Path, branch: str,
     sibling("verdicts").carry(root, SUITE_VERDICT, "HEAD~1", "HEAD")
     print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
     return tag, packages
+
+
+def major_guide_gate(root: Path, trailer: str) -> None:
+    """Refuse a landing whose kind (`trailer`, `Release-kind: <kind>`) is major unless the landing's
+    tree in `root` holds the upgrade guide's section for the version the next release takes
+    (released_version from project.version), naming the section to write: the release would
+    refuse it there (release), so the landing that makes the breaking change writes it."""
+    kind = trailer.partition(":")[2].strip()
+    version = project_version(root)
+    if kind != "major" or version is None:
+        return
+    name = origin_repository_name(root) or root.name
+    refusal = sibling("upgrade_guide").missing(root, name, released_version(version, kind),
+                                               then="deliver it and integrate again")
+    if refusal is not None:
+        raise QueueError(f"Cannot land a major release kind: {refusal}; nothing was merged")
 
 
 def origin_repository_name(root: Path) -> str | None:
@@ -8381,16 +8429,18 @@ def without_tool_footer(body: str) -> str:
     return body
 
 
-def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str,
+def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str, kind: str,
                         metrics_line: dict[str, object] | None = None) -> str:
     """The landing pull request's description: short enough for any tool argument, it names the
-    work issue and the work pull request whose description is the field report, and the marker
-    CI's field-report step reads that report by (.github/workflows/check.yml); it ends in the
-    integration's metrics line, which outlives a cloud integrator's container for `retro.py
-    collect` (docs/running.md "Metrics")."""
+    work issue and the work pull request whose description is the field report, the marker CI's
+    field-report step reads that report by (.github/workflows/check.yml) and the landing's
+    `Release-kind: <kind>` line, the kind its squash commit's trailer carries, so CI's release-kind
+    gate passes it (pr_issues.py --release-kind); it ends in the integration's metrics line, which
+    outlives a cloud integrator's container for `retro.py collect` (docs/running.md "Metrics")."""
     return (f"Refs {issue_url}\n\n"
             f"Lands {work_pull_url}, whose description is the field report.\n\n"
-            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n"
+            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n\n"
+            + release_kind_line(kind) + "\n"
             + (f"\n{metrics.text(metrics_line)}\n" if metrics_line is not None else ""))
 
 
@@ -9454,6 +9504,7 @@ def integrate(
     trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
     try:
+        major_guide_gate(root, kind)
         review_gate(root, branch, base, head, kind, str(work_issue.get("body") or ""), pull_number,
                     remote, relay, handing_off, pr_comments)
     except Exception:
@@ -9530,7 +9581,7 @@ def integrate(
                 f"{landing_desc}--worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
-            issue_url(tracker, work_number), metrics.snapshot())
+            issue_url(tracker, work_number), state["release_kind"], metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
                             then, tracker, record, mode, verdict=verdict)
         door = relay_door(root, remote) if handing_off else None
@@ -12304,14 +12355,23 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
 RELEASE_HANDOFF = "release"  # the hand-off's state, handoff_path's name for a release landing
 
 
-def release_description(tag: str, packages: str) -> str:
+def release_description(tag: str, packages: str, kind: str) -> str:
     """The release landing pull request's description: what the release raises the version by,
-    the integrations since the last release with their kinds. It names no work issue: pr_issues.py
-    exempts the owner's `land/release-v<version>` (docs/settings.md "Project settings")."""
+    the integrations since the last release with their kinds, and the release's
+    `Release-kind: <kind>` line, the highest of them, so CI's release-kind gate passes it
+    (pr_issues.py --release-kind). It names no work issue: pr_issues.py exempts the owner's
+    `land/release-v<version>` (docs/settings.md "Project settings")."""
     return (f"Release {tag}: `work_tickets.py release` raises the version by the highest "
             "Release-kind recorded since the last release, as SE asked (docs/settings.md \"Project "
             f"settings\").\n\nIntegrated since the last release:\n\n"
-            + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip()) + "\n")
+            + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip())
+            + f"\n\n{release_kind_line(kind)}\n")
+
+
+def release_kind_line(kind: str) -> str:
+    """The `Release-kind: <kind>` line a landing or a release states, written through the interface
+    template release-trailer as release_trailer writes it; refused for any other kind."""
+    return interface_message("release-trailer", kind=kind)
 
 
 def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = ()) -> str | None:
@@ -12397,12 +12457,14 @@ def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = 
     title = f"Release {tag}"
     packages = "\n".join([*(f"{name}: {kind}" for name, kind in released[1]),
                           *(statement.line() for statement in stated)])
+    kind = max((kind for _, kind in released[1]), key=RELEASE_ORDER.index)
+    message = f"{packages}\n\n{release_kind_line(kind)}"
     verdict = status_verdict(root, remote, base, landed) if without_ci else None
     state = {"tag": tag, "landing": landing, "target": target, "base": base, "landed": landed,
              "remote": remote, "landing_mode": mode}
     then = (f"work_tickets.py release --read-back {tag} --worktree {root}")
-    plan = landing_plan(remote, landing, target, base, landed, title, packages,
-                        release_description(tag, packages), then, tracker, None, mode,
+    plan = landing_plan(remote, landing, target, base, landed, title, message,
+                        release_description(tag, packages, kind), then, tracker, None, mode,
                         verdict=verdict)
     door = relay_door(root, remote) if handing_off else None
     if handing_off and door is None:
