@@ -484,7 +484,7 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/python-module.md` | `python-module`: a module other scripts import, `scripts/*.py` | code | SE |
 | `templates/python-component.md` | `python-component`: an ad hoc component, what `se component add` writes | code | SE |
 | `templates/go-module.md` | `go-module`: a Go module, its `go.mod`, package and test | code | SE |
-| `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
+| `templates/retro.md` | `retro`: the five steps, whose answers node is the `standing-questions` block | document | SE |
 | `templates/retro-judgment.md` | `retro-judgment`: the retro draft's judged block, checked by `judgment_problems` | block | SE |
 | `templates/retro-deck.md` | `retro-deck`: a retro's or an overhaul's one report, a deck: the title page's lines, the steps, then the decisions | document | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
