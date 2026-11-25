@@ -9006,7 +9006,7 @@ def test_file_labels_the_issue_with_the_repository_it_files_in_through_gh_and_in
     body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)  # without gh: the plan
     monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
-    monkeypatch.setattr(work_tickets, "template_check", lambda *arguments: False)
+    monkeypatch.setattr(work_tickets, "template_check", lambda *arguments, **_: False)
     assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body),
                "--repo", "git.example/owner/obs") == 0
     plan = capsys.readouterr().out

@@ -128,13 +128,21 @@ its tools.
   closed work issues (older ones, from before reports moved there, in their `field-report` issues).
   - It falls due by what comes back ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due)): your next
     `work_tickets.py file` files it first and refuses the issue you meant, naming it. While a
-    retro or an overhaul is open, you file no new issue; running work goes on.
+    retro is running, file no issue; after its report, file only its findings with
+    `work_tickets.py file --finding <retro>:<finding>`.
+
+    Record declined or merged outcomes with `retro.py outcome`; the retro closes when all findings
+    have an outcome. An open overhaul still blocks all filing; running work goes on.
   - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
     name> --number <issue>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
-    session. It asks the person for the field feedback first, runs the template's `retro.py
-    collect` and `retro.py file`, has the person decide every finding, and closes the issue.
-  - When it reports the issue closed, file its work findings: a work issue names each finding it
-    takes as the message `templates/finding-ref.md` writes it, so the next retro scores it.
+    session.
+
+    It runs `retro.py collect`, judges and prepares the deck, then files the report with
+    `retro.py file`.
+
+    When the report is in, file each accepted work finding with `work_tickets.py file --finding`;
+    record declined or merged findings with `retro.py outcome`. A work issue names each finding it takes as the message
+    `templates/finding-ref.md` writes it, so the next retro scores it.
 - **Overhaul issues**, to ask whether the design is still right, fall due after enough retros or
   days ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due)) and are filed the same way, from
   [overhaul.md](../../.github/ISSUE_TEMPLATE/overhaul.md) (`overhaul.py new` files one by hand).

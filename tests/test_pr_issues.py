@@ -108,6 +108,21 @@ def test_a_pull_request_naming_no_issue_is_refused_with_the_remedy(
     assert github.requests == [f"/repos/{REPO}/issues/900"]  # read once as it is now, not found
 
 
+def test_a_retro_report_pull_request_needs_its_open_retro_issue(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    github.issue(50, "retro")
+    github.items[50]["title"] = "retro-due-20261125"
+    body = "Refs #50\n\n<!-- se:retro-report 50 -->"
+    code, out = run(github, tmp_path, body, capsys=capsys)
+    assert code == 0, out
+    assert "Retro report #50: open retro issue" in out
+    assert "passed" in out
+    assert run(github, tmp_path, "Refs #50\n\n", capsys=capsys)[0] == 1
+    github.items[50]["state"] = "closed"
+    code, out = run(github, tmp_path, body, capsys=capsys)
+    assert code == 1 and "is closed, does not count" in out
+
+
 def test_a_closed_or_unlabelled_issue_does_not_count(
         github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     github.issue(5, "work", state="closed")
