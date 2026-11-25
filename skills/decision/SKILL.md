@@ -15,6 +15,16 @@ the agent may not take travels up to the person is the work model's
 [escalation ladder](../work-model/SKILL.md#escalation-ladder); when to ask and how a turn ends are
 SE's hard rules in [catch-up](../catch-up/SKILL.md#hard-rules).
 
+## Ask only real choices
+
+A retro or deck asks the person only real choices. Where one option clearly fixes the finding,
+the agent applies it within its authority and records it, rather than asking for permission to
+do ordinary work. The person: "You don't need to present everything you want to do as questions
+to me." Steps only the person may approve still follow the work model's escalation ladder.
+
+That an option leaves some other problem unsolved is not a loss of that option. Its losses name
+harm or a trade-off it causes, not unrelated work it does not do.
+
 ## The decision note
 
 One Obsidian Markdown note per decision. Its reader must understand the problem before they see

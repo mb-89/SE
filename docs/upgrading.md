@@ -412,6 +412,18 @@ On main, released as 17.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/upgrade_guide.py show --guide docs/upgrading.md --name <repository> --from <released> --to <next>`
   names the section.
 
+## SE 18
+
+### Session titles put the issue or pull request number before the name
+
+- **Change:** `work_tickets.py session-title` requires `--number` for workers, reviewers and
+  retros, printing `SE/<project>/<role>/<number>/<name>`. A reviewer's name is its PR branch.
+  SE and integrator titles are unchanged.
+- **Steps:** add `--number <issue>` to worker and retro launch commands. For reviewers, pass the
+  PR branch as the topic and `--number <pr>`; rename live sessions to the printed titles.
+- **Check:** `uv run python <se>/scripts/work_tickets.py session-title worker obs-polarion fill-into-polarion-template --number 35`
+  prints `SE/obs-polarion/worker/35/fill-into-polarion-template`.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

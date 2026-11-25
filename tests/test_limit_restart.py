@@ -95,7 +95,7 @@ def test_only_an_undelivered_in_progress_issue_a_session_names_is_reported():
 
 @pytest.mark.parametrize("branch", [BRANCH, "limited-worker"])
 def test_a_stopped_session_titled_by_the_session_scheme_is_found_by_its_branch(branch):
-    title = work_tickets.session_title("worker", "obs", branch)
+    title = work_tickets.session_title("worker", "obs", branch, "7")
     one, = found([session(result("Usage limit reached"), title=title)], in_progress={7: branch})
     assert one.branch == branch and "session_a" in one.what
 

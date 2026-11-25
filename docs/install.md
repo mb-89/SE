@@ -116,8 +116,8 @@ se agent. Sessions that SE or an integrator starts keep naming their role in the
 which wins. Any other value hands over nothing and the greeting names it.
 
 A running fleet shows in the sidebar as one section, the tag `SE`: SE's own session `SE`, each
-project's integrator `SE/<project>/integrator` with its workers `SE/<project>/worker/<ticket name>`
-under it, and SE's reviewers `SE/<project>/reviewer/<pull request number>` beside it, each title
+project's integrator `SE/<project>/integrator` with its workers `SE/<project>/worker/<number>/<ticket name>`
+under it, and SE's reviewers `SE/<project>/reviewer/<number>/<pr-branch-name>` beside it, each title
 printed by `work_tickets.py session-title` ([Visible sessions](../src/skills/work-model/SKILL.md#visible-sessions)).
 
 The greeting needs no permission rule: the plugin's start hook hands it over, and SE opens its

@@ -1396,8 +1396,9 @@ def session_signals(paths: list[Path], root: Path) -> dict:
 #: The usage fields of a result event, summed per session as its tokens.
 COST_TOKENS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
                "output_tokens")
-#: A title SE's roles give their sessions (work_tickets.py session_title): SE/<repo>/<role>[/<topic>].
-SESSION_TITLE = re.compile(r"SE/(?P<repo>[A-Za-z0-9._-]+)/(?P<role>[a-z]+)(?:/(?P<topic>.+))?")
+#: Includes historical titles so a retro can cost sessions started before numbered titles.
+SESSION_TITLE = re.compile(r"SE/(?P<repo>[A-Za-z0-9._-]+)/(?P<role>[a-z]+)"
+                           r"(?:/(?:(?P<number>[1-9][0-9]*)/)?(?P<topic>.+))?")
 
 
 def result_records(event: object) -> list[dict]:
@@ -1437,9 +1438,10 @@ def cloud_cost(session: dict) -> dict:
 
 def cloud_costs(sessions: list[dict], window: list[Closed]) -> dict:
     """The cloud sessions' costs by their titles: each session SE's roles started (SE/<repo>/
-    <role>[/<topic>]) with its tokens and cost (`cloud_cost`), and the sums per issue, role and
-    repository. A worker's (and every other role's) topic names its issue by the issue's title; a
-    reviewer's names the pull request that delivered or landed one; an integrator's names none. A
+    <role>[/<number>][/<topic>]) with its tokens and cost (`cloud_cost`), and the sums per issue, role and
+    repository. A worker's number names its issue; a reviewer's names the pull request that
+    delivered or landed one. Historical titles use the issue title or PR number as topic. An
+    integrator's names none. A
     session of another title is counted as `other`, never guessed."""
     by_title = {item.title: item.number for item in window}
     by_pull = {pull: item.number for item in window
@@ -1453,8 +1455,13 @@ def cloud_costs(sessions: list[dict], window: list[Closed]) -> dict:
             other += 1
             continue
         topic = match["topic"]
-        issue = (by_pull.get(int(topic)) if match["role"] == "reviewer" and topic and topic.isdigit()
-                 else by_title.get(topic) if topic else None)
+        number = match["number"]
+        if number is not None:
+            issue = (by_pull.get(int(number)) if match["role"] == "reviewer"
+                     else int(number) if int(number) in by_title.values() else None)
+        else:
+            issue = (by_pull.get(int(topic)) if match["role"] == "reviewer" and topic and topic.isdigit()
+                     else by_title.get(topic) if topic else None)
         rows.append({"session": str(session.get("id") or ""), "title": title,
                      "repository": match["repo"], "role": match["role"], "issue": issue,
                      **cloud_cost(session)})

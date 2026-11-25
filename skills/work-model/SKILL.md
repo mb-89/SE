@@ -200,6 +200,8 @@ no procedure but SE's sends the person to a session.
 
 - **One-way ref changes** (force-updating or deleting a branch, moving or deleting a tag) go
   through the repository's `ref-maintenance` workflow, as triples `<old-sha> <new-sha> <ref>`.
+  Accepted work-branch cleanup follows [Visible sessions](#visible-sessions) instead; it needs
+  no new approval.
   1. The integrator pushes the commits the new refs point to, writes the triples to a file and
      runs `work_tickets.py refs request <issue> --triples-file <file>`: it posts the triples on
      the issue, runs the workflow's dry run, posts its output and labels the issue `escalated`.
@@ -526,7 +528,10 @@ session list."
 
 Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
 sidebar shows one SE section, each role's sessions nested under the session that started them.
-`work_tickets.py session-title <role> [<project>] [<topic>]` prints the title, its one owner.
+
+`work_tickets.py session-title <role> [<project>] [<topic>] [--number <number>]` prints the title,
+its one owner. Workers, reviewers and retros require `--number`, the work issue or pull request
+number; it appears before the name in the title.
 
 - **The scheme**: the SE agent's own session is `SE`; `<project>` is the repository's name as
   GitHub spells it (`SE`, `obs`).
@@ -535,10 +540,10 @@ sidebar shows one SE section, each role's sessions nested under the session that
   |---|---|---|
   | The SE agent's own | — | `SE` |
   | A project's integrator | — | `SE/<project>/integrator` |
-  | A worker | below the integrator, started by it | `SE/<project>/worker/<ticket name>` |
+  | A worker | below the integrator, started by it | `SE/<project>/worker/<number>/<ticket name>` |
   | A sub-integrator | below the integrator, started by it | `SE/<project>/integrator/<area>` |
-  | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<pull request number>` |
-  | A retro agent | beside the integrator, started by the SE agent | `SE/<project>/retro/<run's issue name>` |
+  | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<number>/<pr-branch-name>` |
+  | A retro agent | beside the integrator, started by the SE agent | `SE/<project>/retro/<number>/<run's issue name>` |
   | A researcher | beside the integrator, started by the SE agent | `SE/<project>/researcher/<topic>` |
   | A spike | beside the integrator, started by the SE agent | `SE/<project>/spike/<topic>` |
 
@@ -556,13 +561,20 @@ sidebar shows one SE section, each role's sessions nested under the session that
   has it. It removes no tag.
 - **Finding sessions**: a role finds the sessions it started with `list_sessions` and
   `children: true`; one it did not start, such as an earlier SE session's integrator, by its exact
-  title (`SE/<project>/integrator`, `SE/<project>/worker/<ticket name>`). Never by tag:
+  title (`SE/<project>/integrator`, `SE/<project>/worker/<number>/<ticket name>`). Never by tag:
   `list_sessions` refuses a tag filter from inside a session.
 - **Reorganizing**: on the person's request, the SE agent renames existing sessions of SE's work
   to the scheme and adds the tag `SE`, and tells the person which it renamed.
   - It removes only the tags SE's earlier prompts gave (`se:worker:*`, `se:issue:*`,
     `se:integrator:*`, `se-track-b`), never another, such as the host's `config:*` or `cowork-*`.
   - It cannot move a session under another parent, and says so where the person asks for that.
+- **Clean up immediately on acceptance**: the integrator that lands a worker's pull request
+  archives its session and removes its worktree and local and remote branch at once, even if the
+  landing leaves its issue open. Use the safe removal procedure in [Worktrees](#worktrees).
+
+  SE archives a reviewer's session once its review is posted, and a retro's session once the person
+  has answered and nothing more is needed from that session; SE retains the answers and draft paths
+  for mechanical filing and closing. Never keep a session "in case": its files survive archiving.
 
 ### Suite at a moved pin
 
@@ -618,8 +630,7 @@ Pull requests built on an old `main` cause most integration trouble.
 - At most `[workers]` working agents run at once, 4 on a local device by default, the cloud open
   unless set ([docs/settings.md "Workers"](../../docs/settings.md#workers)); a local device also counts its CPU
   cores and memory. File clashes and the serial merge queue apply everywhere.
-- An integrated worker session is deleted once its branch is on `main` and its worktree is
-  removed; a session is kept only while it holds an unresolved discussion with a handover issue.
+- Accepted work follows [Visible sessions](#visible-sessions)' immediate cleanup rule.
 
 ## Worktrees
 
@@ -1125,7 +1136,7 @@ harnesses.
   - Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker',
     '--trust-folder','--no-ask-user','--allow-tool=<list>','-n','<title>','-p','<prompt>'
     -RedirectStandardOutput <worktree>\.se\worker.log -WindowStyle Hidden`.
-  - `<title>` is the worker's title, `session-title worker <project> <branch>`, the `title=` of
+  - `<title>` is the worker's title, `session-title worker <project> <branch> --number <issue>`, the `title=` of
     `start`'s `Launch worker:` line.
   - `<list>` holds the worker's tools: its shell, its file edits and the `se` server.
   - `--trust-folder`: project MCP servers and hooks load only in a trusted folder.

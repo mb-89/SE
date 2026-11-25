@@ -5908,7 +5908,7 @@ def name_refusal(name: str) -> str:
 # Visible sessions (work model, "Visible sessions"): every session SE's roles start carries the tag
 # SESSION_TAG and a title by this scheme, so the host's sidebar shows one SE section. The SE agent's
 # own session is `SE`; a project's integrator `SE/<project>/integrator`, a sub-integrator
-# `SE/<project>/integrator/<area>`; every other role `SE/<project>/<role>/<topic>`, a worker's topic
+# `SE/<project>/integrator/<area>`; issue/PR roles add their number before the topic, a worker's topic
 # being its ticket name exactly as the name rule accepts it (fleet-check finds it by its branch).
 SESSION_TAG = "SE"
 #: Each role a session title names, and whether its topic is refused, optional or required.
@@ -5916,17 +5916,26 @@ SESSION_ROLES = {"se": "refused", "integrator": "optional", "worker": "required"
                  "reviewer": "required", "retro": "required", "researcher": "required",
                  "spike": "required"}
 SESSION_TOPICS = {"integrator": "an area", "worker": "its ticket name",
-                  "reviewer": "the pull request's number", "retro": "its run's issue name",
+                  "reviewer": "the pull request's branch name", "retro": "its run's issue name",
                   "researcher": "a topic", "spike": "a topic"}
 
 
-def session_title(role: str, project: str | None = None, topic: str | None = None) -> str:
+def session_title(role: str, project: str | None = None, topic: str | None = None,
+                  number: str | None = None) -> str:
     """The title of a session SE's `role` starts for `project` (the repository's name as GitHub
     spells it) and `topic`; refused, naming the remedy, for an unknown role, a missing or extra
     project or topic, or a topic outside the name rule."""
     if role not in SESSION_ROLES:
         raise QueueError(f"session-title: unknown role {role!r}: give one of "
                          f"{', '.join(SESSION_ROLES)} (work model, Visible sessions)")
+    numbered = role in ("worker", "reviewer", "retro")
+    if numbered:
+        if number is None or not re.fullmatch(r"[1-9][0-9]*", number):
+            raise QueueError(f"session-title: a {role} needs its issue or pull request number: "
+                             "give --number with a positive integer (work model, Visible sessions)")
+    elif number is not None:
+        raise QueueError(f"session-title: a {role} takes no issue or pull request number: "
+                         "omit --number (work model, Visible sessions)")
     rule = SESSION_ROLES[role]
     if rule == "refused":
         if project is not None or topic is not None:
@@ -5945,17 +5954,12 @@ def session_title(role: str, project: str | None = None, topic: str | None = Non
             raise QueueError(f"session-title: a {role}'s title names {SESSION_TOPICS[role]}: give "
                              "it after the project (work model, Visible sessions)")
         return f"{SESSION_TAG}/{project}/{role}"
-    if role == "reviewer":
-        if not re.fullmatch(r"[1-9][0-9]*", topic):
-            raise QueueError(f"session-title: a reviewer's topic is the pull request's number, "
-                             f"not {topic!r}: give the number alone, such as `1447` "
-                             "(work model, Visible sessions)")
-    else:
-        refusal = name_refusal(topic)
-        if refusal or topic != topic.strip():
-            raise QueueError(f"session-title: a {role}'s topic is {SESSION_TOPICS[role]}, and "
-                             + (refusal or f"{topic!r} has surrounding spaces; drop them"))
-    return f"{SESSION_TAG}/{project}/{role}/{topic}"
+    refusal = name_refusal(topic)
+    if refusal or topic != topic.strip():
+        raise QueueError(f"session-title: a {role}'s topic is {SESSION_TOPICS[role]}, and "
+                         + (refusal or f"{topic!r} has surrounding spaces; drop them"))
+    suffix = f"{number}/{topic}" if numbered else topic
+    return f"{SESSION_TAG}/{project}/{role}/{suffix}"
 
 
 ROUTED_FROM_PATTERN = re.compile(r"^Routed from: (.+?)[ \t]*$", re.MULTILINE)
@@ -12635,7 +12639,7 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
         url, branch = str(issue.get("url")), str(issue.get("title", ""))
         sent = True
     if path is not None:
-        title = session_title("worker", repo.rsplit("/", 1)[-1], branch)
+        title = session_title("worker", repo.rsplit("/", 1)[-1], branch, str(args.issue))
         print(f"Launch worker: agent=worker issue={url} worktree={path} title={title}")
     print(f"Started #{args.issue}" if sent else
           f"Started #{args.issue} here; run the GitHub steps above to label it and post its "
@@ -12705,14 +12709,15 @@ def run_unclaim(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("session-title", "print the title of a session a role starts: `SE`, "
-                         "`SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` "
+                         "`SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<number>/<topic>` "
                          "(work model, Visible sessions)",
          arg("role", choices=tuple(SESSION_ROLES)),
          arg("project", nargs="?", help="the repository's name as GitHub spells it, such as SE"),
-         arg("topic", nargs="?", help="a worker's ticket name, a reviewer's pull request number, "
-                                      "an integrator's area or a topic"))
+         arg("topic", nargs="?", help="a worker's ticket name, a reviewer's branch name, "
+                                      "a retro's issue name, an integrator's area or a topic"),
+         arg("--number", help="required issue or PR number for worker, reviewer and retro"))
 def run_session_title(root: None, args: argparse.Namespace) -> int:
-    print(session_title(args.role, args.project, args.topic))
+    print(session_title(args.role, args.project, args.topic, args.number))
     return 0
 
 
@@ -13321,7 +13326,7 @@ READ_ONLY_COMMANDS = {
     "config": "Shows the repository's and the machine-local settings in effect for a worktree. Use "
               "it when a command does not behave as expected, to see which settings it read.",
     "session-title": "Prints the title of a session a role starts, by the scheme SE/<project>/"
-                     "<role>/<topic>. Use it before starting a session, to give the host's "
+                     "<role>/[<number>/]<topic>. Use it before starting a session, to give the host's "
                      "session tool its title.",
     "ready": "Lists the ready work issues a session may start now. Use it to choose the next "
              "package to start.",

@@ -1,0 +1,11 @@
+## Learnings
+
+- When changing session titles, follow every consumer, including retro cost attribution, not just
+  fleet discovery. New sessions use the new scheme; historical evidence still needs to attribute
+  sessions recorded under earlier titles.
+- On a Windows checkout, the plugin build tolerates CRLF, but its byte-for-byte tests require
+  canonical generator output. Regenerate those bytes from `se_plugin.expected()` before those
+  checks rather than changing the generator or weakening the tests to hide checkout conversion.
+- Check the publication path before working without a work issue: `work_tickets.py push` requires
+  an intake snapshot even when the person authorized issue-free work. Report that gate upstream;
+  never invent an issue snapshot or bypass the gate with a raw push.

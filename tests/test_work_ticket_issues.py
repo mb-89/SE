@@ -2379,7 +2379,7 @@ def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
     assert run(main_checkout, "start", "5") == 0
     worktree = trees / "feature-example-20261104"
     assert (f"Launch worker: agent=worker issue={URL} worktree={worktree} "
-            f"title=SE/repo/worker/{BRANCH}") in capsys.readouterr().out
+            f"title=SE/repo/worker/5/{BRANCH}") in capsys.readouterr().out
     branch = git_run(worktree, "branch", "--show-current").stdout.strip()
     assert branch == BRANCH
     subject = git_run(worktree, "log", "-1", "--format=%s").stdout.strip()
@@ -2837,7 +2837,7 @@ def test_start_without_gh_prints_the_label_change_and_the_started_comment_as_ste
     assert '"body": "<the issue\'s body with its beat line set to <!-- se:beat ' in steps[3]
     assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in steps[4]
     assert (f"Launch worker: agent=worker issue={URL} worktree={worktree} "
-            f"title=SE/repo/worker/{BRANCH}") in out
+            f"title=SE/repo/worker/5/{BRANCH}") in out
     assert "Started #5 here; run the GitHub steps above" in out
 
 
@@ -8894,16 +8894,20 @@ def test_without_a_local_list_only_the_public_list_runs(worktree, gh, capsys, te
     (("se",), "SE"),
     (("integrator", "SE"), "SE/SE/integrator"),
     (("integrator", "obs", "docs"), "SE/obs/integrator/docs"),
-    (("worker", "obs", "compare-two-builds"), "SE/obs/worker/compare-two-builds"),
-    (("worker", "obs", "feat/table-live-source-20261116"),
-     "SE/obs/worker/feat/table-live-source-20261116"),
-    (("reviewer", "SE", "1447"), "SE/SE/reviewer/1447"),
+    (("worker", "obs", "compare-two-builds", "35"), "SE/obs/worker/35/compare-two-builds"),
+    (("worker", "obs", "feat/table-live-source-20261116", "36"),
+     "SE/obs/worker/36/feat/table-live-source-20261116"),
+    (("reviewer", "SE", "showcase-round-trip-holds", "43"),
+     "SE/SE/reviewer/43/showcase-round-trip-holds"),
+    (("retro", "SE", "retro-due-20261125", "1961"),
+     "SE/SE/retro/1961/retro-due-20261125"),
     (("researcher", "obs", "graph-layouts"), "SE/obs/researcher/graph-layouts"),
     (("spike", "SE", "kern-relay"), "SE/SE/spike/kern-relay"),
 ])
 def test_session_title_names_each_role_by_the_scheme(arguments, title, capsys):
     assert work_tickets.session_title(*arguments) == title
-    assert work_tickets.main(["session-title", *arguments]) == 0
+    cli = [*arguments[:3], "--number", arguments[3]] if len(arguments) == 4 else list(arguments)
+    assert work_tickets.main(["session-title", *cli]) == 0
     assert capsys.readouterr().out == f"{title}\n"
 
 
@@ -8912,12 +8916,16 @@ def test_session_title_names_each_role_by_the_scheme(arguments, title, capsys):
     (("se", "SE"), "give the role alone"),
     (("se", None, "topic"), "give the role alone"),
     (("integrator",), "give the repository's name as GitHub spells it"),
-    (("worker", "owner/obs", "topic"), "give the name without its owner"),
-    (("worker", "obs"), "names its ticket name: give it after the project"),
-    (("reviewer", "SE"), "names the pull request's number"),
+    (("worker", "owner/obs", "topic", "1"), "give the name without its owner"),
+    (("worker", "obs", None, "1"), "names its ticket name: give it after the project"),
+    (("reviewer", "SE", None, "1"), "names the pull request's branch name"),
     (("spike", "SE"), "names a topic"),
-    (("reviewer", "SE", "pr-12"), "give the number alone"),
-    (("worker", "obs", "Compare_Builds"), "keep the words that matter"),
+    (("reviewer", "SE", "branch"), "give --number with a positive integer"),
+    (("worker", "obs", "branch", "0"), "give --number with a positive integer"),
+    (("retro", "SE", "retro-due", "-1"), "give --number with a positive integer"),
+    (("worker", "obs", "branch", "pr-12"), "give --number with a positive integer"),
+    (("integrator", "SE", None, "1"), "omit --number"),
+    (("worker", "obs", "Compare_Builds", "1"), "keep the words that matter"),
     (("integrator", "obs", "one-two-three-four-five-six"), "it has 6 words"),
 ])
 def test_session_title_refuses_what_breaks_the_scheme_naming_the_remedy(arguments, remedy):
@@ -8928,7 +8936,7 @@ def test_session_title_refuses_what_breaks_the_scheme_naming_the_remedy(argument
 
 def test_the_session_title_command_reports_a_refusal(capsys):
     assert work_tickets.main(["session-title", "worker", "obs"]) == 1
-    assert "names its ticket name" in capsys.readouterr().err
+    assert "give --number with a positive integer" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(("line", "post_merge"), [
