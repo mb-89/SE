@@ -618,7 +618,7 @@ Pull requests built on an old `main` cause most integration trouble.
   unless set ([docs/settings.md "Workers"](../../../docs/settings.md#workers)); a local device also counts its CPU
   cores and memory. File clashes and the serial merge queue apply everywhere.
 - An integrated worker session is deleted once its branch is on `main` and its worktree is
-  removed; a session is kept only while it holds an unresolved discussion with a handover issue.
+  removed; a session is kept only while it holds an unresolved discussion.
 
 ## Worktrees
 

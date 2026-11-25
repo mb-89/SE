@@ -1264,3 +1264,19 @@ def test_the_decision_skill_asks_for_plain_english_and_names_no_stock_opening():
         assert stock not in decision, stock
     for path in [*(ROOT / "skills" / "decision").rglob("*.md"), ROOT / "templates" / "decision.md"]:
         assert "one case of" not in normalized(path).lower(), path.relative_to(ROOT).as_posix()
+
+
+#: A text that names a handover kept on GitHub: an issue, its label or its filing.
+HANDOVER_ISSUE = re.compile(r"handover`?\s+(issue|label)|labell?ed\s+`?handover|"
+                            r"file[sd]?\s+(the|a)\s+handover", re.IGNORECASE)
+
+
+def test_no_built_agent_or_skill_names_a_handover_issue():
+    """The handover is the local file .se/handover.md (src/skills/catch-up/SKILL.md "Close"); no
+    agent or skill the build writes files or reads one on GitHub."""
+    built = sorted([*(ROOT / "agents").glob("*.md"), *(ROOT / "skills").rglob("*.md")])
+    assert built
+    named = [f"{path.relative_to(ROOT).as_posix()}: {match.group(0)}" for path in built
+             for match in HANDOVER_ISSUE.finditer(" ".join(path.read_text(encoding="utf-8").split()))]
+    assert named == []
+    assert ".se/handover.md" in normalized(ROOT / "skills" / "catch-up" / "SKILL.md")
