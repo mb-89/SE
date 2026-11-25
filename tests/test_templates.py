@@ -131,12 +131,12 @@ NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "o
 #: The documents a deck is built from (deck.build): the retro's and the overhaul's one report.
 DECKS = ("retro-deck",)
 #: The interface templates with fields: the texts SE's sessions pass to each other.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover",
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker",
               "rules-page", "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc",
               "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart",
               "release-trailer", "review-done", "run-closed")
-#: The templates that claim files (`file.write`): the work issue's body file.
-FILES = ("work-file",)
+#: The templates that claim files (`file.write`): the work issue's body file and the handover.
+FILES = ("work-file", "handover")
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
 #: scaffold writes, each claiming the scripts or modules it shapes.
 CODE_TEMPLATES = ("python-script", "python-module", "python-component", "go-module")
@@ -1061,7 +1061,8 @@ def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tm
     file's and its code templates' scripts and modules among them, and another folder's own."""
     assert templates.main(["list", "--owned", "--tree"]) == 0
     assert capsys.readouterr().out == ("**/go.mod: go-module\n.se/components/*/__init__.py: python-component\n"
-                                       ".se/issues/*.md: work-file\ngo.mod: go-module\n"
+                                       ".se/handover.md: handover\n.se/issues/*.md: work-file\n"
+                                       "go.mod: go-module\n"
                                        "scripts/*.py: python-module\nscripts/*.py: python-script\n")
     write_template(tmp_path, "steps", MINIMAL.format(
         name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
@@ -2118,7 +2119,7 @@ def test_every_whole_document_a_fill_makes_carries_its_templates_marker(catalog)
     filled = [name for name, template in catalog.items()
               if template.example and set(template.actions) & {"issue.create", "comment.create"}
               and not (template.is_adapter or template.message or template.writes_file)]
-    assert {"work", "ticket", "routed", "handover"} <= set(filled)
+    assert {"work", "ticket", "routed"} <= set(filled)
     for name in filled:
         template = catalog[name]
         rendered, _, _ = templates.fill(template, dict(template.example["fields"]), "raw input",

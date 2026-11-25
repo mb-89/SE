@@ -988,12 +988,13 @@ def test_check_files_changed_reads_no_git_where_no_template_claims_a_path(capsys
 WORK_FILE_GLOB = ".se/issues/*.md"
 #: Every glob SE's own templates own: the work issue body file's and the code templates' (sorted).
 SE_OWNED = [("**/go.mod", "go-module"), (".se/components/*/__init__.py", "python-component"),
-            (WORK_FILE_GLOB, "work-file"), ("go.mod", "go-module"), ("scripts/*.py", "python-module"),
+            (".se/handover.md", "handover"), (WORK_FILE_GLOB, "work-file"), ("go.mod", "go-module"), ("scripts/*.py", "python-module"),
             ("scripts/*.py", "python-script")]
 
 
 def test_ses_owned_paths_are_the_work_issue_body_file_and_the_code_templates_and_no_switch_turns_the_file_gate():
-    """SE's own templates claim the work issue body file (work-file) and, through its code templates,
+    """SE's own templates claim the work issue body file (work-file), the handover (handover) and,
+    through its code templates,
     its scripts, its ad hoc components and every go.mod; no `files` switch is left."""
     assert templates.owned(CATALOG) == SE_OWNED
     assert se_templates.claims_a_path(CATALOG)
