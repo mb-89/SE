@@ -1059,6 +1059,11 @@ def sibling(name: str):
         return module
 
 
+def finding_ref(value: str):
+    """Parse a retro finding lazily, after the command modules have finished importing."""
+    return sibling("retro").FindingRef(value)
+
+
 metrics = sibling("metrics")
 trust = sibling("ci_trust")
 feedback = sibling("feedback")
@@ -6636,7 +6641,7 @@ def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> St
 def file_work_issue(
     root: Path, title: str, file: Path | None, blockers: list[int], repo: str | None,
     extra: tuple[str, ...] = (), fields: Path | None = None, hold: bool = False, *,
-    gate: bool = True, ready: bool = True,
+    gate: bool = True, ready: bool = True, finding=None,
 ) -> str:
     """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
     with blockers, link them first and add `ready` last, so the issue is never startable before its
@@ -6653,8 +6658,17 @@ def file_work_issue(
               *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
     refuse_unchecked_filing(repo, "file", body)
-    if gate:
-        filing_check(root, repo, "file")
+    retro = sibling("retro")
+    if finding is not None:
+        if hold:
+            raise QueueError("file --finding cannot use --hold: a held issue is not a finding outcome")
+        match = retro.FINDING_REFERENCE.search(body)
+        if match is None or (int(match[1]), int(match[2])) != (finding.retro, finding.finding):
+            raise QueueError(f"file --finding {finding}: the work issue body must name exactly "
+                             f"`retro #{finding.retro} finding {finding.finding}`")
+    check_door = filing_door(root, repo) if gate or finding is not None else None
+    if gate or finding is not None:
+        filing_check(root, repo, "file", door=check_door, finding=finding)
     first = [label for label in labels if not blockers or label != "ready"]
     if hand_off() and blockers:
         raise QueueError(
@@ -6665,6 +6679,13 @@ def file_work_issue(
     outcome = filed_once(root, repo, "file", title.strip(), body,
                          work_issue_filing(repo, title.strip(), body, first), template="work",
                          hold=hold, given=given)
+    if finding is not None:
+        issue_number = outcome.twin or outcome.lower or outcome.number
+        if issue_number is not None:
+            retro.record_outcome(root, repo, finding, "issue", str(issue_number), check_door)
+        else:
+            print(f"After the issue_write create step returns its issue number, record the outcome "
+                  f"with `retro.py outcome {finding} --issue <number>`.")
     if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
             block(root, outcome.number, blocker, repo)
@@ -6675,8 +6696,8 @@ def file_work_issue(
 
 
 class ReviewDueError(QueueError):
-    """A retro or an overhaul is due or open: SE files no other issue until the person has decided
-    its findings (docs/fleet.md "Retro due")."""
+    """A retro or an overhaul is due or open: only report-state retro findings may be filed
+    until every finding has an outcome (docs/fleet.md "Retro due")."""
 
 
 REVIEW_HELP = 'docs/fleet.md "Retro due"'
@@ -6693,7 +6714,7 @@ def filing_door(root: Path, repo: str):
 
 
 def filing_check(root: Path, repo: str, command: str, door=None,
-                 now: datetime | None = None) -> None:
+                 now: datetime | None = None, finding=None) -> None:
     """The filing check (docs/fleet.md "Retro due"), which every issue SE files passes first: while a
     retro or an overhaul is open, refuse, naming it; where one is due, file it first (the retro
     first where both are, as an overhaul reads the closed retros) and refuse, naming it. Running
@@ -6701,9 +6722,16 @@ def filing_check(root: Path, repo: str, command: str, door=None,
     print the check's command first, for the session to run before the plan."""
     door = door if door is not None else filing_door(root, repo)
     if door is None:
-        print(f"Before filing: run `uv run python {SE_ROOT.as_posix()}/scripts/retro.py due "
-              f"--worktree {root.as_posix()}` and its plan; while it names a retro or an "
-              f"overhaul due or open, file nothing else ({REVIEW_HELP})")
+        if finding is not None:
+            print(f"Before filing finding {finding}, read retro #{finding.retro}'s issue and its "
+                  f"comments through GitHub tools. It must have a "
+                  "`<!-- se:retro-state report findings=<count> -->` marker "
+                  "with this finding in range and no outcome marker for it; after the work issue "
+                  f"is created, run `retro.py outcome {finding} --issue <number>`.")
+        else:
+            print(f"Before filing: run `uv run python {SE_ROOT.as_posix()}/scripts/retro.py due "
+                  f"--worktree {root.as_posix()}` and its plan; while it names a retro or an "
+                  f"overhaul due or open, file nothing else ({REVIEW_HELP})")
         return
     retro = sibling("retro")
     found = retro.countdowns(door, repo, integration_branch(root), root,
@@ -6711,11 +6739,47 @@ def filing_check(root: Path, repo: str, command: str, door=None,
     if found is None:
         raise QueueError(f"work_tickets.py {command}: the filing check could not read GitHub; "
                          f"run `retro.py due --worktree {root.as_posix()}` ({REVIEW_HELP})")
-    held = (f"{command} files no other issue until the person has decided every finding of it in "
-            f"an SE session and it is closed; running work goes on ({REVIEW_HELP})")
+    held = (f"{command} files no other issue until every finding has an outcome and the retro is "
+            f"done; running work goes on ({REVIEW_HELP})")
+    if finding is not None:
+        if command != "file":
+            raise ReviewDueError(f"work_tickets.py {command}: --finding is supported only by file")
+        if found["overhaul"].open:
+            names = ", ".join(f"#{number}" for number in found["overhaul"].open)
+            raise ReviewDueError(f"work_tickets.py file --finding: the overhaul {names} is open; "
+                                 f"file nothing until it is closed ({REVIEW_HELP})")
+        if len(found["retro"].open) != 1 or found["retro"].open[0] != finding.retro:
+            names = ", ".join(f"#{number}" for number in found["retro"].open) or "none"
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
+                                 f"#{finding.retro} is not the only open retro ({names})")
+        state = retro.filing_state(door.comments(finding.retro))
+        if getattr(door, "missing", []):
+            raise QueueError(f"work_tickets.py file --finding {finding}: the retro's comments "
+                             "are missing; read them before filing")
+        if state.phase != "report" or state.findings is None:
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
+                                 f"#{finding.retro} is {state.phase}, not in report state")
+        if finding.finding > state.findings:
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: finding "
+                                 f"{finding.finding} is not in the report (1..{state.findings})")
+        if finding.finding in state.outcomes:
+            kind, value = state.outcomes[finding.finding]
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: already recorded as "
+                                 f"{kind} {value!r}")
+        return
     for kind in ("retro", "overhaul"):
         if found[kind].open:
             names = ", ".join(f"#{number}" for number in found[kind].open)
+            if kind == "retro":
+                states = [retro.filing_state(door.comments(number)) for number in found[kind].open]
+                if getattr(door, "missing", []):
+                    raise QueueError(f"work_tickets.py {command}: comments for retro {names} are "
+                                     "missing; read them before filing")
+                if len(states) == 1 and states[0].phase == "report":
+                    raise ReviewDueError(f"work_tickets.py {command}: retro {names} is in report "
+                                         f"state; file only its findings with `work_tickets.py file "
+                                         f"--finding {names.removeprefix('#')}:<k>`, or record "
+                                         f"declined/merged outcomes with `retro.py outcome`; {held}")
             raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
     for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
         if found[kind].due:
@@ -11456,12 +11520,14 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
                   "labelled off-template and not ready (docs/templating.md \"Templates\")"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
+         arg("--finding", type=finding_ref, metavar="RETRO:FINDING",
+             help="file only this finding of a retro in report state"),
          arg("--label", action="append", default=[], metavar="LABEL",
              help="a further label, such as discovery, repeatable"),
          REPO)
 def run_file(root: Path, args: argparse.Namespace) -> int:
     print(file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo,
-                          tuple(args.label), args.fields, args.hold))
+                          tuple(args.label), args.fields, args.hold, finding=args.finding))
     return 0
 
 

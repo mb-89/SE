@@ -22,10 +22,11 @@ The agents, templates and rules improve from what the window's packages show.
 
 ## Approach
 
-The retro takes six steps, the retro template's (`templates/retro.md`): field feedback, collect,
-the table of what happened, the standing questions with their matrix, classes and homes, and the
-person's decisions. Two commands of se (its README "Work commands") run it, and a judge fills the
-steps and the block between them.
+The retro takes six steps, the retro template's (`templates/retro.md`): collected field feedback,
+collect, the table of what happened, the standing questions with their matrix, classes and homes,
+and the person's decisions. The judge does not ask for or wait on field feedback; it uses the
+record available and writes `None.` when no separate input exists. Two commands of se (its README
+"Work commands") run it, and a judge fills the steps and the block between them.
 Not picked: free-form findings only, and an issue per finding, because only SE files issues, once
 it has read the report.
 
@@ -35,8 +36,8 @@ None.
 
 ## Requirements
 
-1. **Field feedback**: before anything is read, the person says what came back from real use
-   since the last retro; the judge quotes it in step 1 of the draft.
+1. **Field feedback**: the judge uses field feedback already available in the record and does not
+   ask for or wait on more; step 1 says `None.` when no separate input exists.
 2. **Collect**: `uv run python <se>/scripts/retro.py collect <this issue> --out <draft>` writes the
    draft, the retro template's six steps: in step 2 the window's sizes, refusals, escalations,
    suite times, the rule checks, the metrics, the scripts run three or more times, the field
@@ -57,15 +58,17 @@ None.
    judge is unsure or it recurred, `controversial` with its why.
 6. **The person decides** every open class in the session; the judge records the decisions in step
    6, the judged draft lands on the integration branch as the retro doc (`docs/retro-...`), and
-   `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` checks the judgment,
-   posts the report as this issue's closing comment, linking the doc for the facts and the block,
-   and closes it, filing no issue: SE reads the report, bundles the `work` findings into work
-   issues (each naming `retro #<n> finding <k>`) and puts the `decision` findings on the owner's
-   decision list.
+   `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` checks the judgment
+   and posts the report, linking the doc for the facts and the block. The retro stays open in
+   report state: SE files each accepted `work` finding with
+   `work_tickets.py file --finding <retro>:<finding>` (the work issue names
+   `retro #<n> finding <k>`) and records declined or merged findings with `retro.py outcome`.
+   Once every finding has an outcome, the retro becomes done and closes.
 
 ## Acceptance
 
-- [ ] The report, the six steps, is posted here, linking the retro doc, and this issue is closed.
+- [ ] The report, the six steps, is posted here, linking the retro doc; the issue stays open until
+      each finding has an outcome, then closes.
 
 ## Verification
 

@@ -46,7 +46,7 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 | `work_tickets.py body-read` | `work_tickets.py body-read --worktree WORKTREE [--body-file FILE]` | record the work issue's body as read (intake records it; field-report --check and deliver refuse a body changed after it) |
 | `work_tickets.py comments-read` | `work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST` | record the work issue's comments as read: their count and the newest one's id (intake records them; field-report --check and deliver refuse comments after it) |
 | `work_tickets.py escalate` | `work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]` | comment a question on an issue, label it escalated and print the escalation message to send SE, its first line the question (templates/escalation.md) |
-| `work_tickets.py file` | `work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]` | for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked |
+| `work_tickets.py file` | `work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--blocked-by N] [--finding RETRO:FINDING] [--label LABEL] [--repo REPO]` | for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked |
 | `work_tickets.py intake` | `work_tickets.py intake --worktree WORKTREE (--issue ISSUE \| --issue-body FILE \| --outside) [--comments-file FILE] [--repo REPO] [--discovery] [--probe-root PROBE_ROOT]` | read the work issue with gh, or from the files your GitHub tools' answers were saved to, and write its tickets into todo; it lists the comments, each with its author, a line ending [not the repository owner] where the repository's owner account did not write it (scripts/comment_authors.py) |
 | `work_tickets.py paused` | `work_tickets.py paused [--worktree WORKTREE] [--repo REPO]` | whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2 |
 | `work_tickets.py refresh` | `work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]` | re-read the work issue and its comments and report changes; each new or edited comment with its author, marked as intake marks it (--json: byOwner) |
@@ -121,15 +121,17 @@ and the report it files as one comment.
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, deck builds
-its one report, a deck, from the judged draft, file checks the judged draft and closes the retro
-issue with its report, due says whether a retro or an overhaul is due or open.
+its one report, a deck, from the judged draft, file checks the judged draft and moves the retro
+issue to report state, outcome records each finding's disposition, and due says whether a retro or
+an overhaul is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
 | `retro.py deck` | `retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
-| `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
+| `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
+| `retro.py outcome` | `retro.py outcome (--issue ISSUE \| --declined REASON \| --merged-into FINDING) [--worktree WORKTREE] [--repo REPO] RETRO:FINDING` | record a finding's issue, declined or merged outcome on its retro |
 
 #### Overhaul
 

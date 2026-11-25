@@ -20,6 +20,7 @@ fields:
   - name: field_feedback
     kind: text
     required: true
+    none_ok: true
   - name: collect
     kind: text
     required: true
@@ -41,7 +42,7 @@ fields:
     required: true
 example:
   fields:
-    field_feedback: "> The integrator stalled twice on a red suite."
+    field_feedback: "None."
     collect: "Two issues landed; one delivery was refused."
     timeline: "| chapter | steps |\n|---|---|\n| 1 | #11 |"
     matrix: "| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |"
@@ -52,7 +53,7 @@ example:
 
 ## 1. Field feedback
 
-<!-- field_feedback: The person's answer, asked before anything is read: what came back from real use since the last retro, what went well, what cost them time, what they want changed; quoted. -->
+<!-- field_feedback: Relevant field feedback already available in the record; do not ask for or wait on more. Write "None." when no separate input is available. -->
 
 ## 2. Collect
 

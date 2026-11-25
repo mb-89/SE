@@ -10,8 +10,8 @@ issue closed (whose findings it then scores); the rule checks judge that window 
 comes with the field report of the pull request that landed
 it, found through the landing pull request's `<!-- se:field-report-in <n> -->` marker. It writes a
 draft that is a document of the retro template (TEMPLATE_NAME, `templates/retro.md`), its six steps
-(field feedback, collect, the table of what happened, the standing questions with their matrix,
-classes and homes, the person's decisions; `draft`), each step's heading and instruction the
+(available field feedback, collect, the table of what happened, the standing questions with their
+matrix, classes and homes, the person's decisions; `draft`), each step's heading and instruction the
 template's. Step 2, collect, holds
 
 - the sizes: closed, landed, duplicates, escalated;
@@ -30,7 +30,8 @@ template's. Step 2, collect, holds
   every collect runs once its answers are all there;
 
 - the previous retro's findings, each scored: the work issues of the window that name it
-  (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
+  (`retro #<n> finding <k>`), its recorded outcome, whether one closed, and whether the rule check
+  it names broke again
   (recurred); where the overhaul countdown is on (overhaul.py countdown_on), one that an open issue
   takes is too early to score (TOO_EARLY), neither;
 - the previous retro's classes measured again (`class_patterns`): rate before, its findings per
@@ -74,8 +75,9 @@ nothing, a draft whose steps break the retro template (a step or a standing ques
 steps, the judgment in step 5, each class with its home and its state against the tree and each
 finding with its proposed fix and its kind (`work`, which SE bundles into work issues, or
 `decision`, for the owner's decision list), and the person's decisions and what follows in step 6,
-as the retro issue's closing comment, and closes the issue. The facts and the block stay in the committed
-draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
+as a report comment. The issue stays open until every finding has an outcome, and then closes. The
+facts and the block stay in the committed draft, the retro doc, which the comment links at its
+commit (DOC_MARKER) and the next collect
 reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut, each ending
 in its label, the message `templates/retro-part.md` (PART_TEMPLATE).
 
@@ -114,6 +116,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote, unquote
 import se_script
 
 
@@ -154,6 +157,11 @@ JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->
 # FINDING_TEMPLATE (templates/finding-ref.md) the reports write (`finding_reference`); finding one
 # stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
+FINDING_REF_ARGUMENT = re.compile(r"([1-9]\d*):([1-9]\d*)\Z")
+RETRO_STATE = re.compile(r"<!-- se:retro-state (report|done) findings=(\d+) -->")
+RETRO_OUTCOME = re.compile(
+    r"<!-- se:retro-outcome finding=(\d+) kind=(issue|declined|merged) "
+    r"value=([A-Za-z0-9._~%-]+) -->")
 FINDING_TEMPLATE = "finding-ref"
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
 # The draft's parts the deck leaves out, as they repeat what it shows once (SE#1826, requirements 8 and
@@ -276,6 +284,30 @@ class Issue:
     created_at: str = ""
 
 
+@dataclass(frozen=True, init=False)
+class FindingRef:
+    retro: int
+    finding: int
+
+    def __init__(self, value: str) -> None:
+        match = FINDING_REF_ARGUMENT.fullmatch(value)
+        if match is None:
+            raise ValueError(f"{value!r} must be <retro>:<finding>, both positive issue numbers")
+        object.__setattr__(self, "retro", int(match[1]))
+        object.__setattr__(self, "finding", int(match[2]))
+
+    def __str__(self) -> str:
+        return f"{self.retro}:{self.finding}"
+
+
+@dataclass(frozen=True)
+class RetroState:
+    phase: str
+    findings: int | None
+    outcomes: dict[int, tuple[str, str]]
+    marker_phase: str | None
+
+
 @dataclass
 class Pull:
     number: int
@@ -296,6 +328,55 @@ def issue_of(item: dict) -> Issue:
         body=str(item.get("body") or ""),
         updated_at=str(first(item, "updated_at", "updatedAt") or ""),
         created_at=str(first(item, "created_at", "createdAt") or ""))
+
+
+def filing_state(comments: list[dict]) -> RetroState:
+    """The report/finding state recorded on a retro issue, from its machine-marked comments."""
+    states = [match for item in comments
+              if (match := RETRO_STATE.search(str(item.get("body") or "")))]
+    outcomes: dict[int, tuple[str, str]] = {}
+    for item in comments:
+        body = str(item.get("body") or "")
+        for match in RETRO_OUTCOME.finditer(body):
+            finding, kind, value = int(match[1]), match[2], unquote(match[3])
+            previous = outcomes.get(finding)
+            if previous is not None and previous != (kind, value):
+                raise QueueError(f"Retro finding {finding} has conflicting recorded outcomes")
+            outcomes[finding] = (kind, value)
+    if not states:
+        if outcomes:
+            raise QueueError("Retro finding outcomes exist without a recorded report state")
+        return RetroState("running", None, {}, None)
+    phase, total = states[-1][1], int(states[-1][2])
+    if total < 0:
+        raise QueueError("The retro report state has a negative finding count")
+    invalid = sorted(finding for finding in outcomes if finding < 1 or finding > total)
+    if invalid:
+        raise QueueError(f"Retro finding outcome(s) {', '.join(map(str, invalid))} are outside "
+                         f"the report's 1..{total} findings")
+    if phase == "done" and len(outcomes) != total:
+        raise QueueError(f"The retro is marked done with {len(outcomes)} of {total} finding "
+                         "outcomes")
+    return RetroState("done" if phase == "done" or len(outcomes) == total else "report",
+                      total, outcomes, phase)
+
+
+def report_state_comment(phase: str, findings: int) -> str:
+    """The machine-readable state comment on a retro issue."""
+    return f"<!-- se:retro-state {phase} findings={findings} -->"
+
+
+def outcome_comment(finding: int, kind: str, value: str) -> str:
+    """The machine-readable record and readable text for one finding's outcome."""
+    encoded = quote(value, safe="")
+    if kind == "issue":
+        detail = f"Finding {finding}: filed as #{value}."
+    elif kind == "declined":
+        detail = f"Finding {finding}: declined — {value}."
+    else:
+        detail = f"Finding {finding}: merged into finding {value}."
+    return (f"<!-- se:retro-outcome finding={finding} kind={kind} value={encoded} -->\n"
+            f"{detail}")
 
 
 def pull_of(item: dict) -> Pull:
@@ -521,6 +602,11 @@ class ToolDoor:
     def issue(self, number: int) -> dict:
         answer = self.door.ask("issue_read", {"method": "get", "issue_number": number})
         return answer if isinstance(answer, dict) else {}
+
+    def comments(self, number: int) -> list[dict]:
+        answer = self.door.ask("issue_read", {"method": "get_comments", "issue_number": number,
+                                             "perPage": 100})
+        return listed(answer, "comments")
 
 
 def is_retro(issue: Issue) -> bool:
@@ -1163,11 +1249,15 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         return None
 
     previous = None
+    outcomes: dict[int, tuple[str, str]] = {}
     if last is not None:
-        texts = [last.body, *(str(item.get("body") or "") for item in door.comments(last.number))]
+        comments = door.comments(last.number)
+        texts = [last.body, *(str(item.get("body") or "") for item in comments)]
         if door.missing:
             return None
         previous = posted_block(texts, last.number, git_show(root))
+        if previous is not None:
+            outcomes = filing_state(comments).outcomes
     # An issue that takes one of the previous findings and is still open makes it too early to
     # score, where the overhaul countdown is on (overhaul.py countdown_on): only then, and only with
     # findings to score, are the open issues read.
@@ -1185,7 +1275,8 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
                if refusals else None)
     if door.missing:
         return None
-    scored = scored_findings(previous, last.number if last else 0, window, checks, opened)
+    scored = scored_findings(previous, last.number if last else 0, window, checks, opened,
+                             outcomes)
     patterns = class_patterns(previous, issue_texts, root)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
@@ -1499,14 +1590,15 @@ def cost_lines(costs: dict | None) -> list[str]:
 
 
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
-                    checks: dict[str, RuleCheck], opened: list[Issue] = ()) -> list[dict]:
+                    checks: dict[str, RuleCheck], opened: list[Issue] = (),
+                    outcomes: dict[int, tuple[str, str]] | None = None) -> list[dict]:
     """Each finding of the previous retro's block, scored against this window: the work issues
     closed in it or still open (`opened`) that name the finding (`retro #<retro> finding <k>`),
     its state (closed where one of them closed as completed, else TOO_EARLY where one is still
     open: filed after the previous retro's cut-off, it had no time to land; `opened` is empty
     where the overhaul countdown is off, so nothing is too early there; else the reason they
-    closed with, else none) and whether the rule check it names broke again (recurred), which a
-    finding too early to score never is."""
+    closed with, else none), its recorded outcome, and whether the rule check it names broke again
+    (recurred), which a finding too early to score never is."""
     found: list[dict] = []
     for index, finding in enumerate((previous or {}).get("findings") or [], 1):
         if not isinstance(finding, dict):
@@ -1522,11 +1614,15 @@ def scored_findings(previous: dict | None, retro: int, window: list[Issue],
         reasons = [issue.state_reason or "completed" for issue in naming]
         state = ("closed" if "completed" in reasons else TOO_EARLY if still
                  else reasons[0] if reasons else "none")
+        kind, value = (outcomes or {}).get(number, ("", ""))
+        outcome = (f"issue #{value}" if kind == "issue" else
+                   f"declined: {value}" if kind == "declined" else
+                   f"merged into finding {value}" if kind == "merged" else "not recorded")
         check = str(finding.get("check") or "")
         found.append({"finding": number, "title": str(finding.get("title") or ""),
                       "class": str(finding.get("class") or ""), "kind": finding.get("kind"),
                       "check": check, "issues": sorted(issue.number for issue in naming + still),
-                      "state": state,
+                      "state": state, "outcome": outcome,
                       "recurred": state != TOO_EARLY and bool(check) and check in checks
                       and not checks[check].kept})
     return found
@@ -1633,15 +1729,16 @@ def collect_lines(found: Collected) -> list[str]:
     if found.previous:
         lines += ["", f"### The findings of retro #{found.previous['retro']}", ""]
     if scored:
-        lines += ["| finding | class | kind | issues | state | recurred |",
-                  "|---|---|---|---|---|---|"]
+        lines += ["| finding | class | kind | outcome | issues | state | recurred |",
+                  "|---|---|---|---|---|---|---|"]
         for item in scored:
             issues = ", ".join(f"#{number}" for number in item["issues"]) or "none"
             recurred = (("not scored" if item["state"] == TOO_EARLY
                          else "yes" if item["recurred"] else "no") + f" ({item['check']})"
                         if item["check"] else "no check named")
             lines.append(f"| {item['finding']}. {item['title']} | {item['class']} | "
-                         f"{item['kind'] or ''} | {issues} | {item['state']} | {recurred} |")
+                         f"{item['kind'] or ''} | {cell(item['outcome'])} | {issues} | "
+                         f"{item['state']} | {recurred} |")
     elif found.previous:
         lines.append("None.")
     lines += class_lines(found)
@@ -2047,7 +2144,7 @@ def judged_class_lines(classes: list[dict], block: dict, named_only: bool = Fals
 
 def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
            root: Path | None = None) -> str:
-    """The retro's report proper, its closing comment, a document of the retro template: the six
+    """The retro's report proper, a comment documenting the retro template: the six
     steps, the draft `text`'s for steps 1, 3 and 4, the judgment's for steps 5 and 6 (each class
     with its home and its state against the tree at `root`, and its findings, each with its kind),
     and step 2 linking the committed retro doc `doc` at commit `sha` (`url`), which holds the
@@ -2062,11 +2159,13 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     reference = finding_reference("retro", number)
     decided = [str(drafted.get("decisions") or "").strip(),
                "Open classes: " + (", ".join(still) or "none") + ".",
-               f"This retro filed no issue. SE files what the person accepted: it bundles the "
-               f"{WORK} findings ({', '.join(map(str, work)) or 'none'}) into as few work issues "
-               f"as the work needs, each naming `{reference}` for every finding "
-               f"it takes, so the next retro scores it; the {DECISION} findings "
-               f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list."]
+               f"The report is in; the retro stays open until every finding has an outcome. SE "
+               f"files each accepted {WORK} finding with `work_tickets.py file --finding "
+               f"{number}:<k>`, and records a declined or merged finding with `retro.py outcome "
+               f"{number}:<k>`. Each filed work issue names `{reference}` so the next retro can "
+               f"score it. The {WORK} findings are {', '.join(map(str, work)) or 'none'}; the "
+               f"{DECISION} findings are "
+               + (", ".join(map(str, decisions)) or "none") + "."]
     fields = {
         "field_feedback": drafted.get("field_feedback") or "None.",
         "collect": f"The facts (sizes, landed issues, rule checks, metrics, the field reports' "
@@ -2169,18 +2268,116 @@ def posted_block(texts: list[str], number: int, show) -> dict | None:
     return judged(text, number, filed=True)
 
 
-def file_steps(tracker: str, number: int, comments: list[str], what: str = "retro") -> Plan:
-    """The writes: the report as the `what` issue's closing comments, in order, then the
-    close."""
+def file_steps(tracker: str, number: int, comments: list[str], findings: int,
+               what: str = "retro") -> Plan:
+    """The writes: the report and report-state marker; empty reports are also marked done and closed."""
     issues = work_tickets.owner_repo(tracker)
     posts = tuple(Step("comment_issue", "add_issue_comment", {
         **issues, "issue_number": number, "body": comment},
         note=f"Part {index} of {len(comments)}: post the parts in order" if len(comments) > 1
         else "") for index, comment in enumerate(comments, 1))
-    return Plan(f"the report of {what} #{number}", (
-        *posts,
-        Step("close_issue", "issue_write", {**issues, "method": "update", "issue_number": number,
-                                            "state": "closed", "state_reason": "completed"})))
+    posts += (Step("comment_issue", "add_issue_comment", {
+        **issues, "issue_number": number,
+        "body": (report_state_comment("report", findings) + "\n"
+                 f"The report is in; record an outcome for each of its {findings} findings.")}),)
+    if findings == 0:
+        posts += (
+            Step("comment_issue", "add_issue_comment", {
+                **issues, "issue_number": number,
+                "body": report_state_comment("done", findings)}),
+            Step("close_issue", "issue_write", {
+                **issues, "method": "update", "issue_number": number,
+                "state": "closed", "state_reason": "completed"}))
+    return Plan(f"the report of {what} #{number}", posts)
+
+
+def issue_actions(root: Path, tracker: str, door) -> dict:
+    """Run issue writes through the same GitHub door used to read the retro state."""
+    if isinstance(door, ToolDoor):
+        def relay(tool: str):
+            return lambda arguments, _: door.door.ask(
+                tool, {key: value for key, value in arguments.items()
+                      if key not in ("owner", "repo")})
+        return {"comment_issue": relay("add_issue_comment"), "close_issue": relay("issue_write")}
+    return work_tickets.tracker_actions(root, tracker)
+
+
+def record_outcome(root: Path, tracker: str, reference: FindingRef, kind: str, value: str,
+                   door=None) -> None:
+    """Record one finding outcome on its report-in retro, closing it after the last outcome."""
+    door = door if door is not None else work_tickets.filing_door(root, tracker)
+    if door is None:
+        print(f"Record the outcome on retro #{reference.retro}: post "
+              f"`{outcome_comment(reference.finding, kind, value)}`; when every finding has an "
+              "outcome, post its done state marker and close it. Run `retro.py due` afterwards.")
+        return
+    comments = door.comments(reference.retro)
+    if getattr(door, "missing", []):
+        raise QueueError(f"retro.py outcome: GitHub comments for retro #{reference.retro} are "
+                         "missing; read them before recording an outcome")
+    state = filing_state(comments)
+    retro_issue = door.issue(reference.retro)
+    if not retro_issue:
+        raise QueueError(f"retro.py outcome: retro issue #{reference.retro} does not exist")
+    issue_open = str(retro_issue.get("state") or "").lower() == "open"
+    if state.findings is None:
+        raise QueueError(f"retro.py outcome: retro #{reference.retro} is still running; its report "
+                         "must be in before recording outcomes")
+    if reference.finding > state.findings:
+        raise QueueError(f"retro.py outcome: finding {reference.finding} is not in retro "
+                         f"#{reference.retro}'s report (1..{state.findings})")
+    if kind == "issue":
+        issue_number = int(value)
+        work_issue = door.issue(issue_number)
+        if not work_issue:
+            raise QueueError(f"retro.py outcome: work issue #{issue_number} does not exist")
+        labels = {label.lower() for label in label_names(work_issue)}
+        if (str(work_issue.get("state") or "").lower() != "open" or "work" not in labels
+                or not any(int(match[1]) == reference.retro
+                           and int(match[2]) == reference.finding
+                           for match in FINDING_REFERENCE.finditer(str(work_issue.get("body") or "")))):
+            raise QueueError(f"retro.py outcome: #{issue_number} must be an open work issue that "
+                             f"names `retro #{reference.retro} finding {reference.finding}`")
+    if kind == "merged":
+        target = int(value)
+        if target == reference.finding or target > state.findings:
+            raise QueueError(f"retro.py outcome: finding {reference.finding} must merge into a "
+                             f"different finding in 1..{state.findings}")
+    desired = (kind, value)
+    previous = state.outcomes.get(reference.finding)
+    if previous is not None and previous != desired:
+        raise QueueError(f"retro.py outcome: finding {reference.finding} already has outcome "
+                         f"{previous[0]} {previous[1]!r}")
+    issues = work_tickets.owner_repo(tracker)
+    steps = []
+    outcomes = dict(state.outcomes)
+    if previous is None:
+        steps.append(Step("comment_issue", "add_issue_comment", {
+            **issues, "issue_number": reference.retro,
+            "body": outcome_comment(reference.finding, kind, value)}))
+        outcomes[reference.finding] = desired
+    complete = len(outcomes) == state.findings
+    if complete:
+        if state.marker_phase != "done":
+            steps.append(Step("comment_issue", "add_issue_comment", {
+                **issues, "issue_number": reference.retro,
+                "body": report_state_comment("done", state.findings)}))
+        if issue_open:
+            steps.append(Step("close_issue", "issue_write", {
+                **issues, "method": "update", "issue_number": reference.retro,
+                "state": "closed", "state_reason": "completed"}))
+    if not steps:
+        print(f"Retro #{reference.retro} finding {reference.finding} already has this outcome")
+        return
+    plan = Plan(f"record retro #{reference.retro} finding {reference.finding}'s outcome",
+                tuple(steps), (f"retro #{reference.retro} is done and closed" if complete
+                               else f"retro #{reference.retro} remains open for its other findings"))
+    if not isinstance(door, (ToolDoor, GhDoor)):
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
+        print(plan.text())
+        return
+    work_tickets.run_plan(plan, issue_actions(root, tracker, door))
+    print(plan.then)
 
 
 def run_file(args: argparse.Namespace) -> int:
@@ -2202,20 +2399,37 @@ def run_file(args: argparse.Namespace) -> int:
         raise QueueError(f"The report of retro #{args.retro} breaks the retro template, so nothing "
                          "was written: " + "; ".join(refused))
     comments = parts(posted, args.retro)
-    steps = file_steps(tracker, args.retro, comments)
-    if work_tickets.hand_off():
+    steps = file_steps(tracker, args.retro, comments, len(block["findings"]))
+    door = work_tickets.filing_door(root, tracker)
+    if door is None:
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
     else:
-        work_tickets.run_plan(steps, work_tickets.tracker_actions(root, tracker))
-        print(f"Posted the report of retro #{args.retro} as its closing comment and closed it")
+        work_tickets.run_plan(steps, issue_actions(root, tracker, door))
+        status = ("; no findings, so it is done and closed" if not block["findings"]
+                  else "; the retro remains open for finding outcomes")
+        print(f"Posted the report of retro #{args.retro}{status}")
     sizes = ", ".join(f"{len(comment)}" for comment in comments)
     print(f"Retro #{args.retro}: the report in {len(comments)} comment(s) of {sizes} characters "
           f"(limit {COMMENT_LIMIT}), linking {doc} at {sha[:12]} for the facts and the block")
     kinds = [item["kind"] for item in block["findings"]]
     print(f"Retro #{args.retro}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
-          f"{DECISION} finding(s); no issue filed: SE bundles the {WORK} findings into work "
-          f"issues and puts the {DECISION} findings on the owner's decision list")
+          f"{DECISION} finding(s); SE records an outcome for each after the report is in")
+    return 0
+
+
+def run_outcome(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    tracker = work_tickets.resolve_repo(root, args.repo)
+    if args.issue is not None:
+        record_outcome(root, tracker, args.finding, "issue", str(args.issue))
+    elif args.declined is not None:
+        reason = " ".join(args.declined.split())
+        if not reason:
+            raise QueueError("retro.py outcome --declined needs a reason")
+        record_outcome(root, tracker, args.finding, "declined", reason)
+    else:
+        record_outcome(root, tracker, args.finding, "merged", str(args.merged_into))
     return 0
 
 
@@ -2451,9 +2665,10 @@ def run_due(args: argparse.Namespace) -> int:
 COMPONENTS = (sibling("se_components").Group(
     "retro", "Retro",
     "A retro: collect writes its draft from the work since the last one, deck builds its one "
-    "report, a deck, from the judged draft, file checks the judged draft and closes the retro "
-    "issue with its report, due says whether a retro or an overhaul is due or open.",
-    ("collect", "deck", "file", "due")),)
+    "report, a deck, from the judged draft, file checks the judged draft and moves the retro "
+    "issue to report state, outcome records each finding's disposition, and due says whether a "
+    "retro or an overhaul is due or open.",
+    ("collect", "deck", "file", "outcome", "due")),)
 #: The commands that go through kern where it runs (se_components.routed): none, as collect reads
 #: GitHub for minutes and writes the draft, and file writes.
 INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
@@ -2524,14 +2739,13 @@ def make_parser() -> argparse.ArgumentParser:
                               help="the checkout of the repository (default: .)")
     deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
-        "file", help="check a judged retro draft and close the retro issue with its report",
+        "file", help="check a judged retro draft and move the retro issue to report state",
         description="Check the judgment the judge wrote into the draft's block, refusing an "
                     "incomplete one and writing nothing; post the report (each finding with its "
                     f"proposed fix and kind, {WORK} or {DECISION}, and a link to the draft "
                     "committed on the integration branch, which holds the facts and the block) "
-                    f"as the retro issue's closing comment, in numbered parts over {COMMENT_LIMIT} "
-                    "characters, and close it. It files no issue: SE reads the report and files "
-                    "the work.")
+                    f"as comments in numbered parts over {COMMENT_LIMIT} characters, then leave "
+                    "the issue open while SE files, declines or merges each finding.")
     file_command.add_argument("retro", type=int, help="the retro issue's number")
     file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
                               help="the draft retro.py collect wrote, its block judged, "
@@ -2541,6 +2755,23 @@ def make_parser() -> argparse.ArgumentParser:
     file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
                                              "tracker or origin remote)")
     file_command.set_defaults(run=run_file)
+    outcome_command = commands.add_parser(
+        "outcome", help="record a finding's issue, declined or merged outcome on its retro",
+        description="Record one outcome after the retro report is in. The last outcome marks the "
+                    "retro done and closes its issue.")
+    outcome_command.add_argument("finding", type=FindingRef, metavar="RETRO:FINDING",
+                                 help="the retro issue and finding numbers")
+    disposition = outcome_command.add_mutually_exclusive_group(required=True)
+    disposition.add_argument("--issue", type=int, help="the work issue filed for this finding")
+    disposition.add_argument("--declined", metavar="REASON",
+                             help="decline the finding with a reason")
+    disposition.add_argument("--merged-into", type=int, metavar="FINDING",
+                             help="merge it into another finding of the same retro")
+    outcome_command.add_argument("--worktree", default=".",
+                                 help="the checkout of the repository (default: .)")
+    outcome_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
+                                                "tracker or origin remote)")
+    outcome_command.set_defaults(run=run_outcome)
     due_command = commands.add_parser(
         "due", help="say whether a retro or an overhaul is due or open",
         description="Count what came back since the newest retro started (a landing 1, an "

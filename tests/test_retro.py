@@ -1128,6 +1128,49 @@ class FakeTracker:
                 for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
 
 
+def test_record_outcome_closes_only_after_last_finding(monkeypatch, capsys):
+    class Door(retro.GhDoor):
+        missing = []
+
+        def __init__(self):
+            self.given = [{"body": retro.report_state_comment("report", 2)}]
+            self.closed = False
+
+        def comments(self, number):
+            return self.given
+
+        def issue(self, number):
+            if number == 30:
+                return {"number": 30, "state": "open", "labels": [{"name": "retro"}]}
+            if number == 99:
+                return {"number": 99, "state": "open", "labels": [{"name": "work"}],
+                        "body": "retro #30 finding 2"}
+            return {}
+
+    door = Door()
+
+    def actions(root, tracker, _):
+        def comment(arguments, detail):
+            door.given.append({"body": arguments["body"]})
+
+        def close(arguments, detail):
+            door.closed = True
+
+        return {"comment_issue": comment, "close_issue": close}
+
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(retro, "issue_actions", actions)
+    first = retro.FindingRef("30:1")
+    retro.record_outcome(Path("."), REPO, first, "declined", "not needed", door)
+    assert retro.filing_state(door.given).phase == "report"
+    assert door.closed is False
+    retro.record_outcome(Path("."), REPO, retro.FindingRef("30:2"), "issue", "99", door)
+    assert retro.filing_state(door.given).phase == "done"
+    assert door.closed is True
+    assert any("se:retro-state done findings=2" in item["body"] for item in door.given)
+    assert "done and closed" in capsys.readouterr().out
+
+
 def filed(checkout: Path, monkeypatch, text: str) -> list[tuple[str, dict]]:
     """`retro.py file 30` of the draft `text`, committed as the retro doc on main, through gh:
     the writes it made."""
@@ -1140,11 +1183,11 @@ def filed(checkout: Path, monkeypatch, text: str) -> list[tuple[str, dict]]:
     return tracker.calls
 
 
-def test_file_posts_the_report_proper_as_the_closing_comment_and_files_nothing(
+def test_file_posts_the_report_and_leaves_the_retro_open_for_finding_outcomes(
         checkout, monkeypatch, capsys):
     calls = filed(checkout, monkeypatch, judged_draft(checkout))
 
-    assert [name for name, _ in calls] == ["comment_issue", "close_issue"]
+    assert [name for name, _ in calls] == ["comment_issue", "comment_issue"]
     assert all(arguments["issue_number"] == 30 for _, arguments in calls)
     comment = calls[0][1]["body"]
     assert comment.startswith(retro.REPORT_MARKER + "\n# Retro #30: the report\n")
@@ -1155,16 +1198,19 @@ def test_file_posts_the_report_proper_as_the_closing_comment_and_files_nothing(
     assert ("- **2. Make the field report a rule of the rule book** (decision, for the owner's "
             "decision list: it changes a rule; home `src/skills/work-model/") in comment
     assert "- The fake door kept the tests fast." in comment
-    assert "This retro filed no issue." in comment and "`retro #30 finding <k>`" in comment
+    assert "The report is in; the retro stays open until every finding has an outcome." in comment
+    assert "`retro #30 finding <k>`" in comment
     sha = git(checkout, "rev-parse", "origin/main")
     url = f"https://github.com/owner/repo/blob/{sha}/docs/retro-30.md"
     assert f"committed retro doc [docs/retro-30.md]({url}), at {sha[:12]}." in comment
     assert comment.endswith(retro.DOC_MARKER.format(sha=sha, path="docs/retro-30.md") + "\n")
+    assert calls[1][1]["body"] == retro.report_state_comment("report", 2) + "\n" + (
+        "The report is in; record an outcome for each of its 2 findings.")
     assert "#### Sizes" not in comment and retro.BLOCK_MARKER not in comment  # in the doc
     assert retro.JUDGE_BEGIN not in comment and "## Judgment" not in comment
     out = capsys.readouterr().out
     assert f"the report in 1 comment(s) of {len(comment)} characters (limit 65536)" in out
-    assert "1 work and 1 decision finding(s); no issue filed" in out
+    assert "1 work and 1 decision finding(s); SE records an outcome for each" in out
 
 
 def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout, monkeypatch):
@@ -1178,10 +1224,12 @@ def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout
     calls = filed(checkout, monkeypatch, text)
 
     comments = [arguments["body"] for name, arguments in calls if name == "comment_issue"]
-    assert len(comments) == 1 and len(comments[0]) < retro.COMMENT_LIMIT
+    assert len(comments) == 2 and len(comments[0]) < retro.COMMENT_LIMIT
     assert "/blob/" in comments[0] and "docs/retro-30.md" in comments[0]
     assert "a landed issue's row" not in comments[0]
-    assert [name for name, _ in calls][-1] == "close_issue"
+    assert comments[1].startswith("<!-- se:retro-state report findings=")
+    assert [name for name, _ in calls] == ["comment_issue", "comment_issue"]
+    assert calls[-1][1]["body"].startswith("<!-- se:retro-state report findings=")
 
 
 def test_the_doc_marker_is_the_retro_doc_message_and_reads_back():
@@ -1204,6 +1252,36 @@ def test_the_finding_reference_is_the_finding_ref_message_that_collect_finds():
         retro.finding_reference("overhaul", 50, 1)).groups() == ("50", "1")
 
 
+def test_filing_state_is_done_only_after_every_outcome_is_recorded():
+    comments = [{"body": retro.report_state_comment("report", 2)}]
+    assert retro.filing_state(comments).phase == "report"
+    comments.append({"body": retro.outcome_comment(1, "declined", "not needed")})
+    assert retro.filing_state(comments).phase == "report"
+    comments.append({"body": retro.outcome_comment(2, "merged", "1")})
+    assert retro.filing_state(comments).phase == "done"
+    with pytest.raises(work_tickets.QueueError, match="marked done with 0 of 2"):
+        retro.filing_state([{"body": retro.report_state_comment("done", 2)}])
+
+
+def test_finding_argument_is_a_positive_retro_and_finding_pair():
+    assert (retro.FindingRef("30:2").retro, retro.FindingRef("30:2").finding) == (30, 2)
+    for value in ("0:1", "3:0", "3:1:2", "x:1"):
+        with pytest.raises(ValueError, match="must be <retro>:<finding>"):
+            retro.FindingRef(value)
+
+
+def test_the_next_retro_reports_each_finding_outcome():
+    previous = {"findings": [
+        {"finding": 1, "title": "Keep the report open", "class": "C", "kind": "work"},
+        {"finding": 2, "title": "Record an outcome", "class": "C", "kind": "work"},
+        {"finding": 3, "title": "Merge duplicates", "class": "C", "kind": "work"}]}
+    rows = retro.scored_findings(
+        previous, 5, [], {}, outcomes={1: ("issue", "11"), 2: ("declined", "not needed"),
+                                       3: ("merged", "1")})
+    assert [row["outcome"] for row in rows] == [
+        "issue #11", "declined: not needed", "merged into finding 1"]
+
+
 def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkeypatch):
     long = "\n".join(f"Line {index} of a long finding body." for index in range(4000))
     long += "\n" + "x" * 70000  # a line longer than a comment is cut within it, never dropped
@@ -1211,10 +1289,13 @@ def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkey
 
     calls = filed(checkout, monkeypatch, text)
 
-    comments = [arguments["body"] for name, arguments in calls if name == "comment_issue"]
+    all_comments = [arguments["body"] for name, arguments in calls if name == "comment_issue"]
+    comments = all_comments[:-1]
     total = len(comments)
-    assert total > 3 and [name for name, _ in calls] == ["comment_issue"] * total + ["close_issue"]
-    assert all(len(comment) <= retro.COMMENT_LIMIT for comment in comments)
+    assert total > 3 and len(all_comments) == total + 1
+    assert [name for name, _ in calls] == ["comment_issue"] * (total + 1)
+    assert all(len(comment) <= retro.COMMENT_LIMIT for comment in all_comments)
+    assert all_comments[-1].startswith("<!-- se:retro-state report findings=")
     # Each part is unmarked, so the gate takes none for a whole report; file checked the whole.
     assert comments[0].startswith("# Retro #30: the report\n")
     assert not any(retro.REPORT_MARKER in comment or retro.templates().FLEET_MARKER in comment
@@ -1226,6 +1307,7 @@ def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkey
                      enumerate(comments, 1))
     assert "Line 3999 of a long finding body." in joined and "x" * 70000 in joined.replace("\n", "")
     assert retro.DOC_MARKER.split(" {")[0] in comments[-1]
+    assert calls[-1][1]["body"].startswith("<!-- se:retro-state report findings=1 -->")
 
 
 @pytest.mark.parametrize("where", ["outside", "uncommitted", "changed"])
@@ -1253,7 +1335,7 @@ def test_file_refuses_a_draft_main_does_not_hold_and_writes_nothing(checkout, tm
     assert writes == []
 
 
-def test_file_without_gh_prints_the_comment_and_the_close(checkout, monkeypatch, capsys):
+def test_file_without_gh_posts_report_state_and_leaves_findings_open(checkout, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     draft = commit_doc(checkout, judged_draft(checkout))
 
@@ -1262,8 +1344,8 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, monkeypatch,
     out = capsys.readouterr().out
     assert "GitHub plan: the report of retro #30" in out
     assert '1. add_issue_comment {"body": "<!-- se:retro-report -->' in out
-    assert ('2. issue_write {"issue_number": 30, "method": "update", "owner": "owner", '
-            '"repo": "repo", "state": "closed", "state_reason": "completed"}') in out
+    assert '2. add_issue_comment {"body": "<!-- se:retro-state report findings=2 -->' in out
+    assert "issue_write" not in out
     assert "create" not in out.replace("created", "")
 
 
@@ -1291,7 +1373,10 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
                        + json.dumps(block) + "\n```\n", "docs/retro-5.md")
     assert retro.main(["file", "5", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
-    given["comments-5.json"] = [{"body": tracker.calls[0][1]["body"]}]
+    given["comments-5.json"] = [
+        {"body": tracker.calls[0][1]["body"]},
+        {"body": tracker.calls[1][1]["body"]},
+    ]
     for item in given["issues.json"]:
         if item["number"] == 11:
             item["body"] = "Takes retro #5 finding 1."
@@ -1306,29 +1391,57 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
     assert "open-issues.json" not in off.reads
     assert unchanged.previous["findings"][3] == {
         "finding": 4, "title": "Gate the landing on its check run", "class": "C", "kind": "work",
-        "check": "check", "issues": [], "state": "none", "recurred": True}
-    assert ("| 4. Gate the landing on its check run | C | work | none | none | yes (check) |"
+        "check": "check", "issues": [], "state": "none", "outcome": "not recorded",
+        "recurred": True}
+    assert ("| 4. Gate the landing on its check run | C | work | not recorded | none | none | "
+            "yes (check) |"
             in retro.draft(unchanged))
     (checkout / "se.toml").unlink()
 
+    given["comments-5.json"] = [
+        {"body": tracker.calls[0][1]["body"]},
+        {"body": tracker.calls[1][1]["body"]},
+        {"body": retro.outcome_comment(1, "issue", "11")},
+        {"body": retro.outcome_comment(2, "declined", "duplicate")},
+        {"body": retro.outcome_comment(3, "merged", "2")},
+        {"body": retro.outcome_comment(4, "issue", "16")},
+        {"body": retro.report_state_comment("done", 4)},
+    ]
     found = collected(checkout, given)
     assert found.previous["sizes"] == {"closed": 7}
     assert found.previous["findings"] == [
         {"finding": 1, "title": "Name the fake door in every test", "class": "C", "kind": "work",
-         "check": "", "issues": [11], "state": "closed", "recurred": False},
+         "check": "", "issues": [11], "state": "closed", "outcome": "issue #11",
+         "recurred": False},
         {"finding": 2, "title": "Run the check job on every landing", "class": "C",
-         "kind": "work", "check": "check", "issues": [12], "state": "closed", "recurred": True},
+         "kind": "work", "check": "check", "issues": [12], "state": "closed",
+         "outcome": "declined: duplicate", "recurred": True},
         {"finding": 3, "title": "A finding nobody took up yet", "class": "C", "kind": "work",
-         "check": "", "issues": [], "state": "none", "recurred": False},
+         "check": "", "issues": [], "state": "none", "outcome": "merged into finding 2",
+         "recurred": False},
         {"finding": 4, "title": "Gate the landing on its check run", "class": "C", "kind": "work",
-         "check": "check", "issues": [16], "state": "too early to score", "recurred": False}]
+         "check": "check", "issues": [16], "state": "too early to score",
+         "outcome": "issue #16", "recurred": False}]
     text = retro.draft(found)
     assert "### The findings of retro #5" in text
-    assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
-    assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
-    assert ("| 4. Gate the landing on its check run | C | work | #16 | too early to score | "
+    assert ("| 2. Run the check job on every landing | C | work | declined: duplicate | #12 | closed | "
+            "yes (check) |") in text
+    assert ("| 3. A finding nobody took up yet | C | work | merged into finding 2 | none | none | "
+            "no check named |") in text
+    assert ("| 4. Gate the landing on its check run | C | work | issue #16 | #16 | "
+            "too early to score | "
             "not scored (check) |") in text
     assert retro.read_block(text)["findings"] == []
+
+    given["comments-5.json"] = [
+        {"body": tracker.calls[0][1]["body"]},
+        {"body": tracker.calls[1][1]["body"]},
+        {"body": retro.outcome_comment(1, "issue", "11")},
+        {"body": retro.outcome_comment(2, "declined", "duplicate")},
+        {"body": retro.outcome_comment(3, "merged", "2")},
+        {"body": retro.outcome_comment(4, "issue", "16")},
+        {"body": retro.report_state_comment("done", 4)},
+    ]
 
     given["comments-5.json"] = [{"body": retro.DOC_MARKER.format(sha="f" * 40,
                                                                   path="docs/retro-5.md")}]
