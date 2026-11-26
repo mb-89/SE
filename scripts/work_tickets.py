@@ -2825,18 +2825,69 @@ def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
     read = {path for path, _ in new_files if path is not None}
     elsewhere = {
         prose_key(sentence)
-        for path in tracked_paths(root, branch) if path not in read
-        for sentence in authored_sentences(content(path, branch))
+        for path, text in tracked_authored_contents(root, branch, globs)
+        if path not in read
+        for sentence in authored_sentences(text)
     }
     return [(path, sentence) for path, sentence in found if prose_key(sentence) not in elsewhere]
 
 
-def tracked_paths(root: Path, revision: str) -> list[str]:
-    """Each file `revision`'s tree tracks, by `git ls-tree -r`."""
-    listed = run_git(root, "ls-tree", "-r", "-z", "--name-only", revision)
+def tracked_authored_contents(
+    root: Path, revision: str, globs: list[str],
+) -> list[tuple[str, str]]:
+    """The authored files in `revision`, read in one git door call per tree and one batched
+    object read, rather than one `git show` process per file."""
+    listed = run_git(root, "ls-tree", "-r", "-z", revision)
     if listed.returncode != 0:
         raise QueueError(f"Cannot list the files of {revision}: {failure_detail(listed)}")
-    return [path for path in listed.stdout.split("\0") if path]
+    blobs: list[tuple[str, str]] = []
+    for entry in listed.stdout.split("\0"):
+        if not entry:
+            continue
+        metadata, separator, path = entry.partition("\t")
+        fields = metadata.split()
+        if separator and len(fields) == 3 and fields[1] == "blob" and any(
+                authored_content_matches(path, glob) for glob in globs):
+            blobs.append((path, fields[2]))
+    if not blobs:
+        return []
+
+    batch = git_door.run(
+        "cat-file", "--batch", root=root,
+        stdin="".join(f"{object_id}\n" for _, object_id in blobs).encode(),
+        binary=True,
+    )
+    if batch.returncode != 0:
+        detail = batch.stderr.decode("utf-8", "replace").strip()
+        raise QueueError(
+            f"Cannot read authored files at {revision}: {detail or f'git cat-file exited {batch.returncode}'}"
+        )
+
+    contents: list[tuple[str, str]] = []
+    output = batch.stdout
+    offset = 0
+    for path, object_id in blobs:
+        line_end = output.find(b"\n", offset)
+        if line_end < 0:
+            raise QueueError(f"git cat-file --batch returned an incomplete header for {path}")
+        header = output[offset:line_end].split()
+        if (
+            len(header) != 3
+            or header[0].decode("ascii", "replace") != object_id
+            or header[1] != b"blob"
+        ):
+            raise QueueError(f"git cat-file --batch returned an unexpected object for {path}")
+        if not header[2].isdigit():
+            raise QueueError(f"git cat-file --batch returned an invalid size for {path}")
+        start = line_end + 1
+        end = start + int(header[2])
+        if end >= len(output) or output[end:end + 1] != b"\n":
+            raise QueueError(f"git cat-file --batch returned incomplete content for {path}")
+        contents.append((path, output[start:end].decode("utf-8", "replace")))
+        offset = end + 1
+    if offset != len(output):
+        raise QueueError("git cat-file --batch returned unexpected trailing content")
+    return contents
 
 
 def authored_content_matches(path: str, glob: str) -> bool:

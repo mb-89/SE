@@ -25,3 +25,6 @@
 - Prefer `work_tickets.py guard` when checking a report's removed tests and prose, rather than
   composing long inline probes. If introspection is necessary, read the helper's actual name
   first: the test-removal helper is `deleted_test_places`, not `deleted_tests`.
+- Batch authored-content reads when a field-report guard checks a whole tree; one `git show` per
+  tracked path exceeded the delivery timebox. Wrong: start one Git process per file; right: list
+  the matching blobs once and read them with `git cat-file --batch`.
