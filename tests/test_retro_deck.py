@@ -56,7 +56,20 @@ def test_the_built_cover_is_exactly_the_title_and_retro_report_once(tmp_path, ob
     assert retro_deck.build(deck_text(), destination, "copilot") == 0
     page = destination.read_text(encoding="utf-8")
     cover = json.loads(html.unescape(re.search(r'id="running-header-script" data-header-metadata="([^"]*)"', page)[1]))
-    assert list(cover.values()) == ["example: Retro #30", "Retro report"]
+    assert cover == {"title": "example: Retro #30", "document type": "Retro report"}  # no subtitle element
+
+
+@pytest.mark.parametrize("subtitle", ["Retro report", " example:  Retro #30 ", "retro REPORT"])
+def test_a_subtitle_that_repeats_the_title_or_the_document_type_is_left_out(tmp_path, subtitle):
+    """The owner, 26 Nov: "If the document type and the title explain everything, then just don't use a subtitle"."""
+    retro_deck.vault(retro_deck.text("example: Retro #30", subtitle, STEPS, DECISIONS), tmp_path)
+    front = (tmp_path / "manifest.md").read_text(encoding="utf-8").split("---")[1]
+    assert "subtitle" not in front and front.count("Retro report") == 1
+
+
+def test_a_subtitle_that_adds_something_stays(tmp_path):
+    retro_deck.vault(retro_deck.text("Overhaul #31", "rule gen-002, 3 findings", STEPS, DECISIONS), tmp_path)
+    assert 'subtitle: "rule gen-002, 3 findings"' in (tmp_path / "manifest.md").read_text(encoding="utf-8")
 
 
 def test_a_free_form_decision_chapter_is_refused_naming_it():

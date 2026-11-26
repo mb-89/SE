@@ -31,7 +31,7 @@ fields:
     kind: line
     label: Subtitle
     required: false
-    says: "An overhaul's subtitle names its rule and finding counts; a retro has none, as its cover's second line is its document type, `Retro report`."
+    says: "Optional: use one only where the title and the document type do not explain everything; one that repeats either is left out. An overhaul's subtitle names its rule and finding counts; a retro has none, as its cover's second line is its document type, `Retro report`."
   - name: steps
     kind: text
     required: true

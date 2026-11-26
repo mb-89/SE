@@ -10,7 +10,8 @@ the deck holds; this module owns how its text becomes an obs vault and one HTML 
   and deeper), shifted two levels down under the template's `### <heading>`. It refuses, raising
   DeckError, what breaks the template, and every decision that is no note of the decision template
   (templates/decision.md), naming it: the deck's shape comes from the templates, never from the
-  judge. A retro has no subtitle, as its cover's second line is DOCUMENT_TYPE; an overhaul has one.
+  judge. A subtitle is optional: a retro has none, as its cover's second line is DOCUMENT_TYPE, and
+  `vault` leaves out one that repeats the title or the document type; an overhaul's adds its counts.
 - `decision_note(...)` writes a decision chapter's body as the decision template lays it out, and
   ANYTHING_ELSE is a retro's last decision, "Nothing else" its single selectable option.
 - `vault(text, folder)` reads that text back through the template and writes it as obs notes: the
@@ -242,6 +243,8 @@ def vault(written: str, folder: Path, home: str | None = None) -> list[str]:
             if kind == "decision":
                 asked.append(name)
     subtitle = " ".join(str(fields.get("subtitle") or "").split())
+    if subtitle.casefold() in {" ".join(fields["title"].split()).casefold(), DOCUMENT_TYPE.casefold()}:
+        subtitle = ""  # a subtitle that repeats the title or the document type says nothing
     manifest = ["---", f"title: {_yaml(fields['title'])}",
                 *([f"subtitle: {_yaml(subtitle)}"] if subtitle else []),
                 f"document type: {_yaml(DOCUMENT_TYPE)}",
