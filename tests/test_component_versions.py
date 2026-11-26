@@ -485,7 +485,7 @@ WRITE_CASES = (
     "    found = {path.stem: path.read_text() for path in sorted(pathlib.Path('templates').glob('*.md'))}\n"
     "    for name, text in cases(found).items():\n"
     "        pathlib.Path(name).parent.mkdir(parents=True, exist_ok=True)\n"
-    "        pathlib.Path(name).write_text(text)\n")
+    "        pathlib.Path(name).write_text(text, encoding='utf-8', newline='\\n')\n")
 
 
 def fresh_cases(templates: dict[str, str]) -> dict[str, str]:

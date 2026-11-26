@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import locale
 import os
 import subprocess
 import sys
@@ -136,8 +137,8 @@ def child_context(invocation: Invocation) -> Iterator[tuple[io.TextIOWrapper, io
     """This process set up as the child would be: its working directory, environment, standard
     input and output, restored after. One at a time, as they are the process's."""
     with _lock:
-        out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", write_through=True)
-        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", write_through=True)
+        out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", newline="\n", write_through=True)
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", newline="\n", write_through=True)
         given = io.TextIOWrapper(io.BytesIO(invocation.stdin), encoding="utf-8", errors="replace")
         saved = (os.getcwd(), dict(os.environ), sys.stdin, sys.stdout, sys.stderr, list(sys.argv))
         try:
@@ -341,11 +342,20 @@ def completed(invocation: Invocation, answer: Answer) -> subprocess.CompletedPro
     options = invocation.options
     text = bool(options.get("text") or options.get("universal_newlines") or options.get("encoding")
                 or options.get("errors"))
-    encoding = options.get("encoding") or "utf-8"
+    encoding = options.get("encoding") or locale.getpreferredencoding(False)
 
     def shaped(value: str | bytes) -> str | bytes:
-        data = value.encode("utf-8") if isinstance(value, str) else value
-        return data.decode(encoding, options.get("errors") or "strict").replace("\r\n", "\n") if text else data
+        if isinstance(value, bytes):
+            data = value
+        else:
+            output = value.replace("\r\n", "\n").replace("\r", "\n")
+            if os.linesep != "\n":
+                output = output.replace("\n", os.linesep)
+            data = output.encode(locale.getpreferredencoding(False))
+        if not text:
+            return data
+        decoded = data.decode(encoding, options.get("errors") or "strict")
+        return decoded.replace("\r\n", "\n").replace("\r", "\n")
 
     captured = options.get("capture_output")
     stdout = shaped(answer.stdout) if captured or options.get("stdout") == subprocess.PIPE else None

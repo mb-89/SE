@@ -160,6 +160,7 @@ def generate(text: str, path: str, ref: str, repository: str) -> str:
         raise WorkflowError(f"{path}: SE ships no such file; it ships {', '.join(SHIPPED)}")
     if not SHA.match(ref):
         raise WorkflowError(f"{ref}: the pin is a full commit SHA")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     body = text.replace(WORKFLOW_REPOSITORY, repository).replace(WORKFLOW_SHA, ref)
     if path in WHOLE:
         pass

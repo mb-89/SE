@@ -92,7 +92,7 @@ func folderFiles(folder string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		files[name] = string(data)
+		files[name] = normalizeNewlines(string(data))
 	}
 	for _, entry := range entries { // each template manifest's notes, as <folder>/<note>
 		sub := filepath.Join(folder, entry.Name())
@@ -112,7 +112,7 @@ func folderFiles(folder string) (map[string]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			files[entry.Name()+"/"+note.Name()] = string(data)
+			files[entry.Name()+"/"+note.Name()] = normalizeNewlines(string(data))
 		}
 	}
 	return files, nil
@@ -163,7 +163,7 @@ func gitFiles(root string) map[string]string {
 		if err != nil {
 			continue
 		}
-		files[name] = strings.ToValidUTF8(shown, "�")
+		files[name] = normalizeNewlines(strings.ToValidUTF8(shown, "�"))
 		note = note || strings.HasSuffix(name, templateSuffix)
 	}
 	if !note {

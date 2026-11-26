@@ -572,13 +572,15 @@ def test_the_greeting_names_a_running_kern_under_its_first_line(setup, capsys, m
 
 
 @pytest.mark.parametrize(("args", "answer", "line", "stop"), [
-    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting", "/k the core is starting; see "),
+    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting",
+     f"{Path('/k')} the core is starting; see "),
     (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"},
      "kern 0.2.0: failed: kern start: boom", "kern start: boom"),
-    (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see ",
-     "/k the core is not running; see "),
+    (["--kern-bin", "/k"], {"state": "not running"},
+     "kern 0.2.0: failed: not running after its start; see ",
+     f"{Path('/k')} the core is not running; see "),
     (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see ",
-     "/k its status does not answer; see "),
+     f"{Path('/k')} its status does not answer; see "),
 ])
 def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys, monkeypatch, args, answer, line,
                                                                    stop):
