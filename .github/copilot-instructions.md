@@ -20,3 +20,7 @@
 - Prefer `work_tickets.py guard` when checking a report's removed tests and prose, rather than
   composing long inline probes. If introspection is necessary, read the helper's actual name
   first: the test-removal helper is `deleted_test_places`, not `deleted_tests`.
+- Check the field-report draft gate before starting issue-free work: without an intake snapshot it
+  refuses. Report that refusal rather than inventing a snapshot or bypassing the gate.
+- Run focused tests with `-n 0` when another session is running the complete suite, unless testing
+  xdist itself; the default worker count can start many processes and contend with its setup.
