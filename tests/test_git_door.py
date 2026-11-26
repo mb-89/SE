@@ -364,7 +364,7 @@ def test_checkout_detach_and_reset_hard_move_head_and_the_files_to_a_commit(door
 def test_commit_all_takes_the_tracked_files_and_leaves_new_ones(door, tmp_path: Path) -> None:
     root = project(tmp_path)
     commit(root, {"a.txt": "a\n", "b.txt": "b\n"})
-    (root / "a.txt").write_text("a2\n", encoding="utf-8")
+    (root / "a.txt").write_text("a2\n", encoding="utf-8", newline="\n")
     (root / "b.txt").unlink()
     (root / "new.txt").write_text("new\n", encoding="utf-8")
     git(root, "commit", "-qam", "all")

@@ -179,7 +179,7 @@ def test_integrate_lands_and_closes_the_work_issue_over_rest(
     branch = "feature/worker"
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", branch, str(worker))
-    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8", newline="\n")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "Add the worker file")
     git_ok("-C", str(worker), "push", "-q", "origin", branch)

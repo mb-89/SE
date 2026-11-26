@@ -59,8 +59,11 @@ note() { printf '%s se_mcp.sh: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$l
 phys() { # <folder>
   local p w
   p="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
-  if w="$(cd "$1" && pwd -W 2>/dev/null)" && [[ "$w" =~ ^([A-Za-z]):(/.*)?$ ]]; then
-    p="/${BASH_REMATCH[1],,}${BASH_REMATCH[2]}"
+  if w="$(cd "$1" && pwd -W 2>/dev/null)"; then
+    w="${w//\\//}"
+    if [[ "$w" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+      p="/${BASH_REMATCH[1],,}${BASH_REMATCH[2]}"
+    fi
   fi
   printf '%s' "$p"
 }
