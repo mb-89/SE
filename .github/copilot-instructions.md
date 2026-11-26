@@ -50,3 +50,7 @@
   profile path in tracked test source is itself rejected by the public check.
 - Read a maintenance generator's entry point before passing `--help`: a script without an argument
   parser may regenerate unconditionally rather than display usage.
+- Upward delivery notices obey the same recipient-status rule as orders: steer a running chat,
+  queue otherwise, retry `cannotSteer` with the identical queued message, and verify once.
+- When a requested guidance change replaces a protected sentence, update its existing assertion
+  to enforce the new rule and retained safeguards, rather than leaving the old rule in the test.

@@ -101,6 +101,21 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
   (["Retro due"](../../docs/fleet.md#retro-due)).
 
+### Session messages
+
+Before every message, inspect the receiving chat's current status, not just the parent session's.
+This applies upward and downward alike: worker delivery or completion to its integrator,
+integrator reports to SE, and orders sent to a running agent.
+
+Under Copilot, `get_current_session` lists the current session's chats and their statuses;
+use the host's session metadata for a recipient outside that list. A running (`inProgress`)
+recipient takes `send_message` with `delivery: "steer"`; otherwise use `delivery: "queue"`.
+If steering returns `cannotSteer`, resend the identical message with `queue`.
+
+After sending, verify once with `get_session_context` that the message is not pending.
+Pending means delivery is unconfirmed: report that blocker, rather than claiming receipt or
+polling repeatedly. A fallback resend remains the same logical notice, not an extra delivery.
+
 ## Issues
 
 An issue is one package of work: its title is its branch name, and it ends as one merge whose

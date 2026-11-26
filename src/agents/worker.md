@@ -198,8 +198,9 @@ every package, so work issues and session prompts never repeat it.
    refuses your turn's end until an open pull request carries a field report that passes the check
    at the branch tip, and its refusal names what is missing.
 7. **Notify the integrator**, as the last delivery step and only once: a worker whose prompt names
-   an integrator session sends it one queued message (`send_message`, delivery `queue`), the
-   delivery notice `deliver` prints after `Notify <session>:` as it stands.
+   an integrator session sends it the delivery notice `deliver` prints after `Notify <session>:`
+   as it stands, using [Session messages](../skills/work-model/SKILL.md#session-messages):
+   inspect the recipient, steer if running or queue otherwise, then verify delivery once.
 
    It is `field report in PR #<m> for <branch>`, the interface template
    `templates/delivery-notice.md`. No questions, no other messages. A worker whose prompt names

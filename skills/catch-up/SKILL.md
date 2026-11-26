@@ -34,9 +34,10 @@ project's commands and hot files by the project's `AGENTS.md`.
   overlap before dispatch (step 5).
 - **Repository dispatch** follows the [shared rule](../work-model/SKILL.md#roles-and-flow),
   including filing the "Tickets for other repositories" from field reports.
-- To change a running worker's task, edit its work issue or comment on it; workers check it for a change
-  before each ticket and reread it when it changed. `send_message` with `delivery: "steer"` only for urgent corrections (wrong paths,
-  boundary violations).
+- To change a running worker's task, edit its work issue or comment on it; workers check it for a
+  change before each ticket and reread it when it changed. Every message, upward or downward,
+  follows [Session messages](../work-model/SKILL.md#session-messages): inspect the recipient,
+  steer if running or queue otherwise, and verify once.
 - Look at workers only when the user asks ("status") or a pull request is delivered (`queue` lists
   the open ones with a complete field report): `list_sessions`, then the git state of their branch.
 - **In autopilot, put everything the user must read into the `task_complete` summary.** Text written

@@ -732,10 +732,12 @@ def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_comma
             "be attached, each screenshot's row names the command that takes it again.") in report
 
 
-def test_the_work_model_waits_on_a_background_process_by_its_id():
+def test_the_work_model_prefers_completion_events_and_bounds_process_id_fallback():
     shell = normalized(WORK_MODEL).split("## Commands and shell", 1)[1]
-    assert "Wait on a background process by its process id (`kill -0 <pid>`" in shell
-    assert "never by `pgrep -f <pattern>`" in shell
+    assert "Use a background process's completion notification, not a polling loop." in shell
+    assert "With no event interface, a bounded fallback queries only its process id" in shell
+    assert "never a name pattern that might match the waiting shell" in shell
+    assert "record the reason, impact and outcome" in shell
 
 
 def test_the_worker_builds_an_acceptance_build_at_the_new_pin_before_code():
