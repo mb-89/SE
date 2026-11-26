@@ -405,14 +405,23 @@ The deck is a document of the retro-deck template
 ([templates/retro-deck.md](../templates/retro-deck.md)), built with obs
 (`scripts/retro_deck.py`):
 
-- a title page with exactly two lines: `<repository name>: Retro #<n>` and `Retro report`;
+- a title page with exactly two lines: `<repository name>: Retro #<n>` and its document type,
+  `Retro report`, rendered once (a retro has no subtitle);
 - every step the retro ran, one chapter each, each thing once: what was collected, the table of
   what happened (its one table, the chapters of the window), the standing questions with their one
   matrix and the field reports' answers, and the classes with their causes, fixes and
   homes, each naming its findings;
-- then, on the last pages, one decision chapter per finding, each opening with its current
-  situation and asking the person for a bless: their go for a `work` finding, their decision for
-  a `decision` finding; finally, `Anything else?` with `Nothing else` as its only default answer.
+- then, on the last pages, one decision chapter per finding, each a note of the decision template
+  ([templates/decision.md](../templates/decision.md)): its current situation, the problem (its
+  class, cause and home), what others do (the finding's `others`), then the `pugh` fence with the
+  change against keeping what we have;
+- each asks the person for a bless: their go for a `work` finding, their decision for a
+  `decision` finding;
+- finally, `Anything else?`, a decision note too, with `Nothing else` as its only selectable
+  default and its comment for anything else.
+
+A decision chapter that is no decision note is refused, naming it: the deck's shape comes from
+the templates, never from the judge.
 
 A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
 
@@ -470,7 +479,8 @@ collect` does.
 - `looked_at`, every part answered (`outside`, `consistency`, `rules`, `retro`, `speed`,
   `mechanize`, `removal`; "nothing to change" is an answer);
 - `findings`, each with `title` (five words or more), `body`, `rule` (a rule's id, or `new`),
-  `place` (the file it changes), `controversial` with its `why`, and optionally `sources`;
+  `place` (the file it changes), `controversial` with its `why`, optionally `sources`, and for
+  the deck `others` (how two or more outside tools or conventions solve the same problem);
 - `went_well`.
 
 It refuses, writing nothing, an incomplete judgment: a rule without a verdict, an empty

@@ -8,7 +8,11 @@ the deck holds; this module owns how its text becomes an obs vault and one HTML 
 - `text(title, subtitle, steps, decisions)` renders the template from the run's parts: each step and
   each decision a `(heading, body)` pair, the body written as a chapter note's (its own headings `##`
   and deeper), shifted two levels down under the template's `### <heading>`. It refuses, raising
-  DeckError, what breaks the template.
+  DeckError, what breaks the template, and every decision that is no note of the decision template
+  (templates/decision.md), naming it: the deck's shape comes from the templates, never from the
+  judge. A retro has no subtitle, as its cover's second line is DOCUMENT_TYPE; an overhaul has one.
+- `decision_note(...)` writes a decision chapter's body as the decision template lays it out, and
+  ANYTHING_ELSE is a retro's last decision, "Nothing else" its single selectable option.
 - `vault(text, folder)` reads that text back through the template and writes it as obs notes: the
   manifest, whose front matter makes the title page (obs's cover: the title, the subtitle and
   DOCUMENT_TYPE, `obsHtml.pages` with the cover), one note per step in order, then one note per
@@ -26,13 +30,15 @@ the deck holds; this module owns how its text becomes an obs vault and one HTML 
 The engine has no title page, no table field and no data inside a fence (docs/what-should-be-templates.md,
 C2, C6 and C10); the deck needs none of them from it. The title page is the template's two label lines,
 which `vault` writes as obs's cover metadata; the tables are Markdown inside the step's text, which obs
-renders; the decisions are bless chapters, no `pugh` fence.
+renders; each decision is a decision note with its `pugh` fence, built by scripts/deck.py as every
+other deck of the person's is.
 """
 
 from __future__ import annotations
 
 import contextlib
 import io
+import json
 import re
 from datetime import datetime, timezone
 import shutil
@@ -52,6 +58,8 @@ DOCUMENT_TYPE = "Retro report"
 CHAPTER = 3
 #: What the template's decisions hold where the run brings no finding.
 NONE = "None."
+#: The template every decision chapter is a note of.
+DECISION_TEMPLATE = "decision"
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->[ \t]*\n?", re.DOTALL)
 
@@ -69,6 +77,70 @@ class DeckError(ValueError):
 def template():
     """The retro-deck template, as SE's checkout holds it."""
     return templates.own(TEMPLATE_NAME)
+
+
+def decision_note(situation: str, problem: str, others: str, criteria: list[dict],
+                  candidates: list[dict], datum: str) -> str:
+    """A decision chapter's body as the decision template lays it out: its sections in the template's
+    order, then the options as obs's `pugh` fence, each criterion and option one JSON line (valid YAML)."""
+    def lines(items: list[dict]) -> str:
+        return "\n".join(f"  - {json.dumps(item, ensure_ascii=False)}" for item in items)
+    texts = dict(zip(("situation", "problem", "others"), (situation, problem, others)))
+    sections = [f"## {field.heading}\n\n{' '.join(str(texts[field.name]).split())}".rstrip()
+                for field in templates.own(DECISION_TEMPLATE).fields if field.name in texts]
+    fence = (f"```pugh\ncriteria:\n{lines(criteria)}\ncandidates:\n{lines(candidates)}\n"
+             f"datum: {json.dumps({'prefer': [datum]})}\n```")
+    return "\n\n".join([*sections, fence])
+
+
+#: The one criterion of a finding's decision: the change against keeping what we have.
+FINDING_CRITERIA = [{"key": "cause", "label": "Removes the cause the finding shows", "weight": 1,
+                     "better": "higher", "kind": "judged"}]
+
+
+def finding_note(item: dict, problem: str, what: str, losses: str) -> str:
+    """A judged finding's decision chapter body, a decision note: the finding is its current situation,
+    `problem` its cause, the judge's `others` what others do, and the options the change (`what`, at
+    the cost `losses`) against keeping what we have, the datum. A finding without `others` is refused."""
+    others = " ".join(str(item.get("others") or "").split())
+    if not others:
+        raise DeckError(f'finding {item.get("finding")} ("{" ".join(str(item.get("title") or "").split())}") '
+                        "has no `others`: write in its block how at least two outside tools, products or "
+                        "conventions solve the same problem, as the decision template's What others do asks")
+    change = {"key": "a", "label": " ".join(str(item["title"]).split()), "what": what,
+              "wins": "The cause is gone where it starts.", "losses": losses,
+              "success": "The next retro finds this cause no more.",
+              "marks": {"cause": {"mark": 1, "because": "the change removes the cause"}}}
+    keep = {"key": "b", "label": "Keep what we have", "what": "Nothing changes.", "wins": "No work.",
+            "losses": "The cause stays and comes back.", "success": "Nothing to check.", "marks": {"cause": 0}}
+    return decision_note(str(item["body"]), problem, others, FINDING_CRITERIA, [change, keep], "b")
+
+
+#: A retro's last decision: "Nothing else" is its single selectable option and the default; the other
+#: does not fit, so what the person adds goes in the chapter's comment.
+ANYTHING_ELSE = ("Anything else?", decision_note(
+    "The findings on the pages before this one come from the collected record, the field reports and "
+    "the top-level SE session's input.",
+    "Something the person saw may be in none of them, and a retro that does not ask leaves it out.",
+    "A Start, Stop, Continue retrospective ends with an open round for what nobody has said yet; a "
+    "GitHub pull request review ends with a general comment beside its line comments.",
+    [{"key": "said", "label": "Everything the person saw is in the retro", "weight": 1,
+      "better": "higher", "kind": "judged"}],
+    [{"key": "a", "label": "Nothing else", "what": "The retro holds everything the person saw.",
+      "wins": "The retro closes as it stands.", "losses": "None.",
+      "success": "No later report names something this retro missed.", "marks": {"said": 0}},
+     {"key": "b", "label": "Something else", "what": "The person names it in this chapter's comment.",
+      "fits": False, "whyNot": "Write it in the comment: the comment is the answer.",
+      "wins": "It reaches SE.", "losses": "None.", "success": "SE answers the comment.",
+      "marks": {"said": {"mark": 1, "because": "the comment adds what was missing"}}}],
+    "a"))
+
+
+def decision_problems(body: str) -> list[str]:
+    """What the decision template refuses in a decision chapter's `body`."""
+    template = templates.own(DECISION_TEMPLATE)
+    return [finding.fix for finding in templates.check(template, templates.parse(template, body))
+            if finding.severity == templates.REFUSE]
 
 
 def chapters(text: str) -> list[tuple[str, str]]:
@@ -105,6 +177,11 @@ def text(title: str, subtitle: str, steps: list[tuple[str, str]],
     decisions ("None." where there are none); DeckError names what breaks the template."""
     if not steps:
         raise DeckError("the deck has no step: write each step the run ran as a chapter")
+    for heading, body in decisions:
+        problems = decision_problems(body)
+        if problems:
+            raise DeckError(f'decision "{" ".join(heading.split())}" is no note of the decision template '
+                            f"(templates/{DECISION_TEMPLATE}.md): " + "; ".join(problems))
     fields = {"title": " ".join(title.split()), "subtitle": " ".join(subtitle.split()),
               "steps": "\n\n".join(_part(*step) for step in steps),
               "decisions": "\n\n".join(_part(*item) for item in decisions) or NONE}
@@ -164,7 +241,9 @@ def vault(written: str, folder: Path, home: str | None = None) -> list[str]:
             links.append(f"- [[{name}|{_label(heading)}]]")
             if kind == "decision":
                 asked.append(name)
-    manifest = ["---", f"title: {_yaml(fields['title'])}", f"subtitle: {_yaml(fields['subtitle'])}",
+    subtitle = " ".join(str(fields.get("subtitle") or "").split())
+    manifest = ["---", f"title: {_yaml(fields['title'])}",
+                *([f"subtitle: {_yaml(subtitle)}"] if subtitle else []),
                 f"document type: {_yaml(DOCUMENT_TYPE)}",
                 "obsHtml: {layout: paged, pages: [{page: cover}]}", "---", "", *links, ""]
     (folder / "manifest.md").write_text("\n".join(manifest), encoding="utf-8", newline="\n")

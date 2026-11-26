@@ -179,7 +179,7 @@ RETRO_OUTCOME = re.compile(
     r"<!-- se:retro-outcome finding=(\d+) kind=(issue|declined|merged) "
     r"value=([A-Za-z0-9._~%-]+) -->")
 FINDING_TEMPLATE = "finding-ref"
-FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check", "source")
+FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check", "source", "others")
 #: The one `source` a finding may name: the top-level SE session's input, marked in the deck.
 SE_SOURCE = "se"
 # The draft's parts the deck leaves out, as they repeat what it shows once (SE#1826, requirements 8 and
@@ -1863,7 +1863,9 @@ def draft(found: Collected) -> str:
               "changes), `controversial` (true where it changes a rule, trades one metric for "
               "another, the judge is unsure, or it recurred after an earlier fix) with its `why`, "
               f"and optionally `check` (a rule check: {', '.join(RULE_CHECKS)}) and `source` "
-              f"(\"{SE_SOURCE}\" where it comes from the top-level SE session's input); a class has "
+              f"(\"{SE_SOURCE}\" where it comes from the top-level SE session's input), and for the "
+              "deck `others` (how two or more outside tools or conventions solve the same problem, "
+              "its decision note's What others do); a class has "
               f"`name`, `cause`, `fix`, `home` and `home_kind` (one of: {', '.join(HOMES)}), and "
               f"optionally {', '.join(f'`{key}`' for key in CLASS_KEYS)}; `went_well` lists what "
               "went well. Step 5 leaves the person's decisions open for the deck; the report and "
@@ -2673,18 +2675,24 @@ def run_outcome(args: argparse.Namespace) -> int:
 
 
 def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
-    """A judged finding as its decision chapter of the deck: it opens with the finding itself, its
-    current situation as the judge wrote it, then its class by name (Classes and homes holds its cause and fix),
-    its home, and last what the person decides (their go for `work`, their decision for `decision`)."""
-    lines = [item["body"].strip(), "", f"Class: {item['class'].strip()}, its cause and fix under Classes and homes."]
+    """A judged finding as its decision chapter of the deck, a note of the decision template that
+    retro_deck.finding_note writes: the finding is its current situation, its class's cause and home
+    the problem, the judge's `others` what others do, and the class's fix against keeping what we have
+    the options; a decision's `why` is the change's cost, a work finding's one work issue."""
+    named = " ".join(item["class"].split())
+    row = next((row for row in classes if row["name"] == named), {})
     check = f"; check `{item['check']}`" if item.get("check") else ""
-    lines += ["", f"Home: `{item['home'].strip()}`{check}.", "",
-              f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
-              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
-    if item.get("source") == SE_SOURCE:
-        lines = ["From SE: the top-level SE session's input.", ""] + lines
+    problem = (f"Class: {named}. {str(row.get('cause') or '').strip()} "
+               f"Home: `{item['home'].strip()}`{check}.")
+    what = (f"{str(row.get('fix') or '').strip()} "
+            + ("It is the person's decision." if item["kind"] == DECISION
+               else "Bless sends it to SE, which bundles it into a work issue."))
+    losses = item["why"].strip() if item["kind"] == DECISION else "One work issue."
+    note = dict(item, body=("From SE: the top-level SE session's input. " if item.get("source") == SE_SOURCE
+                            else "") + item["body"])
     suffix = " (from SE)" if item.get("source") == SE_SOURCE else ""
-    return f"{item['finding']}. {item['title'].strip()}{suffix}", "\n".join(lines)
+    return f"{item['finding']}. {item['title'].strip()}{suffix}", sibling("retro_deck").finding_note(
+        note, problem, what, losses)
 
 
 def without_sections(text: str, headings: tuple[str, ...]) -> str:
@@ -2739,7 +2747,7 @@ def deck_parts(block: dict, text: str, root: Path | None = None
              (heading["classes"], review.demoted("\n".join(judged_class_lines(classes, block, named_only=True)),
                                                  -1).strip())]
     decisions = [finding_chapter(item, classes) for item in block["findings"]]
-    decisions.append(("Anything else?", "Nothing else"))
+    decisions.append(sibling("retro_deck").ANYTHING_ELSE)
     return steps, decisions
 
 
@@ -2753,11 +2761,10 @@ def run_deck(args: argparse.Namespace) -> int:
         raise QueueError(f"The draft of retro #{args.retro} leaves a step of the retro template "
                          f"({retro_template().path or TEMPLATE_NAME}) open, so no deck was built: "
                          + "; ".join(open_steps))
-    steps, decisions = deck_parts(block, text, root)
     deck = sibling("retro_deck")
     try:
-        written = deck.text(f"{work_tickets.repository_name(root)}: Retro #{args.retro}",
-                            "Retro report", steps, decisions)
+        steps, decisions = deck_parts(block, text, root)
+        written = deck.text(f"{work_tickets.repository_name(root)}: Retro #{args.retro}", "", steps, decisions)
     except deck.DeckError as error:
         raise QueueError(f"Retro #{args.retro}: {error}") from None
     code = deck.build(written, args.destination, args.host, args.answers)
@@ -2956,11 +2963,12 @@ def make_parser() -> argparse.ArgumentParser:
         "deck", help="build the retro's one report, a deck, from its judged draft",
         description="Check the judged draft as file does, then build the retro's one report: a "
                     "deck from the retro-deck template (templates/retro-deck.md) with a two-line "
-                    "cover (`<repository name>: Retro #<n>` and `Retro report`), "
+                    "cover (`<repository name>: Retro #<n>` and its document type, `Retro report`, "
+                    "rendered once), "
                     "every step the retro ran as a chapter (what was collected, "
                     "the table of what happened, the standing questions with their matrix, the "
-                    "classes with their findings, causes, fixes and homes), one decision chapter "
-                    "per finding, then the final `Anything else?` decision with `Nothing else` as "
+                    "classes with their findings, causes, fixes and homes), one decision note "
+                    "(templates/decision.md) per finding, then the final `Anything else?` decision with `Nothing else` as "
                     "its sole default answer. It writes the one HTML "
                     "file DESTINATION and nothing beside it, and never waits for the answers.")
     deck_command.add_argument("retro", type=int, help="the retro issue's number")

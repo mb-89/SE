@@ -17,13 +17,52 @@ STEPS = [("2. Table of what happened", "| chapter | steps |\n|---|---|\n| 1 | #1
          ("3. The standing questions", "| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |\n\n"
                                        "## Answers to the standing questions\n\n### Has the process gone stale?\n\nNo.\n\n"
                                        "```sh\n# not a heading\n```")]
-DECISIONS = [("1. Refuse a landing without a field report", "**Work, for your go**: Bless sends it to SE."),
-             ("2. Make the field report a rule", "**Decision, for your decision**: it changes a rule."),
-             ("Anything else?", "Nothing else")]
+CHANGE = {"key": "a", "label": "Refuse it at the landing", "what": "integrate refuses it.",
+          "wins": "No lost report.", "losses": "One more check.", "success": "No landing lacks one.",
+          "marks": {"cause": {"mark": 1, "because": "it removes the cause"}}}
+KEEP = {"key": "b", "label": "Keep what we have", "what": "Nothing changes.", "wins": "No work.",
+        "losses": "Reports stay lost.", "success": "Nothing to check.", "marks": {"cause": 0}}
+CRITERIA = [{"key": "cause", "label": "Removes the cause", "weight": 1, "better": "higher", "kind": "judged"}]
+
+
+def note(situation: str) -> str:
+    return retro_deck.decision_note(situation, "Reports get lost.", "Gerrit and GitHub both gate merges on checks.",
+                                    CRITERIA, [CHANGE, KEEP], "b")
+
+
+DECISIONS = [("1. Refuse a landing without a field report", note("#14 closed without a field report.")),
+             ("2. Make the field report a rule", note("The field report is a habit, not a rule.")),
+             retro_deck.ANYTHING_ELSE]
 
 
 def deck_text(decisions=DECISIONS) -> str:
-    return retro_deck.text("example: Retro #30", "Retro report", STEPS, decisions)
+    return retro_deck.text("example: Retro #30", "", STEPS, decisions)
+
+
+def test_the_cover_names_retro_report_once_as_its_document_type(tmp_path):
+    """A project's retro deck: the cover rendered "Retro report" twice, as subtitle and document type."""
+    retro_deck.vault(deck_text(), tmp_path)
+    front = (tmp_path / "manifest.md").read_text(encoding="utf-8").split("---")[1]
+    assert front.count("Retro report") == 1
+    assert f'document type: "{retro_deck.DOCUMENT_TYPE}"' in front and "subtitle" not in front
+
+
+def test_a_free_form_decision_chapter_is_refused_naming_it():
+    with pytest.raises(retro_deck.DeckError, match=r'decision "1\. Refuse it".*Current situation is missing'):
+        deck_text([("1. Refuse it", "**Work, for your go**: Bless sends it to SE.")])
+    with pytest.raises(retro_deck.DeckError, match='decision "2. Bare".*What others do is empty'):
+        deck_text([("2. Bare", retro_deck.decision_note("A.", "B.", "", CRITERIA, [CHANGE, KEEP], "b"))])
+
+
+def test_every_decision_page_has_the_same_sections_and_the_pugh_block(tmp_path):
+    asked = retro_deck.vault(deck_text(), tmp_path)
+    shapes = set()
+    for name in asked:
+        page = (tmp_path / f"{name}.md").read_text(encoding="utf-8")
+        before, fence = page.split("```pugh\n", 1)
+        shapes.add(tuple(re.findall(r"^## (.+)$", before, re.MULTILINE)))
+        assert "\ncandidates:\n" in fence and "\ndatum: " in fence
+    assert shapes == {("Current situation", "The problem", "What others do")}
 
 
 def test_the_deck_is_a_document_of_the_retro_deck_template_steps_first_decisions_last():
@@ -31,7 +70,7 @@ def test_the_deck_is_a_document_of_the_retro_deck_template_steps_first_decisions
     template = retro_deck.template()
     assert templates.select(templates.load(templates.ROOT, tree=True), "deck.build", text).template.name == "retro-deck"
     fields = templates.parse(template, text).fields
-    assert (fields["title"], fields["subtitle"]) == ("example: Retro #30", "Retro report")
+    assert (fields["title"], fields.get("subtitle") or "") == ("example: Retro #30", "")
     assert text.index("\n## Steps\n") < text.index("\n### 2. Table of what happened\n") < text.index(
         "\n#### Answers to the standing questions\n") < text.index("\n## Decisions\n") < text.index(
         "\n### 1. Refuse a landing without a field report\n") < text.index("\n### Anything else?\n")
@@ -49,8 +88,8 @@ def test_a_run_without_a_step_or_with_an_empty_heading_is_refused():
         retro_deck.text("Retro #30", "x", [], [])
     with pytest.raises(retro_deck.DeckError, match="has no heading"):
         retro_deck.text("Retro #30", "x", [(" ", "Body.")], [])
-    with pytest.raises(retro_deck.DeckError, match="Subtitle"):
-        retro_deck.text("Retro #30", " ", STEPS, [])
+    with pytest.raises(retro_deck.DeckError, match="Title"):
+        retro_deck.text(" ", "", STEPS, [])
 
 
 def test_the_vault_has_the_title_page_every_step_and_each_decision_last_asking_a_bless(tmp_path):
@@ -58,7 +97,7 @@ def test_the_vault_has_the_title_page_every_step_and_each_decision_last_asking_a
     assert asked == ["decision-01", "decision-02", "decision-03"]
     manifest = (tmp_path / "manifest.md").read_text(encoding="utf-8")
     front = manifest.split("---")[1]
-    assert 'title: "example: Retro #30"' in front and 'subtitle: "Retro report"' in front
+    assert 'title: "example: Retro #30"' in front
     assert f'document type: "{retro_deck.DOCUMENT_TYPE}"' in front
     assert "obsHtml: {layout: paged, pages: [{page: cover}]}" in front
     assert re.findall(r"^- \[\[([\w-]+)\|", manifest, re.MULTILINE) == [
@@ -69,7 +108,8 @@ def test_the_vault_has_the_title_page_every_step_and_each_decision_last_asking_a
     decision = (tmp_path / "decision-02.md").read_text(encoding="utf-8")
     assert decision.startswith("---\nobs: {bless: pending}\n---\n# 2. Make the field report a rule\n")
     anything_else = (tmp_path / "decision-03.md").read_text(encoding="utf-8")
-    assert anything_else.startswith("---\nobs: {bless: pending}\n---\n# Anything else?\n\nNothing else\n")
+    assert anything_else.startswith("---\nobs: {bless: pending}\n---\n# Anything else?\n\n## Current situation\n")
+    assert '"label": "Nothing else"' in anything_else and '"fits": false' in anything_else
     assert "obs: {bless: pending}" in anything_else
     assert "bless" not in step
 

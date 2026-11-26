@@ -4,8 +4,9 @@
 # before it files the report; its judged block is the adapter templates/retro-judgment.md. The
 # person's decision of 22 Nov (SE#1678). SE's input is evidence in step 1, and the report goes up
 # before the deck because, in the owner's words, "the last [retro] took forever to finish, and
-# that's really not acceptable, so it needs to be quicker this time." scripts/templates.py's
-# docstring owns this note's format.
+# that's really not acceptable, so it needs to be quicker this time." Learning (a project's retro deck, 26 Nov): the deck's shape comes from the templates (retro-deck.md, decision.md), never from
+# the agent's judgment: retro.py deck renders the cover once and every decision as a decision note.
+# scripts/templates.py's docstring owns this note's format.
 name: retro
 version: 3.1.0
 kind: document

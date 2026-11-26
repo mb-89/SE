@@ -14,6 +14,7 @@ import pytest
 import git_door
 import overhaul
 import retro
+import retro_deck
 import templates
 import fake_git
 import time_bound
@@ -519,12 +520,12 @@ def judged_draft(checkout: Path, **changes: object) -> str:
         "looked_at": {part: "Nothing to change." for part in overhaul.LOOKED_AT},
         "findings": [
             {"title": "Prune the three functions only tests reach", "body": "See the facts.",
-             "rule": "des-015", "place": "scripts/overhaul.py", "controversial": False},
+             "rule": "des-015", "place": "scripts/overhaul.py", "controversial": False, "others": "Gerrit and GitHub both gate a merge on its checks."},
             {"title": "Name the speed of the suite as a rule", "body": "The suite grows.",
-             "rule": "tst-002", "place": overhaul.BOOK.as_posix(), "controversial": False},
+             "rule": "tst-002", "place": overhaul.BOOK.as_posix(), "controversial": False, "others": "Gerrit and GitHub both gate a merge on its checks."},
             {"title": "Add a rule that every overhaul compares itself", "body": "None compares.",
              "rule": "new", "place": "src/agents/se.md", "controversial": False,
-             "sources": ["https://example.com/practice"]}],
+             "sources": ["https://example.com/practice"], "others": "Gerrit and GitHub both gate a merge on its checks."}],
         "went_well": ["The retros kept their blocks."]})
     data.update(changes)
     return text[:text.rfind(overhaul.BLOCK_MARKER)] + overhaul.BLOCK_MARKER + "\n```yaml\n" + \
@@ -621,10 +622,13 @@ def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_p
     assert [heading for heading, _ in decisions] == [
         "1. Prune the three functions only tests reach", "2. Name the speed of the suite as a rule",
         "3. Add a rule that every overhaul compares itself"]
-    assert decisions[1][1].startswith("The suite grows.")
-    assert decisions[1][1].endswith("**Decision, for your decision**: it changes a rule")
+    for _, note in decisions:
+        assert re.findall(r"^## (.+)$", note, re.MULTILINE) == ["Current situation", "The problem", "What others do"]
+        assert "\n```pugh\ncriteria:\n" in note and retro_deck.decision_problems(note) == []
+    assert decisions[1][1].startswith("## Current situation\n\nThe suite grows.")
+    assert "It is the person's decision." in decisions[1][1]
     assert "Rule: tst-002 (a rule change)." in decisions[1][1]
-    assert "- Source: https://example.com/practice" in decisions[2][1]
+    assert "Sources: https://example.com/practice." in decisions[2][1]
     draft = tmp_path / "draft.md"
     draft.write_text(text, encoding="utf-8")
     assert overhaul.main(["deck", str(THIS), "--draft", str(draft), "--destination", str(tmp_path / "o.html"),

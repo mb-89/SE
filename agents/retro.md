@@ -75,7 +75,12 @@ retro doc (`docs/retro-*.md`) lands without a work issue, a field report or runn
    holds a title page, every step the run ran, records of fixes applied, decision chapters for
    real choices, and, for a retro, the final `Anything else?` chapter with `Nothing else` as its
    sole default answer; it is the one file the person reads, so write no other report or deck for
-   them.
+   them. Give each finding `others` (how two or more outside tools or conventions solve the same
+   problem): the deck makes every decision chapter a note of the decision template from it.
+   Learning (a project's retro deck, 26 Nov): the deck's shape comes from the templates, never from
+   your judgment. Right: `retro.py deck` writes the cover and every decision note itself, and you
+   fix a refusal in the judged block. Wrong: a second "Retro report" line on the cover, a free-form
+   `### n. finding` chapter, or a deck written by hand.
 5. **Hand it over and end your turn.** Hand the deck to the person as the decision skill's
    [Bringing decisions to the person](../skills/decision/SKILL.md#bringing-decisions-to-the-person)
    says, step 2: locally, link the standalone HTML by its absolute filesystem path, never serve

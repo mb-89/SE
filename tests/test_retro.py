@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import retro
+import retro_deck
 import templates
 import se_component
 import se_usage
@@ -950,10 +951,12 @@ def judged_draft(checkout: Path, **changes: object) -> str:
         "findings": [
             {"title": "Refuse a landing whose work issue has no field report",
              "body": "#14 closed without one.", "class": "Lost reports",
-             "home": "scripts/work_tickets.py", "controversial": False, "check": "field-report"},
+             "home": "scripts/work_tickets.py", "controversial": False, "check": "field-report",
+             "others": "Gerrit and GitHub both gate a merge on its checks."},
             {"title": "Make the field report a rule of the rule book",
              "body": "A rule, not a habit.", "class": "Lost reports",
-             "home": retro.RULE_BOOK, "controversial": True, "why": "it changes a rule"}],
+             "home": retro.RULE_BOOK, "controversial": True, "why": "it changes a rule",
+             "others": "Gerrit and GitHub both gate a merge on its checks."}],
         "went_well": ["The fake door kept the tests fast."]})
     data.update(changes)
     text = fill_steps(retro.draft(collected(checkout)))
@@ -1055,13 +1058,18 @@ def test_the_deck_holds_every_step_then_finding_decisions_and_anything_else(chec
         "2. Make the field report a rule of the rule book",
         "Anything else?"]
     work, decision, anything_else = (text for _, text in decisions)
-    # Each opens with its current situation, the finding as the judge wrote it, and asks last (SE#1826, 10).
-    assert work.startswith("#14 closed without one.\n\nClass: Lost reports, its cause and fix under Classes and homes.")
-    assert work.endswith("Home: `scripts/work_tickets.py`; check `field-report`.\n\n**Work, for your go**: Bless "
-                         "sends it to SE, which bundles it into a work issue.")
-    assert decision.startswith("A rule, not a habit.") and decision.endswith("**Decision, for your decision**: it changes a rule")
-    assert "Cause:" not in decision
-    assert anything_else == "Nothing else"
+    # A project's retro deck: every decision chapter is a note of the decision template, the same sections
+    # in the same order, then the pugh fence.
+    for _, note in decisions:
+        assert re.findall(r"^## (.+)$", note, re.MULTILINE) == ["Current situation", "The problem", "What others do"]
+        assert "\n```pugh\ncriteria:\n" in note and retro_deck.decision_problems(note) == []
+    assert work.startswith("## Current situation\n\n#14 closed without one.\n\n## The problem\n\nClass: Lost reports. "
+                           "a landing need not name a field report")
+    assert "Home: `scripts/work_tickets.py`; check `field-report`." in work
+    assert "Bless sends it to SE, which bundles it into a work issue." in work and '"losses": "One work issue."' in work
+    assert decision.startswith("## Current situation\n\nA rule, not a habit.") and '"losses": "it changes a rule"' in decision
+    assert "Gerrit and GitHub both gate a merge on its checks." in decision
+    assert (heading_and_note := decisions[-1]) == retro_deck.ANYTHING_ELSE and heading_and_note[1] == anything_else
 
 
 def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
@@ -1070,7 +1078,15 @@ def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
     block["findings"] = []
     block["classes"] = []
     _, decisions = retro.deck_parts(block, text)
-    assert decisions == [("Anything else?", "Nothing else")]
+    assert decisions == [retro_deck.ANYTHING_ELSE]
+
+
+def test_deck_refuses_a_finding_without_what_others_do_naming_it(checkout, tmp_path, monkeypatch, capsys):
+    """The decision template asks What others do, so a finding without `others` builds no deck."""
+    text = judged_draft(checkout, findings=[finding()])
+    code, asked = built_deck(checkout, tmp_path, monkeypatch, text)
+    assert (code, asked) == (1, {})
+    assert 'finding 1 ("Refuse a landing whose work issue has no field report") has no `others`' in capsys.readouterr().err
 
 
 def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checkout, tmp_path, monkeypatch, capsys):
@@ -1080,7 +1096,7 @@ def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checko
     assert asked["host"] == "copilot" and asked["answers"] is None
     template = templates.own("retro-deck")
     fields = templates.parse(template, asked["written"]).fields
-    assert fields["title"] == "example: Retro #30" and fields["subtitle"] == "Retro report"
+    assert fields["title"] == "example: Retro #30" and not fields.get("subtitle")
     assert [finding.fix for finding in templates.check(template, templates.parse(template, asked["written"]))
             if finding.severity == templates.REFUSE] == []
     assert [path.name for path in (tmp_path / "out").iterdir()] == ["retro-30.html"]
@@ -1264,9 +1280,9 @@ def test_the_template_and_the_agent_ask_se_once_and_post_the_report_before_the_d
 def test_a_finding_from_se_s_input_is_marked_in_the_deck_and_no_other_source_passes(checkout):
     item = {"finding": 1, "title": "Name the sync a lagging mirror needs", "body": "SE saw it.",
             "class": "Lost reports", "home": "scripts/se_start.py", "kind": retro.WORK,
-            "source": retro.SE_SOURCE}
+            "source": retro.SE_SOURCE, "others": "Gerrit and GitHub both gate a merge on its checks."}
     title, body = retro.finding_chapter(item, [])
-    assert title.endswith("(from SE)") and body.startswith("From SE")
+    assert title.endswith("(from SE)") and body.startswith("## Current situation\n\nFrom SE")
     wrong = judged_draft(checkout, findings=[{**finding(), "source": "elsewhere"}])
     with pytest.raises(retro.QueueError, match="source is"):
         retro.judged(wrong, 30)
