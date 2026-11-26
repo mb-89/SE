@@ -31,3 +31,13 @@
   starting their real commands defeats the spawn guard even when their output is correctly asserted.
 - When a test's fixture parameter changes, the removal guard can flag its unchanged name as
   deleted; list the name and say its assertions remain in the field report, then run the guard again.
+- On Windows, create the isolated profile's `AppData\Local` before running PowerShell: a missing
+  special folder makes its module cache relative to the working directory even when `LOCALAPPDATA`
+  is set. Keep the matching roaming and local environment paths in the child's own profile.
+- A byte-stable recording and any note hashed by bytes need LF in `.gitattributes`; Windows checkout
+  conversion otherwise changes every recorded line or the note's bless version.
+- Before a focused `uv run --no-sync` in a fresh worktree, check that its environment contains the
+  test dependencies; an empty environment cannot run pytest without a normal sync first.
+- PowerShell's `$HOME` is read-only: use a different local variable for a test profile path.
+- Leave tracked files unchanged while a focused test snapshots the checkout, just as for the
+  complete suite; even a documentation edit during its build makes the snapshot assertion fail.
