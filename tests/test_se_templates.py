@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -249,7 +250,7 @@ def test_file_reads_the_version_the_body_as_given_records(recorded, filed_code, 
     (worktree / "se.toml").write_text(f'{IDENTITY}\n[templates]\nenforce = "refuse"\n',
                                       encoding="utf-8")
     body = worktree / "body.md"
-    body.write_text(templates.render(WORK, FIELDS).replace(
+    body.write_text(templates.INPUTS_PATTERN.sub("", templates.render(WORK, FIELDS)).replace(
         f" {WORK.version} ", f" {recorded} ", 1), encoding="utf-8")
     filed = work_tickets.main(["file", "--title", TITLE, "--body-file", str(body),
                                "--worktree", str(worktree)])
@@ -1346,6 +1347,21 @@ def test_backstop_labels_an_off_template_fleet_issue_and_leaves_the_rest_alone(
             (event_file(tmp_path, "closed", action="closed"), "on"),
             (event_file(tmp_path, "thin"), "off")):
         assert backstop(capsys, project, "issues", event, "--backstop", switch) == empty, event
+
+
+def test_reopening_renews_inputs_but_an_edit_keeps_the_existing_acceptance(
+        capsys, tmp_path, project, gh, monkeypatch):
+    body = templates.render(WORK, FIELDS)
+    latest = replace(WORK, version="99.0.0", fields=(*WORK.fields, templates.Field(
+        name="later", kind="text", heading="Added later", required=True)))
+    monkeypatch.setattr(templates, "load", lambda *args, **kwargs: {**CATALOG, "work": latest})
+    edited = event_file(tmp_path, "edit", body=body, action="edited")
+    assert backstop(capsys, project, "issues", edited, "--backstop", "on")["add_labels"] == []
+    reopened = event_file(tmp_path, "reopen", body=body, action="reopened")
+    plan = backstop(capsys, project, "issues", reopened, "--backstop", "on")
+    assert plan["renew_template"] == "work"
+    assert plan["add_labels"] == ["off-template"]
+    assert "Added later" in plan["summary"]
 
 
 def test_backstop_names_a_private_term_by_field_and_list_only(capsys, tmp_path, project, gh):

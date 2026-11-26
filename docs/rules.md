@@ -2,7 +2,7 @@
 
 # Rules
 
-The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after the book.
+The 76 rules in force: the rule book's 64 and 12 guidance notes, the notes after the book.
 
 | Rule | What it says |
 |---|---|
@@ -11,6 +11,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `gen-003` | Fail open for advice, closed for enforcement |
 | `gen-004` | Blameless |
 | `gen-005` | Consistency |
+| `gen-006` | Frozen inputs |
 | `des-001` | Locality |
 | `des-002` | Modularity |
 | `des-003` | Thin adapters |
@@ -29,6 +30,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `des-016` | Every tool has a README and a RUNME |
 | `des-017` | Time is an I/O module |
 | `des-018` | Every I/O module declares its forbid list |
+| `des-019` | Event-driven targeted observation |
 | `tst-001` | Fakes that behave |
 | `tst-002` | Fast tests |
 | `tst-003` | Measured performance, no blind waits |
@@ -47,6 +49,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `wrk-007` | One piece of work, one issue; no command files issues on its own |
 | `wrk-008` | Neutral by construction |
 | `wrk-009` | Visible sessions |
+| `wrk-010` | Report all friction |
 | `dec-001` | Class or case |
 | `dec-002` | Is the problem real |
 | `dec-003` | Keep what we have |

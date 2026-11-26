@@ -48,22 +48,22 @@ None.
    controversy reason where applicable.
 5. **Anything else**: the retro deck ends with a bless chapter titled `Anything else?`, offering
    only the selectable default `Nothing else`, which the person may reject with a comment.
-6. **Report**: the judge commits the draft on the integration branch as `docs/retro-...` and runs
-   `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` to post the report with
-   a link to the document.
+6. **Report**: the draft keeps the template version and rules recorded at collection. After the
+   person blesses the answered report, `uv run python <se>/scripts/retro.py bless <this issue>`
+   opens the gate, posts the report and closes this retro in one call, without a landing.
 7. **Outcomes**: SE records each accepted `work` finding with
    `work_tickets.py file --finding <retro>:<finding>` and each declined or merged finding with
    `retro.py outcome`.
-8. **Close**: the retro closes only after every finding has an outcome.
+8. **Close**: blessing closes the retro; finding outcomes remain independently tracked.
 
 ## Acceptance
 
-- [ ] The report, the five steps, is posted here, linking the retro doc; the issue stays open until
-      each finding has an outcome, then closes.
+- [ ] One bless command posts the answered report, closes the issue and opens its filing gate
+      within one minute, without a landing or another session.
 
 ## Verification
 
 ```sh
 uv run python <se>/scripts/retro.py collect <this issue> --out <draft>
-uv run python <se>/scripts/retro.py file <this issue> --draft <draft>
+uv run python <se>/scripts/retro.py bless <this issue> --draft <draft>
 ```

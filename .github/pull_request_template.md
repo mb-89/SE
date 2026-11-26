@@ -77,6 +77,9 @@ requirements they share, and why (one function changed together, or a test-only 
 <!-- The standing questions, asked of the agent that did the work: one "### <question>" each, as
      templates/standing-questions.md asks them (the retro and the overhaul ask the same); answer
      each for this piece of work, "None" where it does not apply, and name target files and changes.
+     Under "What goes badly, each with its moment in the log?", record all friction, including
+     resolved friction, with evidence, impact and outcome; follow the shared work model's
+     "Friction and observation". "None" means there truly was none.
      field-report --draft writes them in; the check refuses a report that leaves one out. -->
 
 <!-- se:standing-questions -->

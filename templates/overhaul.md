@@ -28,7 +28,7 @@ fields:
   - name: questions
     kind: node
     required: true
-    node: standing-questions@1.0.0
+    node: standing-questions@1.0.1
   - name: overhaul_questions
     kind: node
     required: true

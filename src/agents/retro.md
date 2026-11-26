@@ -19,14 +19,14 @@ README's [Work commands](../../docs/work-commands.md#work-commands) and the run'
 
 ## The box
 
-- While a retro is running, SE files no issue. After the report is in, it may file only a finding
-  with `work_tickets.py file --finding <retro>:<finding>`, or record a declined or merged finding
-  with `retro.py outcome`. The retro closes when every finding has an outcome. An open overhaul
+- While an unblessed retro is running, SE files no issue. Blessing opens the gate immediately and
+  closes the retro in the same command; finding outcomes are tracked independently with
+  `work_tickets.py file --finding <retro>:<finding>` and `retro.py outcome`. An open overhaul
   continues to hold all filing back. Running work goes on, and what comes back meanwhile counts
   towards the next run.
 - You file no issue
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-  the report moves the retro to report state; SE records each finding's outcome and files accepted
+  blessing closes the retro; SE records each finding's outcome and files accepted
   `work` findings as work issues.
 - The run covers everything up to its start: what came back after it fell due is in it too.
 - Paths, shell and the host's GitHub tools follow the work model's
@@ -39,7 +39,8 @@ README's [Work commands](../../docs/work-commands.md#work-commands) and the run'
 <main checkout>`.
 
 1. **Collect.** A retro: `retro.py collect <issue>`, which writes the draft at its known path,
-   `~/.se/retros/<owner>/<repo>/retro-<issue>.md`, where `deck` and `file` read it. An overhaul:
+   `~/.se/retros/<owner>/<repo>/retro-<issue>.md`, where `deck`, `file` and `bless` read it.
+   The draft records the template version and effective rules it starts with. An overhaul:
    `overhaul.py read <issue> --out <draft>`. Without gh, run each plan they print as the work
    model says.
 2. **Judge.** Fill the draft's steps and block as its template says
@@ -68,12 +69,12 @@ README's [Work commands](../../docs/work-commands.md#work-commands) and the run'
    decision; clear fixes are records, not approval requests. Record each answer in the finding
    and the decisions in the draft's last step; a finding the person declines leaves the block. A finding
    still open (a comment, no verdict) is answered and asked again in a new deck.
-6. **Report.** Build the deck once more with `--answers <answers.json>`, the record of its
-   answers, then `retro.py file <issue>` posts the report; it needs no landing, and reads a draft of
-   an older retro template in the current form. The retro stays open for its finding
-   outcomes; SE files each accepted work finding with `work_tickets.py file --finding` and records
-   declined or merged outcomes with `retro.py outcome`. The last outcome marks it done and closes
-   it. An overhaul still closes with its report.
+6. **Bless and close.** In the session receiving the person's blessing, run `retro.py bless
+   <issue>` on the answered draft. It opens the gate at the blessing, posts the report and closes
+   the retro, with one shared minute for network calls. It needs no landing, update or other
+   session; repeating it resumes partial writes. Older drafts migrate automatically; a draft
+   carrying frozen inputs keeps its recorded form and rules. Finding outcomes do not hold the
+   gate. An overhaul still closes with its report.
 7. **Hand back.** Send SE's session one message, the one
    [templates/run-closed.md](../../templates/run-closed.md) writes.
    SE files the work findings as work issues, each naming every finding it takes as the message

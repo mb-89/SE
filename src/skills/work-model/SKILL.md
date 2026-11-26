@@ -41,6 +41,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
     are not migrated; nothing new gets that label.
   - The field report holds what was not done, decisions with confidence, spec gaps, its answers
     to the standing questions (its Retro section) and tickets for other repositories.
+    Every agent records all friction there, or in its equivalent final report, following
+    [Friction and observation](#friction-and-observation).
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
@@ -81,16 +83,18 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   - The standing questions are one block, asked alike by the retro, the overhaul and every field
     report; the overhaul adds its own.
 
-    The retro report moves the issue to report state: SE may file only its findings with
-    `work_tickets.py file --finding`, or record declined/merged outcomes with `retro.py outcome`.
-    The issue closes when every finding has an outcome.
+    The person reviews the prefilled report and blesses it. `retro.py bless <issue>` records that
+    blessing, opens the filing gate immediately, posts the report and closes the retro in one call,
+    without a landing or another session. Finding outcomes are tracked separately with
+    `work_tickets.py file --finding` and `retro.py outcome`.
     SE files no issue by itself before then
     ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
   any new issue: `work_tickets.py file` files a due one first.
 
-  A running retro refuses filing; in report state, only its findings may be filed; it is done once
-  every finding has an outcome. An open overhaul refuses all filing; running work goes on.
+  An unblessed running retro refuses filing; the older report-state path allows only its findings.
+  A blessed retro never holds filing back, even while its closing write is pending. An open
+  overhaul refuses all filing; running work goes on.
 
   Each runs in a session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
@@ -414,6 +418,9 @@ boundary.
     to it).
 - Every error message names where it comes from (the command, file or input) and, where
   possible, the remedy.
+- Inputs are frozen at the start of work, including template versions, nested templates and rules
+  ([gen-006](references/rules.md#gen-006-frozen-inputs)). A reopen starts a new input phase;
+  `templates.py renew <template> --body-file <file>` also explicitly opts into newer inputs.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is
   open.
 - Workers run focused tests and what their issue's acceptance names, the complete suite only
@@ -435,6 +442,26 @@ boundary.
   (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `file`, `route`, `ready`,
   `capacity`, `queue`, `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
   manual.
+
+### Friction and observation
+
+Every agent reports all friction in its field report or equivalent final report, including
+waiting, polling, limited tooling, workarounds and retries. For each, record the evidence,
+impact and outcome; say `None` only when there truly was none
+([wrk-010](references/rules.md#wrk-010-report-all-friction)).
+
+Field reports use the existing standing question "What goes badly, each with its moment in
+the log?", even when a workaround ultimately succeeded. Other final reports include the same
+account without needing a new report format. Existing reports keep their recorded inputs.
+
+Prefer callbacks, subscriptions and completion notifications to polling
+([des-019](references/rules.md#des-019-event-driven-targeted-observation)).
+Unnecessary broad or repeated polling is prohibited. If no event interface exists, query only
+the specific object, with an explicit deadline and bounded attempts, and report why it was needed.
+
+Doors should expose targeted, filtered or incremental queries where sensible, rather than make
+callers scan the whole universe. For example, read one task's status or changes since a known
+revision, not every task repeatedly. Record a missing event or query interface as tooling friction.
 
 ### Neutral by construction
 
@@ -896,9 +923,10 @@ is its reusable part, imported from the project's se module.
 - A session may start in another checkout than the one it works in: `cd` to its worktree in every
   command, use absolute paths for every read and edit and for .NET file APIs (`[IO.File]::...`
   resolves relative paths against the process directory), and run git as `git -C <worktree>`.
-- Wait on a background process by its process id (`kill -0 <pid>` in a loop; PowerShell
-  `Get-Process -Id <pid>`), never by `pgrep -f <pattern>`: the pattern matches the waiting shell's
-  own command line, so the wait never ends.
+- Use a background process's completion notification, not a polling loop. With no event interface,
+  a bounded fallback queries only its process id (`Get-Process -Id <pid>`), never a name pattern
+  that might match the waiting shell; record the reason, impact and outcome
+  ([Friction and observation](#friction-and-observation)).
 - Windows PowerShell 5.1: judge native commands by exit code only; pass every issue, comment and
   pull-request body with `--body-file` (quotes or spaces inside native arguments break the call);
   no inline jq expressions with spaces (use `--json` and `ConvertFrom-Json`).
@@ -1115,7 +1143,9 @@ harnesses.
   ([docs/start.md "The MCP door"](../../../docs/start.md#the-mcp-door)) offers SE's read-only commands as the
   tools `se/status`, `se/greeting`, `se/tickets`, `se/integration` and `se/overhaul`, each taking
   `command`, `args` and `page`.
-  - Where a tool answers `starting`, call it again in a few seconds; where it answers
+  - Where a tool answers `starting`, prefer its readiness event; with none, retry that command
+    with a deadline and bounded attempts, reporting this fallback as tooling friction.
+    Where it answers
     `not-installed` or `failed`, or the session has no `se` tools, run the same command as its
     script, `uv run python <se>/scripts/<name>.py`.
   - A command no tool offers, every one that writes among them, always runs as its script.

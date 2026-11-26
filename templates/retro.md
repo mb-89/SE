@@ -29,7 +29,7 @@ fields:
   - name: answers
     kind: node
     required: true
-    node: standing-questions@1.0.0
+    node: standing-questions@1.0.1
   - name: classes
     kind: text
     required: true

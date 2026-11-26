@@ -30,3 +30,23 @@
   origin's tags reports current while a newer release exists; read the other remotes too.
 - When inserting a test above another with the edit tool, end `new_str` with the following
   test's `def` line intact; dropping it silently merges two tests.
+- A fixing-command hint is not an end-to-end fix: test the person's next action through the gate,
+  closure and read-back in one call. Keep approval separate from later finding outcomes.
+- Freeze effective template fields, nested templates and rule settings, not just a version label.
+  Reopening or an explicit version bump starts a new input phase; a routine check never does.
+- Store a file's frozen-input metadata in front matter, not a long comment in its body: downstream
+  document builders lint body paragraphs and must not render template guidance.
+- A legacy document without saved inputs must not be stamped with today's schema under its older
+  version: resolve that version first, or preserve the legacy record and its explicit diagnostic.
+- Find existing test filenames before selecting a runner command; names inferred from the feature
+  can miss the real suite. Run slow obs-backed files separately to respect a command's timebox.
+- A rule book entry states its rule in one sentence; put its mechanism and examples under
+  Implementations rather than adding sentences to the rule itself.
+- Separate pytest invocations that use the same obs setup lock are not independent; run them
+  serially instead of turning setup contention into repeated three-minute timeouts.
+- Compare a frozen template's effective fields and version in round-trip tests, not its source
+  path or worked examples: those are deliberately not portable acceptance inputs.
+- Privacy regression fixtures construct generic forbidden paths from components; a literal full
+  profile path in tracked test source is itself rejected by the public check.
+- Read a maintenance generator's entry point before passing `--help`: a script without an argument
+  parser may regenerate unconditionally rather than display usage.

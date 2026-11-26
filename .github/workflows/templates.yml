@@ -3,7 +3,8 @@
 # comment a failed run, and the run's summary lists the findings. se_templates.py backstop reads the
 # event file and decides, by se.toml [templates] backstop on the default branch; it never calls GitHub.
 # Anyone can open an issue, so no event text reaches a run: line through an expression: the command
-# reads the event file, and only the plan's number and labels are passed on. The workflow never
+# reads the event file, and only the plan's number, template name and labels are passed on.
+# Reopening renews the issue's recorded inputs from its latest body. The workflow never
 # comments and never removes a label; work_tickets.py unhold is the way back. A label added with
 # the run's token starts no run of its own.
 name: templates
@@ -37,6 +38,13 @@ jobs:
         run: |
           plan="$RUNNER_TEMP/plan.json"
           number=$(jq -r '.number // empty' "$plan")
+          template=$(jq -r '.renew_template // empty' "$plan")
+          if [ -n "$template" ]; then
+            [[ "$number" =~ ^[0-9]+$ && "$template" =~ ^[a-z0-9-]+$ ]] || { echo "templates: malformed renewal" >&2; exit 1; }
+            gh issue view "$number" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' > "$RUNNER_TEMP/body.md"
+            uv run python scripts/templates.py renew "$template" --body-file "$RUNNER_TEMP/body.md"
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+          fi
           while read -r label; do
             [[ "$number" =~ ^[0-9]+$ && "$label" =~ ^[a-z0-9-]+$ ]] || { echo "templates: the plan's number or label is malformed" >&2; exit 1; }
             gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label "$label"

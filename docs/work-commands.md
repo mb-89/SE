@@ -121,12 +121,13 @@ and the report it files as one comment.
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, deck builds
-its one report, a deck, from the judged draft, file checks the judged draft and moves the retro
-issue to report state, outcome records each finding's disposition, and due says whether a retro or
-an overhaul is due or open.
+its one report, a deck, from the judged draft, bless opens filing and closes the retro in one call,
+file checks the judged draft and moves the retro issue to report state, outcome records each
+finding's disposition, and due says whether a retro or an overhaul is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `retro.py bless` | `retro.py bless [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | bless an answered draft, open the filing gate and close the retro in one call |
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
 | `retro.py deck` | `retro.py deck [--draft FILE] --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
@@ -321,7 +322,7 @@ commands read from the filed retro. `--json` prints the block's data alone.
 The draft has one known path on the machine, `~/.se/retros/<owner>/<repo>/retro-<n>.md`.
 `collect` writes it there unless `--out` names another file (`--out -` prints it).
 
-`deck` and `file` read it from there unless `--draft` names another, so no session searches
+`deck`, `bless` and `file` read it from there unless `--draft` names another, so no session searches
 another's folders. Where none is there, they name that path and `retro.py collect <n>`.
 
 `--sessions <file>` adds the cloud sessions' costs: the file holds each session `list_sessions`
@@ -334,7 +335,14 @@ Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](../src/skills/work-model/SKILL.md#without-gh)).
 
-`retro.py file` files a judged retro from its draft. The judge completes the collected facts,
+`retro.py bless <issue>` is the one call after the person checks and blesses the prefilled report:
+it records approval, immediately opens this retro's filing gate, posts the report and closes the
+issue, then reads both back. It needs no landed document, update, build or second session.
+
+Network calls share one minute; repeating the same command resumes partial writes.
+Finding outcomes stay independently tracked and never hold this gate.
+
+`retro.py file` retains the report-state path for a judged retro. The judge completes the collected facts,
 timeline, matrix, answers to the standing questions, and classes and homes; the decisions step
 leaves findings open for the deck. The judge also fills the draft's block:
 
@@ -351,7 +359,11 @@ a finding on the rule book, or on a check that recurred, that is not controversi
 went well.
 
 It refuses, too, a draft whose steps break the retro template, a step or a standing question left
-open among them. A draft of an older retro template whose steps differ only in their headings (the
+open among them. Collected drafts record their template version and effective rules; checks use
+those inputs even after the template changes. `templates.py renew retro --body-file <draft>`
+explicitly adopts the newest inputs; reopening starts a new input phase.
+
+A draft predating that record whose steps differ only in their headings (the
 six-step template's field feedback first) is read in the current form: its field feedback moves
 under Collect as a `### Field feedback` section, and `file` and `deck` say so.
 

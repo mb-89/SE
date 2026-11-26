@@ -139,6 +139,28 @@ behaviour other than what the code does.
     overhaul.
 - **Related:** gen-002, doc-001
 
+### gen-006 Frozen inputs
+
+Every piece of work records its template version and effective rules during its input phase
+and is checked against them through processing and output until closure, adopting newer inputs
+only by explicit opt-in or on reopening.
+
+- **Why:** moving acceptance criteria make work endless.
+- **Without it:** an answered draft is refused for a form introduced after it was answered.
+- **Prevents:** mid-work template drift; new required sections imposed on completed answers.
+- **Implementations:**
+  - se: [`templates.py`](../../../../scripts/templates.py) records effective template inputs,
+    nested templates and rules, and every parsed document carries them into its checks.
+
+    `templates.py renew <template> --body-file <file>` starts a new input phase, on reopen or
+    by explicit choice; raising the marker's version to the current version also opts in.
+    New and reopened work take the newest inputs; older work may choose to adopt them too.
+
+    [`retro.py`](../../../../scripts/retro.py) records these inputs at collection, and filing
+    checks in [`work_tickets.py`](../../../../scripts/work_tickets.py) use the same engine.
+  - Other changes to acceptance criteria during processing: by judgment, only by explicit opt-in.
+- **Related:** gen-002, gen-005
+
 ## des: software design
 
 ### des-001 Locality
@@ -428,6 +450,20 @@ is committed.
     `[commit_checks]` ([Commit checks](../../../../docs/settings.md#commit-checks)); SE's own tree, once
     SE pins a kern with forbid lists (kern 1.3.0) and names its scan there.
 - **Related:** des-004, des-017, tst-001, tst-004
+
+### des-019 Event-driven targeted observation
+
+Observation uses events wherever possible, and unavoidable polling is narrowly scoped, bounded
+and justified in the report.
+
+- **Why:** repeatedly scanning unchanged state wastes time and calls while hiding missing tools.
+- **Without it:** a wait becomes a loop over every object, with no deadline or useful new evidence.
+- **Prevents:** unnecessary polling; full-universe scans for one result; unreported waiting costs.
+- **Implementations:**
+  - se: [Friction and observation](../SKILL.md#friction-and-observation), followed by every role;
+    doors expose targeted, filtered or incremental reads where sensible, and callers prefer
+    callbacks, subscriptions and notifications.
+- **Related:** des-004, des-017, tst-003, wrk-010
 
 ## tst: testing and quality
 
@@ -737,6 +773,21 @@ role that starts them never blocks on them.
   - se: the owner's rule as landed, [Visible sessions](../SKILL.md#visible-sessions); by
     judgment.
 - **Related:** wrk-004, wrk-001, dec-011
+
+### wrk-010 Report all friction
+
+Every agent records all friction with its evidence, impact and outcome in its field report or
+equivalent final report, saying None only when there truly was none.
+
+- **Why:** a successful workaround can hide the waste that the next run will repeat.
+- **Without it:** waiting, limited tools and retries disappear from the evidence used to improve work.
+- **Prevents:** false friction-free reports; repeated workarounds; costs with no recorded outcome.
+- **Implementations:**
+  - se: [Friction and observation](../SKILL.md#friction-and-observation), the existing standing
+    question in [`templates/standing-questions.md`](../../../../templates/standing-questions.md),
+    and the field report's Retro instructions in
+    [the pull request template](../../../../.github/pull_request_template.md).
+- **Related:** gen-003, gen-006, des-019, wrk-009
 
 ## dec: decisions
 

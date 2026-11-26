@@ -1181,40 +1181,46 @@ def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_templat
     document = templates.parse(template, STEP)
     assert document.fields == {"risks": ["The scan misses a tool."]}
     rendered = templates.render(template, document)
-    assert rendered == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(template))
+    assert templates.INPUTS_PATTERN.sub("", rendered) == STEP.replace(
+        "name: Risks\n", "name: Risks\n" + recorded(template))
     assert templates.FLEET_MARKER not in rendered and "se:template" not in rendered
     assert templates.parse(template, rendered).fields == document.fields
     assert templates.render(template, templates.parse(template, rendered)) == rendered
     bare = templates.render(template, templates.parse(template, "# Risks\n\n## Risks\n\nNone\n"))
-    assert bare == f"---\n{recorded(template)}---\n\n# Risks\n\n## Risks\n\nNone\n"
+    assert templates.INPUTS_PATTERN.sub("", bare) == \
+        f"---\n{recorded(template)}---\n\n# Risks\n\n## Risks\n\nNone\n"
     fresh = templates.render(template, {"risks": ["One."]})
-    assert fresh == f"---\n{recorded(template)}---\n\n## Risks\n\n- One.\n"
+    assert templates.INPUTS_PATTERN.sub("", fresh) == f"---\n{recorded(template)}---\n\n## Risks\n\n- One.\n"
     assert templates.parse(template, fresh).fields == {"risks": ["One."]}
 
 
-def test_render_records_derived_from_and_overlay_in_place_and_selection_reads_them(tmp_path):
+def test_render_records_derived_from_and_overlay_in_place_and_selection_reads_them(tmp_path, fake_git_door):
     template = step_templates(tmp_path, risks="")["risks"]
     old = ("---\nderived_from:\n  template: risks\n  version: \"0.1.0\"\nid: S5B\noverlay: x\n---\n\n"
            "# Risks\n\n## Risks\n\nNone\n")
     assert templates.parse(template, old).recorded == "0.1.0"
     rendered = templates.render(template, templates.parse(template, old))
-    assert rendered == ('---\nderived_from: {template: risks, version: "1.0.0"}\n'
+    assert templates.INPUTS_PATTERN.sub("", rendered) == (
+                        '---\nderived_from: {template: risks, version: "1.0.0"}\n'
                         f"id: S5B\noverlay: {template.digest}\n---\n\n"
                         "# Risks\n\n## Risks\n\nNone\n")
     crlf = templates.render(template, templates.parse(template, "---\r\nid: S5B\r\n---\r\n\r\n"
                                                          "## Risks\r\n\r\nNone\r\n"))
-    assert crlf.startswith("---\r\nid: S5B\r\n" + recorded(template).replace("\n", "\r\n") + "---")
+    assert templates.INPUTS_PATTERN.sub("", crlf).startswith(
+        "---\r\nid: S5B\r\n" + recorded(template).replace("\n", "\r\n") + "---")
     assert templates.select(templates.load(tmp_path, folder=tmp_path / "templates"), "file.write",
                             rendered, path="book/m1/steps/x.md").name == "risks"
-    assert templates.draft(template).startswith(f"---\n{recorded(template)}---\n")
+    assert templates.INPUTS_PATTERN.sub("", templates.draft(template)).startswith(
+        f"---\n{recorded(template)}---\n")
 
 
-def test_render_brings_an_issue_s_marker_up_to_the_template_s_version(catalog):
+def test_render_does_not_silently_change_a_recorded_input_version(catalog):
     work = catalog["work"]
     rendered = templates.render(work, work_fields(catalog))
     old = rendered.replace(work.marker_line, work.marker_line.replace(f" {work.version} ", " 0.9.0 "))
     assert old != rendered
-    assert templates.render(work, templates.parse(work, old)) == rendered
+    with pytest.raises(templates.TemplateError, match="restore that version or run"):
+        templates.parse(work, old)
 
 
 def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
@@ -1234,7 +1240,8 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     where = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
     run = lambda *arguments: (templates.main([*arguments, *where]), capsys.readouterr())
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--render")
-    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(risks))
+    assert code == 0 and templates.INPUTS_PATTERN.sub("", out.out) == STEP.replace(
+        "name: Risks\n", "name: Risks\n" + recorded(risks))
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
     assert code == 1 and "[required]" in out.out
     code, out = run("check", "--path", str(steps / "90-S9.md"))
@@ -1244,7 +1251,8 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
     assert code == 0 and json.loads(out.out)["template"] == "risks"
     code, out = run("draft", "--path", str(steps / "51-S5B.md"))
-    assert out.out.startswith(f"---\n{recorded(risks)}---\n\n## Risks\n") and "se:fleet" not in out.out
+    assert templates.INPUTS_PATTERN.sub("", out.out).startswith(
+        f"---\n{recorded(risks)}---\n\n## Risks\n") and "se:fleet" not in out.out
     assert run("draft", "--path", str(tmp_path / "notes.md"))[1].out == \
         "free: no template claims notes.md\n"
     assert templates.main(["list", "--templates", str(tmp_path / "templates")]) == 0
@@ -1253,6 +1261,100 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
 
 
 # The version a document records (docs/templates.md "The document"): its marker's or its front matter's
+
+
+@pytest.mark.parametrize("as_file", [False, True])
+def test_frozen_inputs_survive_a_template_move_and_reopening_takes_new_inputs(
+        tmp_path, as_file, fake_git_door):
+    old = templates.Template(
+        name="example", reader="fleet", says="The input.", actions=("file.write",) if as_file else
+        ("issue.create",), version="1.0.0", digest="sha256:" + "0" * 64, rules={"required": "refuse"},
+        fields=(templates.Field(name="answer", kind="text", heading="Answer", required=True),))
+    body = templates.render(old, {"answer": "Answered before the template changed."})
+    new = replace(old, version="2.0.0", fields=(*old.fields, templates.Field(
+        name="later", kind="text", heading="Added later", required=True)))
+    parsed = templates.parse(new, body)
+    assert parsed.recorded == "1.0.0"
+    assert not templates.check(new, parsed)
+    assert templates.render(new, parsed) == body
+    _, checked = work_tickets.template_findings(tmp_path, "owner/repo", new, "an-example", body)
+    assert not [item for item in checked if item.severity == templates.REFUSE]
+    reopened = templates.renew(new, body)
+    document = templates.parse(new, reopened)
+    assert document.recorded == "2.0.0"
+    assert document.fields["answer"] == parsed.fields["answer"]
+    assert [item.field for item in templates.check(new, document)] == ["later"]
+    fresh = templates.render(new, {"answer": "A new piece of work."})
+    assert [item.field for item in templates.check(new, templates.parse(new, fresh))] == ["later"]
+
+
+def test_an_explicit_version_bump_opts_into_new_inputs_and_renew_is_one_command(
+        tmp_path, monkeypatch, capsys):
+    old = templates.Template(
+        name="example", reader="fleet", says="The input.", actions=("issue.create",),
+        version="1.0.0", digest="sha256:" + "0" * 64, rules={"required": "refuse"},
+        fields=(templates.Field(name="answer", kind="text", heading="Answer", required=True),))
+    new = replace(old, version="2.0.0", fields=(*old.fields, templates.Field(
+        name="later", kind="text", heading="Added later", required=True)))
+    body = templates.render(old, {"answer": "Kept."})
+    bumped = body.replace(old.marker_line, new.marker_line)
+    assert [item.field for item in templates.check(new, templates.parse(new, bumped))] == ["later"]
+    path = tmp_path / "draft.md"
+    path.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(templates, "catalog", lambda *args, **kwargs: {"example": new})
+    assert templates.main(["renew", "example", "--body-file", str(path)]) == 0
+    renewed = path.read_text(encoding="utf-8")
+    assert templates.parse(new, renewed).recorded == "2.0.0"
+    assert [item.field for item in templates.check(new, templates.parse(new, renewed))] == ["later"]
+    assert "Recorded new inputs: example 2.0.0" in capsys.readouterr().out
+
+
+def test_nested_templates_and_rule_settings_are_frozen_too(catalog):
+    old = catalog["work"]
+    body = templates.render(old, work_fields(catalog))
+    changed = replace(old, version="2.0.0", rules={**old.rules, "duplicate": "refuse"},
+                      fields=tuple(replace(item, nested=replace(item.nested, fields=(
+                          *item.nested.fields, templates.Field(
+                              name="later", kind="text", heading="Added later", required=True))))
+                                   if item.nested else item for item in old.fields))
+    parsed = templates.parse(changed, body)
+    assert parsed.inputs.rules == old.rules
+    assert templates.check(changed, parsed) == templates.check(old, templates.parse(old, body))
+
+
+def test_a_pre_snapshot_document_uses_its_recorded_template_from_local_history(tmp_path, fake_git_door):
+    fake_git.init(tmp_path)
+    old = quote_template(tmp_path)
+    commit_all(tmp_path)
+    body = templates.INPUTS_PATTERN.sub("", templates.render(old, FILLED))
+    new = replace(old, version="2.0.0", fields=(*old.fields, templates.Field(
+        name="later", kind="text", heading="Added later", required=True)))
+    parsed = templates.parse(new, body)
+    assert parsed.inputs.version == "1.0.0"
+    assert templates.check(new, parsed) == []
+    reopened = templates.parse(new, templates.renew(new, body))
+    assert [item.field for item in templates.check(new, reopened)] == ["later"]
+
+
+def test_standing_question_guidance_keeps_existing_answers_and_frozen_inputs(catalog):
+    current = catalog["retro"]
+    questions = current.field("answers").nested
+    old_questions = replace(questions, version="1.0.0", fields=tuple(
+        replace(item, says="What went wrong, with its evidence.")
+        if item.name == "goes_badly" else item for item in questions.fields))
+    old = replace(current, fields=tuple(
+        replace(item, pin=old_questions.version, nested=old_questions)
+        if item.name == "answers" else item for item in current.fields))
+    body = templates.render(old, current.example["fields"])
+    parsed = templates.parse(current, body)
+    frozen_questions = parsed.inputs.field("answers").nested
+    assert frozen_questions.version == old_questions.version
+    assert frozen_questions.fields == old_questions.fields
+    assert templates.check(current, parsed) == []
+    upgraded = templates.parse(current, templates.renew(current, body))
+    assert upgraded.inputs.field("answers").nested.version == questions.version
+    assert upgraded.fields == parsed.fields
+    assert templates.check(current, upgraded) == []
 
 
 def at_version(template: templates.Template, version: str) -> templates.Template:
@@ -1286,24 +1388,26 @@ def test_a_document_that_records_no_version_passes(catalog, tmp_path):
 
 
 @pytest.mark.parametrize("recorded", ["2.3.1", "2.1.4", "2.4.0"])
-def test_a_minor_or_patch_move_warns(catalog, tmp_path, recorded):
+def test_a_minor_or_patch_move_warns(catalog, tmp_path, recorded, fake_git_door):
     work = at_version(catalog["work"], "2.3.0")
-    body = templates.render(at_version(work, recorded), work_fields(catalog))
+    body = templates.INPUTS_PATTERN.sub("", templates.render(at_version(work, recorded), work_fields(catalog)))
     found = version_findings(work, body)
     assert [(f.field, f.severity) for f in found] == [("template", "warn")]
     assert f"records work {recorded}; the template is at 2.3.0" in found[0].fix
     assert "templates.py check work --body-file <file> --render" in found[0].fix
     assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
     risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
-    page = templates.render(at_version(risks, recorded), templates.parse(risks, STEP))
+    page = templates.INPUTS_PATTERN.sub("", templates.render(at_version(risks, recorded),
+                                        templates.parse(at_version(risks, recorded), STEP)))
     assert [f.severity for f in version_findings(risks, page)] == ["warn"]
     assert "templates.py check --path <file> --render" in version_findings(risks, page)[0].fix
 
 
 @pytest.mark.parametrize("recorded", ["1.9.0", "3.0.0", "two"])
-def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_path, capsys, recorded):
+def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_path, capsys, recorded, fake_git_door):
     work = at_version(catalog["work"], "2.3.0")
-    body = templates.render(at_version(work, "1.0.0"), work_fields(catalog)).replace(
+    body = templates.INPUTS_PATTERN.sub("", templates.render(
+        at_version(work, "1.0.0"), work_fields(catalog))).replace(
         " 1.0.0 ", f" {recorded} ", 1)
     found = version_findings(work, body)
     assert [f.severity for f in found] == ["refuse"]
@@ -1311,7 +1415,7 @@ def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_pat
     assert "`templates.py draft work --json`" in found[0].fix
     assert "`templates.py check work --fields <fields> --render`" in found[0].fix
     risks = step_templates(tmp_path, risks="")["risks"]
-    page = templates.render(risks, templates.parse(risks, STEP)).replace(
+    page = templates.INPUTS_PATTERN.sub("", templates.render(risks, templates.parse(risks, STEP))).replace(
         'version: "1.0.0"', f'version: "{recorded}"')
     moved = at_version(risks, "2.3.0")
     assert [f.severity for f in version_findings(moved, page)] == ["refuse"]
@@ -1985,6 +2089,7 @@ def without_beats(plan):
 
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
+    "retro:bless": ("retro.py bless", retro_steps),
     "work_tickets:work_issue_filing": ("file", work_issue),
     "work_tickets:stamp": ("stamp", stamped_issue),
     "work_tickets:filing_plan": ("file, backlog file and route", filing),
@@ -2131,13 +2236,14 @@ def test_stamped_writes_the_marker_where_render_writes_it_and_keeps_every_other_
     work, routed, review_template = catalog["work"], catalog["routed"], catalog["review"]
     fleet = templates.FLEET_MARKER
     body = f"{fleet}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n"
-    assert templates.stamped(work, body) == (
+    assert templates.INPUTS_PATTERN.sub("", templates.stamped(work, body)) == (
         f"{fleet}\n{work.marker_line}\n<!-- se:beat 2026-11-24T10:00Z -->\n\n## Goal\n\nG.\n")
-    assert templates.stamped(work, "## Goal\n\nG.\n") == f"{fleet}\n{work.marker_line}\n\n## Goal\n\nG.\n"
+    assert templates.INPUTS_PATTERN.sub("", templates.stamped(work, "## Goal\n\nG.\n")) == \
+        f"{fleet}\n{work.marker_line}\n\n## Goal\n\nG.\n"
     again = templates.stamped(work, body)
     assert templates.stamped(work, again) == again  # stamped once
     routing = "Please.\n\n<!-- se:handled -->\n## Routing\n\nRouted from: x\n"
-    assert templates.stamped(routed, routing) == (
+    assert templates.INPUTS_PATTERN.sub("", templates.stamped(routed, routing)) == (
         f"Please.\n\n<!-- se:handled -->\n{routed.marker_line}\n## Routing\n\nRouted from: x\n")
     assert work_tickets.ROUTED_PATTERN.search(templates.stamped(routed, routing))
     with pytest.raises(templates.TemplateError, match="no `<!-- se:handled -->` line"):
@@ -2590,7 +2696,7 @@ def test_a_fill_from_a_raw_input_file_writes_a_document_that_passes_check(tmp_pa
     assert out.out == "wrote findings/export.md: finding 1.0.0\n"
     written = target.read_text(encoding="utf-8")
     assert written == templates.render(template, FILLED)
-    assert written.startswith(f"---\n{recorded(template)}---\n")
+    assert templates.INPUTS_PATTERN.sub("", written).startswith(f"---\n{recorded(template)}---\n")
     assert templates.main(["check", "--path", str(target), *where]) == 0
     assert capsys.readouterr().out == "finding: no findings\n"
 
@@ -2634,7 +2740,8 @@ def test_a_fill_keeps_the_head_of_the_file_it_fills_again(tmp_path, capsys):
     assert templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
                            "--fields-json", json.dumps(FILLED), *where]) == 0
     written = target.read_text(encoding="utf-8")
-    assert written.startswith(f"---\nid: F1\n{recorded(template)}---\n\n# Export\n\n## Seen\n\n")
+    assert templates.INPUTS_PATTERN.sub("", written).startswith(
+        f"---\nid: F1\n{recorded(template)}---\n\n# Export\n\n## Seen\n\n")
     assert "Old." not in written and templates.parse(template, written).fields == FILLED
 
 
@@ -3035,10 +3142,12 @@ def test_a_template_manifest_fills_a_document_that_derives_from_it_and_holds_non
     assert (code, out) == (0, f"wrote {document}: requirements 2\n")
     text = document.read_text(encoding="utf-8")
     template = templates.load(tmp_path, folder=folder)["requirements"]
-    assert text.startswith('---\nderived_from: {template: requirements, version: "2"}\n'
+    assert templates.INPUTS_PATTERN.sub("", text).startswith(
+                           '---\nderived_from: {template: requirements, version: "2"}\n'
                            f"overlay: {template.digest}\n---\n")
     assert [line for line in text.splitlines() if line.startswith("#")] == ["## Purpose", "## Scope", "## Risks"]
-    assert not [part for part in (*GUIDANCE, templates.SLOT, "<!--", "Why:") if part in text]
+    visible = templates.INPUTS_PATTERN.sub("", text)
+    assert not [part for part in (*GUIDANCE, templates.SLOT, "<!--", "Why:") if part in visible]
     parsed = templates.parse(template, text)
     assert (parsed.fields, parsed.recorded) == (MANIFEST_FILLED, "2")
     assert template.manifest and template.actions == () and template.kind == "document"
@@ -3293,8 +3402,9 @@ def test_a_file_records_its_corrections_in_its_front_matter_and_a_refill_drops_t
     corrected, found, corrections = templates.fill(template, values, RAW)
     assert len(corrections) == 2 and found == []
     front = templates.FRONT_MATTER.match(corrected).group(0)
-    assert front.splitlines()[-2] == 'corrected: ["whitespace"]'
-    assert corrected == templates.render(template, FILLED).replace(
+    assert 'corrected: ["whitespace"]' in front.splitlines()
+    assert templates.INPUTS_PATTERN.sub("", corrected) == templates.INPUTS_PATTERN.sub(
+        "", templates.render(template, FILLED)).replace(
         "\n---\n", '\ncorrected: ["whitespace"]\n---\n', 1)
     again, _, none = templates.fill(template, FILLED, RAW, existing=corrected)
     assert none == [] and "corrected:" not in again
@@ -3345,7 +3455,7 @@ def test_the_worked_example_fills_two_documents_that_pass_link_the_material_and_
         assert templates.main([*common, "--fields-json", json.dumps(fields)]) == 0
         assert capsys.readouterr().out.endswith(f": {named} {template.version}\n")
         text = target.read_text(encoding="utf-8")
-        assert text == expected
+        assert templates.INPUTS_PATTERN.sub("", text) == expected
         assert templates.derived_from(text)[2:] == (named, template.version)
         links = re.findall(r"\]\((\.\./material/[^)]+)\)", text)
         assert links and all((target.parent / link).resolve().is_file() for link in links)
@@ -3479,7 +3589,7 @@ def test_a_nested_finding_names_its_path_from_the_document_down_through_each_par
         "does not say)"]
 
 
-def test_a_list_of_items_leaves_carried_fields_and_documents_filed_before_since_alone(tmp_path):
+def test_a_list_of_items_leaves_carried_fields_and_documents_filed_before_since_alone(tmp_path, fake_git_door):
     plan = templates.load(tmp_path, folder=nested_folder(tmp_path))["plan"]
     body = template_cases.PLAN_BODY
     rules_of = lambda text: [(finding.rule, finding.fix.split(":")[0])  # noqa: E731

@@ -3,7 +3,7 @@
 # a section, its heading the question. The three templates nest this block; scripts/templates.py's
 # docstring owns this note's format.
 name: standing-questions
-version: 1.0.0
+version: 1.0.1
 kind: block
 reader: fleet
 says: "The standing questions every retro, overhaul and field report answers, one section each."
@@ -119,7 +119,7 @@ example:
 
 ## What goes badly, each with its moment in the log?
 
-<!-- goes_badly: What went wrong, each with the log line, commit or comment where it shows. "None" where nothing applies. -->
+<!-- goes_badly: All friction, including waiting, polling, limited tooling, workarounds and retries, even when resolved: each with its log line, commit or comment, impact and outcome. Explain any polling fallback: no event interface, its narrow scope and bounds. "None" only when there truly was none. -->
 
 ## What do the thoughts say that the actions do not?
 

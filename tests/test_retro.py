@@ -536,7 +536,8 @@ def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)
 
-    assert text.startswith("# Retro draft for #30\n")
+    assert "# Retro draft for #30\n" in text
+    assert retro.templates().marked_version(retro.retro_template(), text) == retro.retro_template().version
     assert "| landed | 2 | 5 |" in text
     assert "| #11 feat/a | 1 | 1 | 35.4 s | #22 |" in text
     assert "- **check**: " in text and "broken 1 of 3\n  - #23: check failure" in text
@@ -1136,6 +1137,174 @@ class FakeTracker:
                 for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
 
 
+@pytest.fixture
+def blessing(checkout, monkeypatch):
+    class Tracker:
+        missing = []
+
+        def __init__(self):
+            self.given = []
+            self.closed = False
+            self.calls = []
+            self.fail_after = None
+            self.seconds = 0.0
+            self.gate_open_at_bless = False
+
+        def issue(self, number):
+            self.seconds += 0.2
+            if number == 30:
+                return {"number": 30, "title": "retro-due-20261126", "labels": ["retro"],
+                        "created_at": "2026-11-26T09:00:00Z",
+                        "closed_at": "2026-11-26T09:01:00Z" if self.closed else "",
+                        "state": "closed" if self.closed else "open", "state_reason": "completed"}
+            return {"number": number, "state": "open", "labels": ["work"],
+                    "body": "retro #30 finding 1"}
+
+        def comments(self, number):
+            self.seconds += 0.2
+            return self.given
+
+        def open_issues(self):
+            return [] if self.closed else [self.issue(30)]
+
+        def closed_issues(self):
+            return [self.issue(30)] if self.closed else []
+
+        def pulls(self):
+            return []
+
+        def actions(self, root, tracker, door):
+            def write(arguments, detail, name):
+                self.seconds += 2
+                self.calls.append((name, arguments))
+                if name == "comment_issue":
+                    self.given.append({"body": arguments["body"]})
+                    if retro.BLESSED_DRAFT.search(arguments["body"]):
+                        work_tickets.filing_check(root, REPO, "file", self,
+                                                 datetime(2026, 11, 26, 9, 1, tzinfo=timezone.utc))
+                        self.gate_open_at_bless = not self.closed
+                else:
+                    self.closed = True
+                if self.fail_after == len(self.calls):
+                    self.fail_after = None
+                    raise work_tickets.QueueError("GitHub response lost after write")
+
+            return {name: (lambda arguments, detail, name=name: write(arguments, detail, name))
+                    for name in ("comment_issue", "close_issue")}
+
+    tracker = Tracker()
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
+    monkeypatch.setattr(retro, "issue_actions", tracker.actions)
+    monkeypatch.setattr(retro.time, "monotonic", lambda: tracker.seconds)
+    return tracker
+
+
+@pytest.mark.parametrize("old_form", [False, True])
+def test_bless_goes_from_answered_draft_to_closed_with_gate_open_in_one_call(
+        checkout, tmp_path, monkeypatch, blessing, old_form, capsys):
+    text = judged_draft(checkout)
+    if old_form:
+        text = retro.templates().INPUTS_PATTERN.sub("", text)
+        text = re.sub(r"^## ([1-5])\.", lambda match: f"## {int(match[1]) + 1}.",
+                      text, flags=re.MULTILINE)
+        text = text.replace("## 2. Collect", "## 1. Field feedback\n\n"
+                            "<!-- field_feedback: Answer. -->\n\nRetros take too long.\n\n"
+                            "## 2. Collect", 1)
+    draft = tmp_path / "answered.md"
+    draft.write_text(text, encoding="utf-8")
+    before = draft.read_bytes()
+    monkeypatch.setattr(work_tickets, "integration_ref",
+                        lambda root: pytest.fail("bless must not need a landed doc or sync"))
+    assert retro.main(["bless", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert blessing.seconds < 60
+    assert blessing.closed and blessing.gate_open_at_bless
+    assert retro.filing_state(blessing.given).phase == "blessed"
+    assert draft.read_bytes() == before
+    block = retro.posted_block([item["body"] for item in blessing.given], 30,
+                              lambda sha, path: pytest.fail("no landed doc needed"))
+    assert len(block["findings"]) == 2
+    for finding in (None, retro.FindingRef("30:1")):
+        work_tickets.filing_check(checkout, REPO, "file", blessing,
+                                 datetime(2026, 11, 26, 9, 1, tzinfo=timezone.utc), finding)
+    retro.record_outcome(checkout, REPO, retro.FindingRef("30:1"), "issue", "99", blessing)
+    assert blessing.closed and retro.filing_state(blessing.given).phase == "blessed"
+    assert "blessed and closed; filing gate open" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("fail_after", [1, 2, 4])
+def test_bless_resumes_after_a_lost_write_response_without_duplicate_comments(
+        checkout, tmp_path, blessing, fail_after, capsys):
+    draft = tmp_path / "answered.md"
+    draft.write_text(judged_draft(checkout), encoding="utf-8")
+    command = ["bless", "30", "--draft", str(draft), "--repo", REPO, "--worktree", str(checkout)]
+    blessing.fail_after = fail_after
+    assert retro.main(command) == 1
+    assert "GitHub response lost" in capsys.readouterr().err
+    assert blessing.gate_open_at_bless
+    assert retro.main(command) == 0
+    assert blessing.closed
+    bodies = [item["body"] for item in blessing.given]
+    assert len(bodies) == len(set(bodies)) == 3
+    writes = len(blessing.calls)
+    assert retro.main(command) == 0
+    assert len(blessing.calls) == writes
+
+
+def test_bless_refuses_an_incomplete_draft_before_opening_the_gate(
+        checkout, tmp_path, blessing, capsys):
+    draft = tmp_path / "answered.md"
+    draft.write_text(judged_draft(checkout, went_well=[]), encoding="utf-8")
+    assert retro.main(["bless", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 1
+    assert not blessing.calls and not blessing.closed
+    assert "not complete" in capsys.readouterr().err
+
+
+def test_bless_caps_network_processes_at_the_remaining_minute(monkeypatch, capsys):
+    processes = work_tickets.process_door
+
+    class Timeout:
+        def run(self, argv, options):
+            assert options["timeout"] == 55
+            raise retro.subprocess.TimeoutExpired(argv, options["timeout"])
+
+    def blocked(args, deadline):
+        monkeypatch.setattr(retro.time, "monotonic", lambda: 5)
+        processes.run(["gh", "api", "rate_limit"])
+
+    monkeypatch.setattr(retro.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(retro, "bless", blocked)
+    with processes.use(Timeout()):
+        assert retro.main(["bless", "30"]) == 1
+    assert "one-minute network budget" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command", ["collect", "file", "bless"])
+def test_private_drafts_are_refused_before_writing_or_posting(
+        checkout, tmp_path, monkeypatch, blessing, command, capsys):
+    private = "\\".join(("C:", "Users", "alice", "private", "notes.txt"))
+    text = judged_draft(checkout).replace("## 1. Collect", f"{private}\n\n## 1. Collect")
+    path = tmp_path / "draft.md"
+    if command == "collect":
+        found = collected(checkout)
+        monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+        monkeypatch.setattr(retro, "collect", lambda *args, **kwargs: found)
+        monkeypatch.setattr(retro, "draft", lambda _: text)
+        options = ["--out", str(path)]
+    else:
+        path.write_text(text, encoding="utf-8")
+        options = ["--draft", str(path)]
+    assert retro.main([command, "30", *options, "--repo", REPO,
+                       "--worktree", str(checkout)]) == 1
+    output = capsys.readouterr()
+    assert "private material" in output.err
+    assert private not in output.out + output.err
+    assert not blessing.calls
+    if command == "collect":
+        assert not path.exists()
+
+
 def test_record_outcome_closes_only_after_last_finding(monkeypatch, capsys):
     class Door(retro.GhDoor):
         missing = []
@@ -1361,7 +1530,7 @@ def test_file_reads_a_draft_of_the_older_six_step_template_in_the_current_form(
                 "## 3. Table of what happened", "## 3. The standing questions":
                 "## 4. The standing questions", "## 4. Classes and homes": "## 5. Classes and homes",
                 "## 5. The person decides": "## 6. The person decides"}
-    old = text
+    old = retro.templates().INPUTS_PATTERN.sub("", text)
     for new, before in headings.items():
         old = old.replace(f"\n{new}\n", f"\n{before}\n", 1)
     first = old.index("## 2. Collect")
@@ -1381,6 +1550,30 @@ def test_file_reads_a_draft_of_the_older_six_step_template_in_the_current_form(
     assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
     assert "follows an older retro template" in capsys.readouterr().out
+
+
+def test_file_checks_the_template_inputs_recorded_at_collection_not_the_newest_form(
+        checkout, tmp_path, monkeypatch):
+    text = judged_draft(checkout)
+    engine = retro.templates()
+    old = retro.retro_template()
+    assert engine.marked_version(old, text) == old.version
+    latest = dataclasses.replace(old, version="99.0.0", fields=(*old.fields, engine.Field(
+        name="later", kind="text", heading="Added after the answers", required=True)))
+    own = engine.own
+    monkeypatch.setattr(engine, "own", lambda name: latest if name == "retro" else own(name))
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    draft = tmp_path / "answered.md"
+    draft.write_text(text, encoding="utf-8")
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    report = tracker.calls[0][1]["body"]
+    assert engine.parse(latest, report).recorded == old.version
+    assert not retro.steps_problems(report)
+    renewed = engine.renew(latest, text)
+    assert any("Added after the answers" in problem for problem in retro.steps_problems(renewed))
 
 
 def test_file_reads_the_draft_at_its_known_path_and_names_collect_where_none_is(
@@ -1410,7 +1603,7 @@ def test_file_without_gh_posts_report_state_and_leaves_findings_open(checkout, m
     assert '1. add_issue_comment {"body": "<!-- se:retro-report -->' in out
     assert '2. add_issue_comment {"body": "<!-- se:retro-state report findings=2 -->' in out
     assert "issue_write" not in out
-    assert "create" not in out.replace("created", "")
+    assert not re.search(r"^\d+\. (?:create_issue|issue_write) ", out, re.MULTILINE)
 
 
 def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
@@ -1517,7 +1710,7 @@ def test_the_retro_template_names_the_two_commands():
     template = (Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE"
                 / "retro.md").read_text(encoding="utf-8")
     assert "scripts/retro.py collect <this issue> --out <draft>" in template
-    assert "scripts/retro.py file <this issue> --draft <draft>" in template
+    assert "scripts/retro.py bless <this issue> --draft <draft>" in template
 
 
 def test_an_ad_hoc_component_used_in_enough_sessions_is_a_promotion_candidate(checkout):
