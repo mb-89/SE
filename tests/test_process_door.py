@@ -86,6 +86,17 @@ def test_check_raises_as_subprocess_does() -> None:
     assert raised.value.returncode == 2
 
 
+@pytest.mark.parametrize(("registered", "executable"), [
+    ("gh", "gh.EXE"),
+    ("gh", "gh.CMD"),
+    ("python.exe", "python.exe"),
+])
+def test_fake_matches_windows_executables_by_program_name(tmp_path, registered, executable) -> None:
+    fake = fakes.FakeProcesses().on(registered, lambda call: f"{call.words[1]}\n")
+    result = fake.run([str(tmp_path / executable), "status"], {"capture_output": True, "text": True})
+    assert result.stdout == "status\n"
+
+
 def test_a_script_of_se_runs_in_process_by_its_main(tmp_path: Path, monkeypatch, fake_processes) -> None:
     import se_home
 

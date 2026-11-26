@@ -227,7 +227,7 @@ def shell_backend(item: pytest.Item) -> shell_door.Backend:
     `fake_shell` fixture)."""
     if spawn_guard.allowed(item):
         return shell_door.RealShell()
-    return fake_programs.FakeProcesses(scripts=False, hooks=False)
+    return fake_programs.FakeProcesses(scripts=False, hooks=True)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -325,8 +325,8 @@ def fake_processes() -> fake_programs.FakeProcesses:
 def fake_shell() -> fake_programs.FakeProcesses:
     """The shell door's fake of this test (tests/fake_processes.py), for its handlers: each shell
     the code under test starts (`sh RUNME.sh`, a command line) answered by `fake_shell.on(...)`; a
-    shell no handler answers fails the test, naming it. The shell door's contract (`contract:
-    shell`) runs the real shell and cannot take it."""
+    shell no handler answers fails the test, naming it. SE's hooks run by their in-process logic.
+    The shell door's contract (`contract: shell`) runs the real shell and cannot take it."""
     backend = shell_door.BACKEND
     if not isinstance(backend, fake_programs.FakeProcesses):
         pytest.fail("fake_shell: this test runs the real shell (a spawns mark); drop the mark to take the fake",

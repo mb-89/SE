@@ -94,6 +94,18 @@ def test_a_test_gets_the_fake_shell_which_answers_by_its_handlers(fake_shell: fa
     assert shell_door.run("make docs", shell=True).returncode == 4
 
 
+def test_the_shell_fake_runs_se_hooks_through_their_logic(tmp_path, monkeypatch) -> None:
+    hooks = tmp_path / ".githooks"
+    hooks.mkdir()
+    (hooks / "se-script").touch()
+    hook = hooks / "pre-push"
+    hook.touch()
+    monkeypatch.setitem(fakes.HOOKS, "pre-push", lambda call: fakes.Answer(4, " ".join(call.arguments)))
+    result = process_door.run([str(tmp_path / "sh.EXE"), str(hook), "origin", "remote"],
+                              capture_output=True, text=True)
+    assert (result.returncode, result.stdout) == (4, "origin remote")
+
+
 def test_a_shell_no_handler_answers_fails_the_test_naming_it(fake_shell: fakes.FakeProcesses) -> None:
     with pytest.raises(pytest.fail.Exception, match=r"no fake answers `bash -c exit 9`"):
         shell_door.run(["bash", "-c", "exit 9"])

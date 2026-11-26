@@ -27,6 +27,7 @@ import pytest
 import fake_git
 import git_door
 import hygiene
+import shell_door
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SE_ROOT / "scripts" / "public_check.py"
@@ -1430,8 +1431,8 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
 
 @pytest.mark.parametrize("door", [
     pytest.param("real", marks=pytest.mark.spawns(
-        "entry: .githooks (pre-commit, commit-msg, pre-push), the real hooks run once through sh and "
-        "se-script, held to their in-process logic (tests/fake_processes.py HOOKS)")),
+        "contract: shell, se's hooks run through sh and se-script, held to their in-process logic "
+        "(tests/fake_processes.py HOOKS)")),
     "fake",
 ])
 def test_ses_hooks_run_for_real_answer_as_their_logic_in_process(hooked: Path, tmp_path: Path, door: str) -> None:
@@ -1793,12 +1794,16 @@ def field_report_script() -> str:
     return "\n".join(block)
 
 
-# The field-report step reads the description in its own bash (sed for a landing's marker, grep
-# for the report's, the Component kinds only off a landing) around gh, pr_issues.py and uv: its
-# tests run that shell, as a process, with gh and uv as scripts on its PATH.
+# The field-report step's shell-to-CLI contract covers its marker and issue routing with real bash,
+# gh and uv as scripts on its PATH, and the same Python running this suite.
 FIELD_REPORT_SHELL = pytest.mark.spawns(
-    "shell: the check workflow's field-report step is bash (sed, grep, its landing branch) run only as a "
-    "process, gh and uv as scripts on its PATH")
+    "contract: shell, the workflow's field-report step routes its markers and issue through gh, Python and uv")
+
+
+def field_report_python(bin_dir: Path) -> None:
+    python = bin_dir / "python3"
+    python.write_text(f"#!/bin/sh\nexec '{Path(sys.executable).as_posix()}' \"$@\"\n", encoding="utf-8")
+    python.chmod(0o755)
 
 
 @FIELD_REPORT_SHELL
@@ -1814,6 +1819,7 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
     calls = tmp_path / "calls.txt"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    field_report_python(bin_dir)
     for name, script in {"gh": f'echo "gh $*" >> \'{calls}\'\necho "issue body"\n',
                          "uv": f'echo "uv $*" >> \'{calls}\'\n'}.items():
         (bin_dir / name).write_text("#!/bin/sh\n" + script, encoding="utf-8")
@@ -1822,7 +1828,7 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
            "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example",
            "GITHUB_ENV": str(tmp_path / "github-env")}
-    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
+    result = shell_door.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
@@ -1843,6 +1849,7 @@ def test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request
     calls = tmp_path / "calls.txt"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    field_report_python(bin_dir)
     report = "Fixes https://github.com/alice/example/issues/5\n\n<!-- se:field-report -->\nreport"
     gh = (f'echo "gh $*" >> \'{calls}\'\n'
           f'case "$2" in */pulls/7) printf \'%s\\n\' \'{report}\';; *) echo "issue body";; esac\n')
@@ -1853,7 +1860,7 @@ def test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
            "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example",
            "GITHUB_ENV": str(tmp_path / "github-env")}
-    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
+    result = shell_door.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     made = calls.read_text(encoding="utf-8").splitlines()
@@ -1880,9 +1887,13 @@ def work_tickets_landing_description() -> str:
     "Refs https://github.com/bob/other/issues/7",  # another repository's issue
 ])
 def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path, first_line: str) -> None:
-    env = {**os.environ, "PR_BODY": f"{first_line}\n<!-- se:field-report -->\nreport\n",
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    field_report_python(bin_dir)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+           "PR_BODY": f"{first_line}\n<!-- se:field-report -->\nreport\n",
            "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
-    result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
+    result = shell_door.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 1
     assert "::error::field-report: the description's first line names no work issue" in result.stdout

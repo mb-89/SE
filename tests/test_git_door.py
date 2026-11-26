@@ -412,7 +412,7 @@ def test_a_worktree_shares_the_branches_and_is_listed_until_it_is_removed(door, 
     worker = tmp_path / "worker"
     git(root, "worktree", "add", "-q", "-b", "worker", str(worker))
     assert (worker / ".git").is_file() and (worker / "a.txt").read_text(encoding="utf-8") == "a\n"
-    assert Path(git(worker, "rev-parse", "--show-toplevel")).resolve() == worker.resolve()
+    assert git(worker, "rev-parse", "--show-toplevel") == worker.resolve().as_posix()
     common = Path(git(worker, "rev-parse", "--git-common-dir"))
     assert (common if common.is_absolute() else worker / common).resolve() == (root / ".git").resolve()
     head = commit(worker, {"b.txt": "b\n"})

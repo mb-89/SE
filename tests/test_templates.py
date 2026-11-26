@@ -27,6 +27,7 @@ import overhaul
 import retro
 import review
 import test_deck
+from test_docs import obs_in_process
 import test_overhaul
 import test_retro
 import test_review
@@ -2995,8 +2996,6 @@ MANIFEST_FILLED = {"purpose": "The pump controller keeps the tank level between 
           "scope": "- In scope: the level loop and its alarms.\n- Out of scope: the pump drives.",
           "risks": "The level sensor may drift; the instrument team owns its calibration."}
 BRIEF = "The product brief: the pump controller keeps the tank level for the plant operators."
-OBS_BUILDS = ("tool: obs-document, in obs's own Python environment, builds the filled document, so only "
-              "the real obs proves it reads the document's derived_from; it runs only as a process")
 
 
 def manifest_folder(root: Path, **changed: str | None) -> Path:
@@ -3127,8 +3126,8 @@ def test_derived_from_reads_a_flow_mapping_or_an_indented_one(front, named):
     assert templates.derived_from("---\ntitle: T\n---\n") is None
 
 
-@pytest.mark.spawns(OBS_BUILDS)
-def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, obs, capsys):
+def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, obs_in_process, capsys):
+    obs = obs_in_process
     note = (obs / "spec" / "capabilities" / "templates.md").read_text(encoding="utf-8")
     folder = tmp_path / "templates"
     for match in re.finditer(r"^```text template/(\S+)\n(.*?)^```$", note, re.MULTILINE | re.DOTALL):

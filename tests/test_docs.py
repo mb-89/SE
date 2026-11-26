@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import base64
 import gzip
+import importlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -22,7 +24,7 @@ NOTES = "src/skills/work-model/references/"
 BOOK = ROOT / NOTES / "rules.md"
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
-from fake_processes import Answer  # noqa: E402
+from fake_processes import Answer, Invocation, completed, run_main  # noqa: E402
 # Every build syncs the obs module into the checkout; the fixture `obs` (conftest.py) prepares it first,
 # once at a time.
 
@@ -38,9 +40,67 @@ def built_in_process(capsys: pytest.CaptureFixture, *arguments: str) -> subproce
     return subprocess.CompletedProcess(["build_docs.py", *arguments], code, captured.out, captured.err)
 
 
-# The obs build of a vault: obs's lints are obs's, so only the real obs proves a build fails on one.
-REAL_OBS = ("tool: obs-document, in obs's own Python environment, builds the vault and owns the lint, so "
-            "only the real obs proves the build fails on it; it runs only as a process")
+@pytest.fixture
+def obs_in_process(obs, monkeypatch, fake_processes, fake_git_door, request):
+    """Run obs and its adapter in-process, with their installed packages and the git door's fake."""
+    def is_obs(name):
+        return name in ("obs", "obs_html") or name.startswith(("obs.", "obs_html."))
+
+    previous = {name: sys.modules.pop(name) for name in list(sys.modules) if is_obs(name)}
+
+    def restore_modules():
+        for name in list(sys.modules):
+            if is_obs(name):
+                del sys.modules[name]
+        sys.modules.update(previous)
+
+    request.addfinalizer(restore_modules)
+    adapter = ROOT / ".se" / "obs-local" / "components" / "obs-html"
+    for folder in (adapter, obs):
+        venv = folder / ".venv"
+        site = sysconfig.get_path("purelib", vars={"base": str(venv), "platbase": str(venv)})
+        monkeypatch.syspath_prepend(site)
+        monkeypatch.syspath_prepend(str(folder / "src"))
+    import git_door
+    adapter_module = importlib.import_module("obs.adapter")
+    document_module = importlib.import_module("obs.document")
+    html_module = importlib.import_module("obs_html.cli")
+    render_module = importlib.import_module("obs_html.render")
+
+    def git_output(directory, *arguments):
+        result = git_door.run(*arguments, cwd=directory)
+        return result.stdout.strip() or None if result.returncode == 0 else None
+
+    def html(command, cwd, capture):
+        assert command[:3] == ["uv", "run", "obs-html"]
+        call = Invocation(["obs-html", *command[3:]], {
+            "cwd": cwd, "env": dict(os.environ), "capture_output": capture, "text": capture})
+        return completed(call, run_main(html_module.main, call))
+
+    def uv(call):
+        assert call.words[:7] == ["uv", "run", "--quiet", "--project", str(obs), "python", "-c"]
+        assert len(call.words) == 8
+        if call.words[-1] == "import sys; print(sys.executable)":
+            return Answer(0, "obs-python\n")
+        def execute(_arguments):
+            try:
+                exec(call.words[-1], {"__name__": "__main__"})
+            except adapter_module.AdapterError as error:
+                print(f"obs.adapter.AdapterError: {error}", file=sys.stderr)
+                return 1
+            return 0
+        return run_main(execute, call)
+
+    def document(call):
+        return run_main(lambda arguments: document_module.main(arguments[2:]), call)
+
+    monkeypatch.setattr(render_module, "_git_output", git_output)
+    monkeypatch.setattr(document_module, "run_adapter", html)
+    monkeypatch.setattr(build_docs, "_PYTHON", {})
+    monkeypatch.setattr(build_docs, "_READY", {})
+    fake_processes.on("uv", uv)
+    fake_processes.on("obs-python", document)
+    return obs
 
 
 # The fake se's help, as the build's command-line chapter must show it; no tracked file outside
@@ -219,8 +279,7 @@ def test_no_note_of_the_copy_asks_for_a_verdict():
     assert build_docs.without_verdict(unchanged) == unchanged
 
 
-@pytest.mark.spawns(REAL_OBS)
-def test_a_missing_note_fails_the_build(tmp_path, obs, capsys):
+def test_a_missing_note_fails_the_build(tmp_path, obs_in_process, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "chapter.md").write_text("# Chapter\n\nSee [[no-such-note]].\n", encoding="utf-8")
@@ -231,8 +290,7 @@ def test_a_missing_note_fails_the_build(tmp_path, obs, capsys):
     assert "no-such-note" in result.stderr
 
 
-@pytest.mark.spawns(REAL_OBS)
-def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs, capsys):
+def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs_in_process, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     long_paragraph = " ".join(["word"] * 100)  # six lines at 80 characters, over obs's default of five
@@ -389,22 +447,18 @@ def test_no_script_passes_adapter_config():
     assert passing == []
 
 
-@pytest.mark.spawns("tool: obs's own finder, asked through uv in obs's environment, finds the installed "
-                    "obs-html; it runs only as a process")
-def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs):
-    adapter, refusal = build_docs.installed_adapter(obs)
+def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs_in_process):
+    adapter, refusal = build_docs.installed_adapter(obs_in_process)
     assert refusal == ""
     assert adapter["name"] == build_docs.ADAPTER == "obs-html" and adapter["serve"]
-    assert Path(adapter["folder"]) != obs  # obs 10 holds no adapter in its own tree
+    assert Path(adapter["folder"]) != obs_in_process  # obs 10 holds no adapter in its own tree
 
 
-@pytest.mark.spawns("tool: obs's own finder, asked through uv in obs's environment, refuses a component "
-                    "of another kind; the refusal is obs's, and it runs only as a process")
-def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, monkeypatch):
+def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs_in_process, tmp_path, monkeypatch):
     monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
     (tmp_path / "components.json").write_text(json.dumps({"components": [
         {"name": "obs-html", "kind": "style", "version": "1.0.0", "commit": "0" * 40}]}), encoding="utf-8")
-    adapter, refusal = build_docs.installed_adapter(obs)
+    adapter, refusal = build_docs.installed_adapter(obs_in_process)
     assert adapter is None
     assert "--adapter: obs-html" in refusal and "not an adapter" in refusal
 

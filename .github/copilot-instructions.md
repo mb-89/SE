@@ -24,3 +24,7 @@
   refuses. Report that refusal rather than inventing a snapshot or bypassing the gate.
 - Run focused tests with `-n 0` when another session is running the complete suite, unless testing
   xdist itself; the default worker count can start many processes and contend with its setup.
+- Match a Windows executable's case-insensitive extension before looking up a fake process handler;
+  a full path to `sh.EXE`, `python.exe` or `gh.CMD` must reach the same handler as its bare name.
+- Run obs and its adapter through their in-process entry points in tests, with their git door faked;
+  starting their real commands defeats the spawn guard even when their output is correctly asserted.
