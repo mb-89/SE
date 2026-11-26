@@ -2,9 +2,12 @@
 # A retro's report, its closing comment, and the draft it is filed from: the five steps, the
 # standing questions nested in step 3. retro.py lays the draft out from this note and checks it
 # before it files the report; its judged block is the adapter templates/retro-judgment.md. The
-# person's decision of 22 Nov (SE#1678). scripts/templates.py's docstring owns this note's format.
+# person's decision of 22 Nov (SE#1678). SE's input is evidence in step 1, and the report goes up
+# before the deck because, in the owner's words, "the last [retro] took forever to finish, and
+# that's really not acceptable, so it needs to be quicker this time." scripts/templates.py's
+# docstring owns this note's format.
 name: retro
-version: 3.0.0
+version: 3.1.0
 kind: document
 reader: fleet
 says: "A retro's report and its draft: the five steps, the standing questions nested in step 3."
@@ -48,7 +51,7 @@ example:
 
 ## 1. Collect
 
-<!-- collect: Per project, what retro.py collect read: what came back, refusals, escalations, suite times, session costs, scripts run three or more times, planning misses, the field reports' answers to the standing questions, and the last retro's classes measured again, rate before against rate now. -->
+<!-- collect: Per project, what retro.py collect read: what came back, refusals, escalations, suite times, session costs, scripts run three or more times, planning misses, the field reports' answers to the standing questions, and the last retro's classes measured again, rate before against rate now. SE's input: the retro asks the top-level SE session named in its prompt once, in one message, for a file of what SE saw go wrong, the local notes register with it; it does not wait for the answer. Read SE's file with the field reports and judge it by the same standard as every other piece of evidence; where SE did not answer, say so here. -->
 
 ## 2. Table of what happened
 
@@ -68,4 +71,4 @@ example:
 
 ## 5. The person decides
 
-<!-- decisions: The report records each finding as open; the standalone deck carries the person's answer, so preparing the report does not wait on it. -->
+<!-- decisions: The report goes up first, moving the issue to report state as soon as the findings table stands; only then is a lean deck built. The report records each finding as open; the standalone deck carries the person's answer, so preparing the report does not wait on it. -->

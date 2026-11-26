@@ -372,7 +372,8 @@ it posts the report proper on the retro issue and leaves it open for the finding
 
 The report opens with `<!-- se:retro-report -->` and is a document of the retro template. Where
 the integration branch holds the draft as it stands, it links that retro doc for the collected
-facts and block.
+facts and block. A retro doc (`docs/retro-*.md`) lands without a work issue, a field report or
+runners.
 
 Otherwise it carries the drafted facts itself, and the block follows in its own comments, each a
 `<!-- se:retro-block <k>/<n> -->` line over a fenced piece of the block's JSON, so filing needs no

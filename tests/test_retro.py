@@ -1248,6 +1248,30 @@ def test_bless_closes_a_draft_without_findings_with_the_gate_open_in_one_call(
     assert "blessed and closed; filing gate open" in capsys.readouterr().out
 
 
+def test_the_template_and_the_agent_ask_se_once_and_post_the_report_before_the_deck():
+    root = Path(retro.__file__).resolve().parents[1]
+    template = (root / "templates" / "retro.md").read_text(encoding="utf-8")
+    agent = (root / "src" / "agents" / "retro.md").read_text(encoding="utf-8")
+    collect = template[template.index("<!-- collect:"):template.index("## 2.")]
+    assert "top-level SE session" in collect and "does not wait" in collect
+    assert "Ask SE for its input" in agent and "Do not wait for it" in agent
+    decisions = template[template.index("<!-- decisions:"):]
+    assert decisions.index("report state") < decisions.index("deck")
+    assert agent.index("**Report state first.**") < agent.index("**A lean deck")
+    assert agent.index("`retro.py file <issue>`") < agent.index("`retro.py deck <issue>")
+
+
+def test_a_finding_from_se_s_input_is_marked_in_the_deck_and_no_other_source_passes(checkout):
+    item = {"finding": 1, "title": "Name the sync a lagging mirror needs", "body": "SE saw it.",
+            "class": "Lost reports", "home": "scripts/se_start.py", "kind": retro.WORK,
+            "source": retro.SE_SOURCE}
+    title, body = retro.finding_chapter(item, [])
+    assert title.endswith("(from SE)") and body.startswith("From SE")
+    wrong = judged_draft(checkout, findings=[{**finding(), "source": "elsewhere"}])
+    with pytest.raises(retro.QueueError, match="source is"):
+        retro.judged(wrong, 30)
+
+
 @pytest.mark.parametrize("fail_after", [1, 2, 4])
 def test_bless_resumes_after_a_lost_write_response_without_duplicate_comments(
         checkout, tmp_path, blessing, fail_after, capsys):

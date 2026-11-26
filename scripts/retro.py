@@ -179,7 +179,9 @@ RETRO_OUTCOME = re.compile(
     r"<!-- se:retro-outcome finding=(\d+) kind=(issue|declined|merged) "
     r"value=([A-Za-z0-9._~%-]+) -->")
 FINDING_TEMPLATE = "finding-ref"
-FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
+FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check", "source")
+#: The one `source` a finding may name: the top-level SE session's input, marked in the deck.
+SE_SOURCE = "se"
 # The draft's parts the deck leaves out, as they repeat what it shows once (SE#1826, requirements 8 and
 # 9): step 1's per-issue table and its field reports' answers, which the matrix holds, and step 2's
 # per-step table, as the chapters table is the deck's one table of what happened.
@@ -1860,7 +1862,8 @@ def draft(found: Collected) -> str:
               "(five words or more), `body`, `class` (a class's `name`), `home` (the file it "
               "changes), `controversial` (true where it changes a rule, trades one metric for "
               "another, the judge is unsure, or it recurred after an earlier fix) with its `why`, "
-              f"and optionally `check` (a rule check: {', '.join(RULE_CHECKS)}); a class has "
+              f"and optionally `check` (a rule check: {', '.join(RULE_CHECKS)}) and `source` "
+              f"(\"{SE_SOURCE}\" where it comes from the top-level SE session's input); a class has "
               f"`name`, `cause`, `fix`, `home` and `home_kind` (one of: {', '.join(HOMES)}), and "
               f"optionally {', '.join(f'`{key}`' for key in CLASS_KEYS)}; `went_well` lists what "
               "went well. Step 5 leaves the person's decisions open for the deck; the report and "
@@ -2020,6 +2023,8 @@ def judgment_problems(block: dict) -> list[str]:
         controversial = given.get("controversial", False)
         if not isinstance(controversial, bool):
             problems.append(f"{name}: controversial is true or false")
+        if given.get("source") not in (None, SE_SOURCE):
+            problems.append(f'{name}: source is "{SE_SOURCE}" (SE\'s input) or left out')
         check = review.words(given.get("check"))
         if check and check not in RULE_CHECKS:
             problems.append(f'{name} names the check "{check}", which is no rule check '
@@ -2591,6 +2596,10 @@ def bless(args: argparse.Namespace, deadline: float) -> int:
         raise QueueError(f"bless: retro #{args.retro} was blessed with a different draft; "
                          "restore that answered draft before retrying")
     closed = str(issue.get("state") or "").lower() == "closed"
+    if closed and not approvals and filing_state(given).phase == "done":
+        print(f"Retro #{args.retro}: its report closed it with no findings; it is done and the "
+              "filing gate is open.")
+        return 0
     if closed and not approvals:
         raise QueueError(f"bless: retro #{args.retro} is already closed without this blessing; "
                          "nothing was written")
@@ -2672,7 +2681,10 @@ def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
     lines += ["", f"Home: `{item['home'].strip()}`{check}.", "",
               f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
               else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
-    return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
+    if item.get("source") == SE_SOURCE:
+        lines = ["From SE: the top-level SE session's input.", ""] + lines
+    suffix = " (from SE)" if item.get("source") == SE_SOURCE else ""
+    return f"{item['finding']}. {item['title'].strip()}{suffix}", "\n".join(lines)
 
 
 def without_sections(text: str, headings: tuple[str, ...]) -> str:
