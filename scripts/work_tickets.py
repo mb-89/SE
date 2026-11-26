@@ -99,6 +99,9 @@ RELEASE_KIND_PATTERN = re.compile(r"\*\*Release kind:\*\*[ \t]*(\w*)[ \t]*[â€”â€
 BREAKING_PATTERN = re.compile(r"^\s*(?:[-*+]\s+)?\*\*Breaking:\*\*")
 REMOVED_SECTION = "Removed behaviour, deleted or weakened tests, and authored prose"
 WORK_ISSUE_PATTERN = re.compile(r"\bWork issue:\*{0,2}\s*#(\d+)\b", re.IGNORECASE)
+AUTHORIZED_FIX_PATTERN = re.compile(
+    r"(?m)^\*\*Work issue:\*\*[ \t]*none, authorized fix(?:[ \t]{2,}\*\*Branch:\*\*|$)"
+)
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
 IDENTITY_PATTERN = re.compile(r"(?P<name>.+?)\s*<(?P<email>[^<>\s]+)>")
 ISSUE_FIELDS = "number,title,body,url,updatedAt,comments,labels"
@@ -3590,17 +3593,42 @@ def intended_repository(root: Path, issue: dict[str, object]) -> str:
 
 
 def guard_work_publication(root: Path, branch: str) -> None:
-    """Refuse to push the work branch `branch` to origin unless origin is the repository its
-    recorded work issue is for (intended_repository), compared by name, case-insensitively, so the
-    rule holds on any host; nothing is pushed on a refusal (docs/fleet.md "Work publication")."""
+    """Refuse to push a work branch to origin unless origin is the repository its recorded work
+    issue is for (intended_repository), or its checked field report declares an authorized fix
+    without an issue; compare repository names case-insensitively (docs/fleet.md "Work publication")."""
     issue = load_snapshot(root)
     refused = f"nothing was pushed to origin; {branch} is a work branch, published only to the " \
               "repository its work issue is for"
     if issue is None:
-        raise QueueError(
-            f"push: this checkout records no work issue, so where {branch} belongs is unknown; "
-            f"{refused}. Run work_tickets.py intake --issue <n> for the work issue titled "
-            f"{branch} (without gh, intake --issue-body <file>), then push again")
+        report_file = root / ".se" / "work" / "field-report.md"
+        if not report_file.is_file():
+            raise QueueError(
+                f"push: this checkout records no work issue and has no field report declaring an "
+                f"authorized fix; {refused}. Run field-report --draft --authorized-fix, complete "
+                "the report and check it before pushing")
+        try:
+            report = checked_report(root, report_file, None)
+            if field_report_issue(report) is not None:
+                raise QueueError(
+                    "the field report names a work issue but this checkout has no issue snapshot"
+                )
+            reported_branch = REPORT_BRANCH_PATTERN.search(report)
+            if reported_branch is None or reported_branch[1] != branch:
+                raise QueueError(
+                    f"the field report names branch "
+                    f"{(reported_branch[1] if reported_branch is not None else '(none)')!r}, "
+                    f"not {branch!r}"
+                )
+        except QueueError as error:
+            raise QueueError(f"push: {error}; {refused}") from error
+        origin = origin_repository_name(root)
+        if origin is None:
+            raise QueueError(
+                f"push: {root} has no origin remote; {refused}. Add the intended repository as "
+                "origin (git remote add origin <url>), then push again"
+            )
+        print(f"push: {branch} is an authorized fix without a work issue; publishing to origin/{origin}")
+        return
     if issue.get("title") != branch:
         raise QueueError(
             f"push: the recorded work issue #{issue.get('number')} is titled "
@@ -3629,8 +3657,8 @@ def push(root: Path, branch: str | None = None) -> None:
     settings"). The integration branch and a landing branch `land/<branch>` (docs/settings.md "Landing on
     main") need the verdicts on their tree. A changed file a template claims that breaks it
     refuses the push before anything else runs (claimed_files_problem). Any other branch is a work
-    branch, pushed only where origin is the repository its recorded work issue is for
-    (guard_work_publication)."""
+    branch, pushed only where its work issue belongs or its checked field report declares an
+    authorized fix (guard_work_publication)."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
     target = integration_branch(root)
@@ -3721,12 +3749,17 @@ def partial_left(report: str) -> list[str]:
     return [paragraph]
 
 
-def pull_request_body(issue: dict[str, object], report: str) -> str:
+def pull_request_body(issue: dict[str, object] | None, report: str) -> str:
     """The pull request description: `Fixes <issue>` only where the report is complete and all
     its acceptance shows before the merge, else `Refs <issue>`: for every partial report and for
     acceptance seen only after the merge, so the pull request never says it fixes what it left,
     and a merge of it on GitHub, outside `integrate`, would not close the issue; then the field
-    report `report` between its markers, without the template's comments."""
+    report `report` between its markers, without the template's comments. An authorized fix has
+    no work issue and states that explicitly as its first line."""
+    if issue is None:
+        if field_report_issue(report) is not None:
+            raise QueueError("An issue-free delivery must say `Work issue: none, authorized fix`")
+        return "Work issue: none, authorized fix\n\n" + marked_report(report)
     result = FIELD_REPORT_RESULT_PATTERN.search(report)
     partial = result is not None and result.group(1) == "partial"
     keyword = ("Refs" if partial or post_merge_acceptance(str(issue.get("body", ""))) else "Fixes")
@@ -3921,17 +3954,37 @@ def refuse_se_outside_pin(root: Path) -> None:
 def deliver(root: Path) -> int:
     """Merge current main, check the field report against it, push, and open or update the pull
     request whose description carries the report; returns the pull request's number. No issue is
-    filed."""
-    issue = required_snapshot(root)
-    body = body_at_delivery(root, check_issue_read(root, None, None, str(issue["url"])))
-    branch = delivery_branch(root, issue)
+    filed. Without an issue snapshot, the report must explicitly declare an authorized fix."""
+    issue = load_snapshot(root)
+    if issue is None:
+        body = None
+        branch = current_branch(root)
+        if not branch:
+            raise QueueError("deliver: an authorized fix needs a named delivery branch")
+        file = root / ".se" / "work" / "field-report.md"
+        if not file.is_file():
+            raise QueueError(
+                "deliver: no work issue is recorded; first run field-report --draft "
+                "--authorized-fix, complete the report and check it"
+            )
+    else:
+        body = body_at_delivery(root, check_issue_read(root, None, None, str(issue["url"])))
+        branch = delivery_branch(root, issue)
     merge_current_main(root, branch)
     file = root / ".se" / "work" / "field-report.md"
-    if not file.exists():
+    if issue is not None and not file.exists():
         draft_field_report(root, file)
     report = checked_report(root, file, body)
-    if f"#{issue['number']}" not in report and str(issue["url"]) not in report:
-        raise field_report_error(file.name, [f"does not link work issue #{issue['number']}"])
+    report_issue = field_report_issue(report)
+    if issue is not None and report_issue != int(issue["number"]):
+        raise field_report_error(file.name, [f"does not identify work issue #{issue['number']}"])
+    if issue is None and report_issue is not None:
+        raise field_report_error(file.name, ["does not declare an authorized fix without a work issue"])
+    reported_branch = REPORT_BRANCH_PATTERN.search(report)
+    if reported_branch is None or reported_branch[1] != branch:
+        raise field_report_error(
+            file.name, [f"names branch {(reported_branch[1] if reported_branch else '(none)')!r}, "
+                        f"not {branch!r}"])
     if (warning := platform_warning(root, report)) is not None:
         print(warning)
     remote = remote_repo(root)
@@ -5478,27 +5531,43 @@ def quoted(text: str) -> str:
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
-def draft_field_report(root: Path, file: Path, issue_file: Path | None = None) -> None:
+def draft_field_report(root: Path, file: Path, issue_file: Path | None = None,
+                       authorized_fix: bool = False) -> None:
     """Write the field-report template, markers included, to `file` with the work issue, branch,
     integration-branch commit, branch tip, proposed release kind and user requirement filled in;
     the work issue from intake's snapshot, or from `issue_file`, as the session's GitHub tools
-    read it."""
-    issue = required_snapshot(root) if issue_file is None else issue_record(issue_answer(issue_file), [])
-    branch = delivery_branch(root, issue)
-    body = field_report_template().replace("#<n>", f"#{issue['number']}", 1)
-    kind = default_release_kind(branch, str(issue["body"]), project_version(root))
+    read it. `authorized_fix` writes the explicit issue-free declaration and never reads a snapshot."""
+    if authorized_fix:
+        if issue_file is not None or load_snapshot(root) is not None:
+            raise QueueError(
+                "field-report --draft --authorized-fix cannot be used with a work issue; "
+                "draft the report from that issue instead"
+            )
+        issue = None
+        issue_body = ""
+        branch = current_branch(root)
+        if not branch:
+            raise QueueError("field-report --draft --authorized-fix needs a named delivery branch")
+        body = field_report_template().replace(
+            "**Work issue:** #<n>", "**Work issue:** none, authorized fix", 1)
+    else:
+        issue = required_snapshot(root) if issue_file is None else issue_record(issue_answer(issue_file), [])
+        issue_body = str(issue["body"])
+        branch = delivery_branch(root, issue)
+        body = field_report_template().replace("#<n>", f"#{issue['number']}", 1)
+    kind = default_release_kind(branch, issue_body, project_version(root))
     if kind is not None:
         body = body.replace("**Release kind:** <kind>", f"**Release kind:** {kind}", 1)
     body = (body.replace("<integration branch>", integration_branch(root))
             .replace("<branch>", branch).replace("<commit>", tested_main(root)))
-    requirement = section(issue_sections(issue["body"]), "user requirement")
+    requirement = section(issue_sections(issue_body), "user requirement") if issue is not None else ""
     if requirement:
         body = re.sub(
             r"(^## User requirement[^\n]*\n(?:\s*<!--.*?-->)?\s*\n)>[ \t]*$",
             lambda match: match.group(1) + quoted(requirement),
             body, count=1, flags=re.MULTILINE | re.DOTALL,
         )
-    steps = owner_steps(str(issue["body"]))
+    steps = owner_steps(issue_body) if issue is not None else []
     if steps:
         body = body.replace(REPORT_END, f"## {OWNER_STEP_SECTION}\n\n"
                             + "".join(f"- {step}\n" for step in steps) + f"\n{REPORT_END}", 1)
@@ -5540,6 +5609,22 @@ def label_pattern(label: str) -> re.Pattern[str]:
     return re.compile(r"\*\*" + r"[^*\n]+?".join(map(re.escape, parts)) + r"\*\*")
 
 
+def field_report_issue(body: str) -> int | None:
+    """The report's work issue number, or None for its exact authorized-fix declaration."""
+    header = "\n".join(ordered_sections(body)[0][1])
+    first = next((line for line in HTML_COMMENT_PATTERN.sub("", header).splitlines()
+                  if line.strip()), "")
+    work = WORK_ISSUE_PATTERN.search(first)
+    if work is not None:
+        return int(work[1])
+    if AUTHORIZED_FIX_PATTERN.search(first):
+        return None
+    raise QueueError(
+        "Field report header must say `**Work issue:** #<n>` or exactly "
+        "`**Work issue:** none, authorized fix`"
+    )
+
+
 def field_report_problems(body: str, issue_body: str | None,
                           version: tuple[int, int, int] | None = None) -> list[str]:
     """Where the field report `body` departs from the pull request template, the one owner of its
@@ -5553,10 +5638,22 @@ def field_report_problems(body: str, issue_body: str | None,
     """
     template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
+    try:
+        issue_number = field_report_issue(body)
+    except QueueError as error:
+        issue_number = None
+        issue_header_problem = str(error)
+    else:
+        issue_header_problem = ""
+    if issue_body is not None and issue_number is None and issue_header_problem == "":
+        issue_header_problem = (
+            "a numbered work issue body was supplied, but the header says this is an authorized "
+            "fix without a work issue"
+        )
     if issue_body is not None:
         tip = BRANCH_TIP_PATTERN.search("\n".join(report.get("", [])))
         issue_body = without_open_points(issue_body, tip[1] if tip else None)
-    problems: list[str] = []
+    problems: list[str] = [issue_header_problem] if issue_header_problem else []
     for heading, raw in ordered_sections(template):
         where = "header (above the first section)" if not heading else f'section "## {heading}"'
         lines = report.get(heading.casefold())
@@ -5597,11 +5694,21 @@ def field_report_problems(body: str, issue_body: str | None,
             f"header (above the first section): Re-integration kind {kind[1]!r} must be one of "
             f"{', '.join(RELEASE_ORDER)}"
         )
-    if FIELD_REPORT_RESULT_PATTERN.search(header) is None:
+    result = FIELD_REPORT_RESULT_PATTERN.search(header)
+    if result is None:
         problems.append(
             'header (above the first section): Result must be exactly complete or partial, '
             'as "**Result:** complete" or "**Result:** partial"'
         )
+    elif issue_number is None and issue_header_problem == "":
+        not_delivered = HTML_COMMENT_PATTERN.sub(
+            "", "\n".join(report.get("not delivered", []))
+        ).strip().rstrip(".").casefold()
+        if result[1] != "complete" or not_delivered != "none":
+            problems.append(
+                "an authorized fix without a work issue must be complete and have `None` under "
+                '`## Not delivered`; use a work issue for partial work'
+            )
     if issue_body is not None:
         problems.extend(field_report_evidence_errors(issue_body, body))
         problems.extend(owner_step_problems(body, issue_body))
@@ -5703,7 +5810,7 @@ def body_at_delivery(root: Path, body: str) -> str:
     return body
 
 
-def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
+def checked_report(root: Path | None, file: Path, issue_body: str | None) -> str:
     """The field report `file` carries between its markers (a worker's draft or a whole pull
     request description), refused where it departs from its template or misses evidence against
     `issue_body`. In a checkout of the report's own Branch, the pull request's head branch, its
@@ -5742,22 +5849,30 @@ def check_field_report(
     and a body changed since (read with gh, unless `comments` and the issue body file give them).
     In a worktree its Branch tip is first set to the branch's commit, and the report is held to
     the branch's platform code (platform_warning), with a warning, never a refusal."""
+    issue_body: str | None
     if issue_body_file is not None:
         issue_body = issue_body_text(issue_body_file)
-    elif root is None:
-        raise QueueError(
-            "field-report --check needs the work issue's body for the evidence gate: "
-            "pass --issue-body <file>, or --worktree <worktree> to read intake's snapshot"
-        )
     else:
-        snapshot = load_snapshot(root)
-        if snapshot is None:
+        snapshot = load_snapshot(root) if root is not None else None
+        issue_body = str(snapshot["body"]) if snapshot is not None else None
+    if issue_body is None:
+        report = report_in(read_file(file, "field report"), str(file))
+        try:
+            issue_number = field_report_issue(report)
+        except QueueError:
+            issue_number = None
+        if issue_number is not None:
+            if root is None:
+                raise QueueError(
+                    f"field-report --check: the report names work issue #{issue_number}; pass "
+                    "--issue-body <file>, or --worktree <worktree> to read intake's snapshot"
+                )
             raise QueueError(
-                "field-report --check needs the work issue's body for the evidence gate: "
-                "run intake, or save the work issue's body to a file and pass --issue-body <file>"
+                f"field-report --check: the report names work issue #{issue_number}; run intake, "
+                "or save the work issue's body to a file and pass --issue-body"
             )
-        issue_body = str(snapshot["body"])
-    if root is not None and (comments is not None or load_comments_read(root) is not None
+    if root is not None and issue_body is not None and (
+            comments is not None or load_comments_read(root) is not None
                              or load_body_read(root) is not None):
         # Read the issue again at delivery: the evidence gate checks against the body as it is
         # now, not as intake saved it (body_at_delivery).
@@ -6996,27 +7111,23 @@ def escalate(root: Path, number: int, file: Path, repo: str | None) -> str:
 
 def pull_request_report(
     root: Path, pull_number: int, tracker: str
-) -> tuple[dict[str, object], str, dict[str, object], int]:
+) -> tuple[dict[str, object], str, dict[str, object] | None, int | None]:
     """The pull request, the field report its description carries, its work issue and that
-    issue's number; refused where the description has no report, the report names no work issue,
-    or it departs from its template or misses evidence."""
+    issue's number; an authorized fix has neither, and is refused where the report is missing or
+    departs from its template or misses evidence."""
     pull = json.loads(run_gh(root, [
         "pr", "view", str(pull_number), "--json", "number,url,body,headRefName,headRefOid",
         *repo_arguments(remote_repo(root) or tracker),
     ]))
     where = f"pull request #{pull_number}"
     report = report_in(str(pull.get("body") or ""), f"The description of {where}")
-    work = WORK_ISSUE_PATTERN.search(report)
-    if work is None:
-        raise QueueError(
-            f"The field report in {where} names no work issue; the worker writes "
-            "**Work issue:** #<n> in its header and delivers again"
-        )
-    work_issue = fetch_issue(root, int(work[1]), tracker)
-    problems = field_report_problems(report, str(work_issue["body"]), project_version(root))
+    work_number = field_report_issue(report)
+    work_issue = fetch_issue(root, work_number, tracker) if work_number is not None else None
+    issue_body = str(work_issue["body"]) if work_issue is not None else None
+    problems = field_report_problems(report, issue_body, project_version(root))
     if problems:
         raise field_report_error(f"in {where}", problems)
-    return pull, report, work_issue, int(work[1])
+    return pull, report, work_issue, work_number
 
 
 def run_project_command(root: Path, command: str, description: str) -> str:
@@ -8464,14 +8575,15 @@ def goal_summary(issue_body: str, longest: int = SUMMARY_MAX) -> str:
 
 
 def integration_merge_message(
-    branch: str, work_number: int, pull_number: int, public: bool, issue_body: str
+    branch: str, work_number: int | None, pull_number: int, public: bool, issue_body: str
 ) -> str:
     """The integration's title, the landing pull request's and the squash commit's: `Integrate
     <branch>: <the first sentence of the work issue's Goal>`, never a commit's subject; without
     a public check it also names the work issue and pull request. The whole title keeps within
     GitHub's TITLE_MAX characters: a long branch name leaves the summary less room."""
     head = f"Integrate {branch}"
-    tail = "" if public else f" (work issue #{work_number}, PR #{pull_number})"
+    tail = ("" if public else
+            f" ({f'work issue #{work_number}, ' if work_number is not None else ''}PR #{pull_number})")
     room = min(SUMMARY_MAX, TITLE_MAX - len(head) - len(": ") - len(tail))
     summary = goal_summary(issue_body, room) if room > 0 else ""
     title = head + (f": {summary}" if summary else "")
@@ -8501,7 +8613,7 @@ def without_tool_footer(body: str) -> str:
     return body
 
 
-def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str, kind: str,
+def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str | None, kind: str,
                         metrics_line: dict[str, object] | None = None) -> str:
     """The landing pull request's description: short enough for any tool argument, it names the
     work issue and the work pull request whose description is the field report, the marker CI's
@@ -8509,8 +8621,8 @@ def landing_description(work_pull_url: str, work_pull_number: int, issue_url: st
     `Release-kind: <kind>` line, the kind its squash commit's trailer carries, so CI's release-kind
     gate passes it (pr_issues.py --release-kind); it ends in the integration's metrics line, which
     outlives a cloud integrator's container for `retro.py collect` (docs/running.md "Metrics")."""
-    return (f"Refs {issue_url}\n\n"
-            f"Lands {work_pull_url}, whose description is the field report.\n\n"
+    return ((f"Refs {issue_url}\n\n" if issue_url is not None else "")
+            + f"Lands {work_pull_url}, whose description is the field report.\n\n"
             + FIELD_REPORT_IN.format(number=work_pull_number) + "\n\n"
             + release_kind_line(kind) + "\n"
             + (f"\n{metrics.text(metrics_line)}\n" if metrics_line is not None else ""))
@@ -9357,7 +9469,7 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
     return commit
 
 
-def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
+def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int | None, landed: str,
                   comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
     take it out of progress with its beat line, and close it unless something keeps it open:
@@ -9366,6 +9478,13 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int,
     any `ready` off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
+    if work_number is None:
+        return Plan("close out authorized fix", (
+            Step("comment_pull", "add_issue_comment",
+                 {**pulls, "issue_number": pull_number, "body": landed}),
+            Step("close_pull", "update_pull_request",
+                 {**pulls, "pullNumber": pull_number, "state": "closed"}),
+        ), "the authorized fix has no work issue to close")
     escalate = (label_step(tracker, work_number, "ready", add=False),
                 label_step(tracker, work_number, "escalated", add=True)) if left else ()
     return Plan(f"close out #{work_number}", (
@@ -9390,47 +9509,50 @@ def handoff_path(root: Path, branch: str) -> Path:
 
 def handed_pull_request(root: Path, pull_number: int, remote: str, description: Path | None,
                         issue_body: Path | None, branch: str | None
-                        ) -> tuple[dict[str, object], str, dict[str, object], int]:
+                        ) -> tuple[dict[str, object], str, dict[str, object] | None, int | None]:
     """What `pull_request_report` reads through gh, from the files the session saved with its
     GitHub tools: the pull request (its head from origin), its field report, its work issue and
     that issue's number."""
-    if description is None or issue_body is None or not branch:
+    if description is None or not branch:
         raise QueueError(
             f"work_tickets.py integrate hands its GitHub steps to the session, as gh is not signed "
-            f"in: save pull request #{pull_number}'s description and its work issue's body with the "
-            "GitHub tools and pass --pr-description <file> --issue-body <file> --branch <its head "
-            "branch>")
+            f"in: save pull request #{pull_number}'s description with the GitHub tools and pass "
+            "--pr-description <file> --branch <its head branch>; for a numbered work issue also "
+            "pass --issue-body <file>")
     text = read_file(description, "pull request description")
     where = f"pull request #{pull_number}"
     report = report_in(text, f"The description of {where}")
-    work = WORK_ISSUE_PATTERN.search(report)
-    if work is None:
+    work_number = field_report_issue(report)
+    if work_number is not None and issue_body is None:
         raise QueueError(
-            f"The field report in {where} names no work issue; the worker writes "
-            "**Work issue:** #<n> in its header and delivers again")
-    body = issue_body_text(issue_body)
+            f"integrate: the field report in {where} names work issue #{work_number}; save its "
+            "body and pass --issue-body <file>"
+        )
+    body = issue_body_text(issue_body) if issue_body is not None else None
     problems = field_report_problems(report, body, project_version(root))
     if problems:
         raise field_report_error(f"in {where}", problems)
     checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     pull = {"number": pull_number, "url": pull_url(remote, pull_number), "body": text,
             "headRefName": branch, "headRefOid": remote_head(root, branch)}
-    return pull, report, {"body": body}, int(work[1])
+    return pull, report, {"body": body} if body is not None else None, work_number
 
 
 def relay_pull_request(relay, root: Path, pull_number: int, remote: str, tracker: str
-                       ) -> tuple[dict[str, object], str, dict[str, object], int]:
+                       ) -> tuple[dict[str, object], str, dict[str, object] | None, int | None]:
     """What `pull_request_report` reads, from kern's relay instead of retyped files: the pull
     request (its snapshot, on `remote`), its field report, its work issue (that snapshot, on
     `tracker`, as the gh path reads it) and its number. No file is saved."""
     pull, report, work_number = relay_pull(relay, root, pull_number, remote)
+    if work_number is None:
+        return pull, report, None, None
     work_issue = relay_work_issue(relay, pull_number, tracker, report, work_number,
                                   project_version(root))
     return pull, report, work_issue, work_number
 
 
 def relay_pull(relay, root: Path, pull_number: int, remote: str
-               ) -> tuple[dict[str, object], str, int]:
+               ) -> tuple[dict[str, object], str, int | None]:
     """The pull request through kern's relay, its field report and its work issue's number, with
     its head branch fetched: what the local guards need, so they run before the work issue's
     reads."""
@@ -9440,12 +9562,11 @@ def relay_pull(relay, root: Path, pull_number: int, remote: str
     text = str(data.get("body") or "")
     where = f"pull request #{pull_number}"
     report = report_in(text, f"The description of {where}")
-    work = WORK_ISSUE_PATTERN.search(report)
-    if work is None:
-        raise QueueError(
-            f"The field report in {where} names no work issue; the worker writes "
-            "**Work issue:** #<n> in its header and delivers again")
-    work_number = int(work[1])
+    work_number = field_report_issue(report)
+    if work_number is None:
+        problems = field_report_problems(report, None, project_version(root))
+        if problems:
+            raise field_report_error(f"in {where}", problems)
     head = data.get("head") if isinstance(data.get("head"), dict) else {}
     branch = str(head.get("ref") or "")
     if not branch:
@@ -9514,6 +9635,7 @@ def integrate(
     if handing_off and pr_description is None and (stepped := relay_door(root, remote)):
         relay = StepReads(root, stepped)  # one call through kern: the reads are steps too
     work_issue: dict[str, object] | None = None
+    work_number: int | None
     if handing_off and relay is not None:  # the work issue's reads wait for the local guards
         pull, report, work_number = relay_pull(relay, root, pull_number, remote)
     elif handing_off:
@@ -9522,6 +9644,9 @@ def integrate(
     else:
         pull, report, work_issue, work_number = pull_request_report(root, pull_number, tracker)
     metrics.note(issue=work_number)
+    if work_number is None:
+        print("Integrating an authorized fix without a work issue; review, suite and public checks "
+              "remain in force")
     branch = str(pull.get("headRefName", ""))
     if not branch:
         raise QueueError(f"Pull request #{pull_number} has no head branch")
@@ -9565,7 +9690,7 @@ def integrate(
             print(f"Merge: {', '.join(taken)} conflicted; took {target}'s, which the merge regenerates")
     component_tags = assign_component_versions(root, target, landing, base, branch, report)
     regenerate_merge(root, target, landing, branch)
-    if work_issue is None:  # through the relay: read once the branch has passed the local guards
+    if work_issue is None and work_number is not None:  # through the relay, after local guards
         try:
             work_issue = relay_work_issue(relay, pull_number, tracker, report, work_number,
                                           project_version(root))
@@ -9574,18 +9699,19 @@ def integrate(
             raise
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote, None)
-    kind = release_trailer(root, branch, str(work_issue["body"]), report)
+    issue_body = str(work_issue.get("body") or "") if work_issue is not None else ""
+    kind = release_trailer(root, branch, issue_body, report)
     try:
         major_guide_gate(root, kind)
-        review_gate(root, branch, base, head, kind, str(work_issue.get("body") or ""), pull_number,
-                    remote, relay, handing_off, pr_comments)
+        review_gate(root, branch, base, head, kind, issue_body, pull_number, remote, relay,
+                    handing_off, pr_comments)
     except Exception:
         abandon_landing(root, target, landing)
         raise
     title = integration_merge_message(
         branch, work_number, pull_number,
         public_check_enabled(root) or any(mirror.public for mirror in mirrors),
-        str(work_issue.get("body") or ""),
+        issue_body,
     )
     message = "\n\n".join((kind, *((trailer,) if trailer else ())))
     checked_git(root, "commit", "-q", "--amend", "-m", title, "-m", message)
@@ -9593,7 +9719,8 @@ def integrate(
     if not head or contained.returncode != 0:
         abandon_landing(root, target, landing)
         reason = f"the merged {landing} does not contain the pull request head"
-        integration_escalation(root, work_number, tracker, reason)
+        if work_number is not None:
+            integration_escalation(root, work_number, tracker, reason)
         raise QueueError(reason)
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
@@ -9631,8 +9758,8 @@ def integrate(
             "tracker": tracker, "remote": remote,
             "pull_number": pull_number, "pull_url": str(pull.get("url") or ""),
             "work_number": work_number, "suite": suite_result, "late": late,
-            "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
-            "open_points": open_points(str(work_issue.get("body", "")), reported_tip(report)),
+            "included": included, "pending": post_merge_acceptance(issue_body),
+            "open_points": open_points(issue_body, reported_tip(report)),
             "pieces": planned_pieces(report), "left": partial_left(report),
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
@@ -9653,7 +9780,8 @@ def integrate(
                 f"{landing_desc}--worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
-            issue_url(tracker, work_number), state["release_kind"], metrics.snapshot())
+            issue_url(tracker, work_number) if work_number is not None else None,
+            state["release_kind"], metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
                             then, tracker, record, mode, verdict=verdict)
         door = relay_door(root, remote) if handing_off else None
@@ -9704,7 +9832,7 @@ def integrate(
             error = QueueError(f"{error}; {target} is back at {base[:12]}.{left}")
         elif left:
             error.args = (f"{error}.{left}",)
-        if not isinstance(error, PausedError):  # a pause is the owner's, no escalation
+        if work_number is not None and not isinstance(error, PausedError):  # a pause is the owner's
             integration_escalation(root, work_number, tracker, str(error))
         raise error from None
     return finish_integration(root, state, commit, str(given["pull url"]),
@@ -9983,10 +10111,12 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     what is unblocked started; in the cloud it starts nothing, whatever door it has."""
     target, landing = str(state["target"]), str(state["landing"])
     tracker, remote = str(state["tracker"]), str(state["remote"])
-    pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
+    pull_number = int(state["pull_number"])
+    work_number = int(state["work_number"]) if state.get("work_number") is not None else None
     check_commands = state.get("check_commands")
     temporary = bool(state.get("check_temporary_working_directory"))
-    feedback.phase(f"close out: {target} at the landed commit, the mirrors, the work issue")
+    feedback.phase(f"close out: {target} at the landed commit, the mirrors, "
+                   f"{'work issue' if work_number is not None else 'authorized fix'}")
     checked_git(root, "switch", "-q", target)
     checked_git(root, "merge", "-q", "--ff-only", commit)
     run_git(root, "branch", "-D", landing)
@@ -10008,7 +10138,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
             f"Branch {branch} on origin has {len(unlanded)} commit(s) the landing {commit[:12]} "
             "did not take:\n" + "\n".join(f"- {line}" for line in unlanded) + "\n"
             f"They were pushed after integrate read the branch. The landing stands; nothing was "
-            f"closed: pull request #{pull_number}, work issue #{work_number}, the branch and its "
+            f"closed: pull request #{pull_number}"
+            f"{f', work issue #{work_number}' if work_number is not None else ''}, the branch and its "
             f"worktree stay. The worker updates its field report in place (deliver), then "
             f"integrate {pull_number} again lands them")
     short = run_git(root, "rev-parse", "--short", commit).stdout.strip()
@@ -10058,18 +10189,22 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
             "close_issue": lambda arguments, _: issues.close_issue(int(arguments["issue_number"])),
             "beat": beat_action_door(issues),
         })
-        print(f"Issue #{work_number}: {issues.issue_state(work_number)} on GitHub after the merge")
+        if work_number is not None:
+            print(f"Issue #{work_number}: {issues.issue_state(work_number)} on GitHub after the merge")
     else:
         run_plan(plan, {**tracker_actions(root, tracker),
                         "comment_pull": lambda arguments, _: door.comment(
                             int(arguments["issue_number"]), str(arguments["body"])) and None,
                         "close_pull": lambda arguments, _: door.close_pull(
                             int(arguments["pullNumber"]))})
-        state_read = run_gh(root, [
-            "issue", "view", str(work_number), "--json", "state", "--jq", ".state",
-            *repo_arguments(tracker),
-        ]).strip() or "unreadable"
-        print(f"Issue #{work_number}: {state_read} on GitHub after the merge")
+        if work_number is not None:
+            state_read = run_gh(root, [
+                "issue", "view", str(work_number), "--json", "state", "--jq", ".state",
+                *repo_arguments(tracker),
+            ]).strip() or "unreadable"
+            print(f"Issue #{work_number}: {state_read} on GitHub after the merge")
+        else:
+            print("No work issue to close: the report declares an authorized fix")
     if pending:
         print(f"Close #{work_number} once its post-merge acceptance is seen: {'; '.join(pending)}")
     if points:
@@ -11443,8 +11578,9 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
              help="path to the selected worktree; needed except by --check with --issue-body"),
          Exclusive((
              arg("--draft", type=Path, metavar="FILE",
-                 help="write the template, markers included, to FILE with work issue, branch, "
-                      "tested commit, branch tip, release kind and user requirement filled in"),
+                 help="write the template, markers included, to FILE with branch, tested commit, "
+                      "branch tip and release kind filled in; reads the work issue unless "
+                      "--authorized-fix is set"),
              arg("--check", type=Path, metavar="FILE",
                  help="only validate the report in FILE (" + PR_DESCRIPTION_HELP + ") against "
                       "the template, without writing GitHub: its header lines, sections, tables, "
@@ -11455,6 +11591,9 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
                       "it; any other checkout, the main checkout among them, leaves FILE and its "
                       "Branch tip as they are; refuses a FILE without the markers"),
          ), required=True),
+         arg("--authorized-fix", action="store_true",
+             help="with --draft and no work issue: write `Work issue: none, authorized fix` "
+                  "instead of reading intake's snapshot"),
          arg("--issue-body", type=Path, metavar="FILE",
              help="with --check: the work issue's body as your GitHub tools read it now, for the "
                   "evidence gate and the body-read check (the body, or the issue's JSON as the "
@@ -11483,7 +11622,12 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
         comments = None if args.comment_count is None else {
             "count": args.comment_count, "newest": args.newest_comment}
         check_field_report(root, args.check, args.issue_body, comments, args.check_runs)
-        print(f"Field report {args.check.name} follows the template")
+        report = report_in(read_file(args.check, "field report"), str(args.check))
+        if field_report_issue(report) is None:
+            print(f"Field report {args.check.name} declares an authorized fix without a work issue "
+                  "and follows the template")
+        else:
+            print(f"Field report {args.check.name} follows the template")
         if args.component_kinds_to is not None:
             kinds = component_versions.stated_kinds(args.check.read_text(encoding="utf-8"))
             line = f"{component_versions.ENVIRONMENT}={component_versions.environment_value(kinds)}"
@@ -11493,7 +11637,9 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     elif root is None:
         raise QueueError("field-report --draft needs --worktree <worktree>, the worker's checkout")
     else:
-        draft_field_report(root, args.draft, args.issue_body)
+        if args.authorized_fix and args.issue_body is not None:
+            raise QueueError("field-report --authorized-fix cannot be combined with --issue-body")
+        draft_field_report(root, args.draft, args.issue_body, args.authorized_fix)
         print(f"Drafted {args.draft}")
     return 0
 
@@ -12156,8 +12302,10 @@ def run_guard(root: Path, args: argparse.Namespace) -> int:
          arg("--integrator-session", help=f"{SESSION_HELP} to notify"))
 def run_deliver(root: Path, args: argparse.Namespace) -> int:
     refuse_se_outside_pin(root)
+    issue = load_snapshot(root)
     session = config_value(
-        "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
+        "integrator_session", str(issue["repo"]) if issue is not None else remote_repo(root),
+        args.integrator_session)
     pr = deliver(root)
     notice = interface_message("delivery-notice", pr=str(pr), branch=current_branch(root))
     print(f"Notify {session or '<integrator session>'}: {notice}")
@@ -12166,7 +12314,8 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
 
 @command("push", "se_templates.py check-files --changed origin/<integration branch> first; "
                  "public check's push gate; a work branch only where origin is the repository "
-                 "its recorded work issue is for (docs/fleet.md \"Work publication\"); then git push -u origin <branch>; retries a "
+                 "its recorded work issue is for, or its checked field report declares an "
+                 "authorized fix without one (docs/fleet.md \"Work publication\"); then git push -u origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
@@ -12219,19 +12368,28 @@ def run_verified(root: Path, args: argparse.Namespace) -> int:
 @command("pr-body", "print the pull request description deliver writes: Fixes <issue> where the "
                     "report is complete and all its acceptance shows before the merge, else Refs "
                     "<issue> (every partial, and acceptance seen only after the merge), then the "
-                    "field report between its markers",
-         OPTIONAL_WORKTREE, ISSUE_BODY,
-         arg("--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>"),
+                    "field report between its markers; without a work issue, the report states "
+                    "`Work issue: none, authorized fix`",
+         OPTIONAL_WORKTREE,
+         arg("--issue-body", type=Path, help="the work issue's body; required with --issue-url"),
+         arg("--issue-url", help="the work issue's URL, ending in /issues/<n>"),
          arg("--field-report", required=True, type=Path, metavar="FILE",
              help="the checked field report: " + PR_DESCRIPTION_HELP))
 def run_pr_body(root: Path, args: argparse.Namespace) -> int:
-    number = re.search(r"/issues/(\d+)/?$", args.issue_url)
-    if number is None:
-        raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
-    body = issue_body_text(args.issue_body)
+    if args.issue_url is None:
+        if args.issue_body is not None:
+            raise QueueError("pr-body: --issue-body requires --issue-url")
+        issue = None
+    else:
+        number = re.search(r"/issues/(\d+)/?$", args.issue_url)
+        if number is None:
+            raise QueueError(f"pr-body: --issue-url {args.issue_url!r} does not end in /issues/<n>")
+        if args.issue_body is None:
+            raise QueueError("pr-body: --issue-url requires --issue-body")
+        body = issue_body_text(args.issue_body)
+        issue = {"number": number.group(1), "url": args.issue_url, "body": body}
     report = report_in(read_file(args.field_report, "field report"), str(args.field_report))
-    print(pull_request_body({"number": number.group(1), "url": args.issue_url, "body": body},
-                            report), end="")
+    print(pull_request_body(issue, report), end="")
     return 0
 
 
@@ -12262,7 +12420,9 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
 
 @command("integrate", "validate the field report a pull request's description carries, merge it "
                       "on land/<branch>, test, land it through a squash pull request once check "
-                      "passes, and close the work issue. Where gh is not signed in it pushes "
+                      "passes, and close the work issue when one is named. An authorized fix "
+                      "without one still gets the same checks and closes only its pull request. "
+                      "Where gh is not signed in it pushes "
                       "land/<branch> and prints the GitHub steps as a plan for the session's "
                       "GitHub tools; --read-back <branch> then checks the landing through git and "
                       "finishes the close-out",

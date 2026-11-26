@@ -770,6 +770,44 @@ def test_field_report_draft_writes_the_template_between_its_markers_and_files_no
     assert all(call[:2] == ["issue", "view"] for call in gh.calls)  # reads only; no issue filed
 
 
+def test_field_report_draft_and_check_support_an_authorized_fix_without_an_issue(
+        worktree, gh, capsys):
+    report = worktree / "report.md"
+    assert run(worktree, "field-report", "--draft", str(report), "--authorized-fix") == 0
+    draft = report.read_text(encoding="utf-8")
+    assert "**Work issue:** none, authorized fix" in draft
+    assert "authorized-fix cannot be used with a work issue" not in capsys.readouterr().err
+    report.write_text(
+        fill_evidence_rows(draft).replace(
+            "**Result:** complete | partial", "**Result:** complete"
+        ).replace("## Not delivered\n\n", "## Not delivered\n\nNone.\n", 1),
+        encoding="utf-8",
+    )
+
+    assert run(worktree, "field-report", "--check", str(report)) == 0
+    assert "declares an authorized fix without a work issue" in capsys.readouterr().out
+    assert gh.calls == []
+
+
+@pytest.mark.parametrize(("result", "not_delivered"), [
+    ("partial", "None."),
+    ("complete", "Requirement 2 remains."),
+])
+def test_an_authorized_fix_without_an_issue_cannot_leave_partial_work(
+        worktree, gh, capsys, result, not_delivered):
+    report = worktree / "report.md"
+    assert run(worktree, "field-report", "--draft", str(report), "--authorized-fix") == 0
+    draft = fill_evidence_rows(report.read_text(encoding="utf-8"))
+    draft = draft.replace("## Not delivered\n\n", "## Not delivered\n\nNone.\n", 1)
+    draft = draft.replace("**Result:** complete | partial", f"**Result:** {result}")
+    draft = draft.replace("## Not delivered\n\nNone.", f"## Not delivered\n\n{not_delivered}")
+    report.write_text(draft, encoding="utf-8")
+
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    assert "must be complete and have `None` under `## Not delivered`" in capsys.readouterr().err
+    assert gh.calls == []
+
+
 def test_a_field_report_that_leaves_a_standing_question_out_is_refused(worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
     question = work_tickets.standing_questions().fields[4].heading
@@ -1146,7 +1184,7 @@ def test_the_integration_reads_the_report_from_the_pull_request_description(work
         work_tickets.pull_request_report(worktree, 7, "git.example/owner/repo")
 
     described(f"Fixes {URL}\n\n{BEGIN}\n## Delivered\n{END}\n")
-    with pytest.raises(work_tickets.QueueError, match="names no work issue"):
+    with pytest.raises(work_tickets.QueueError, match="Field report header must say"):
         work_tickets.pull_request_report(worktree, 7, "git.example/owner/repo")
 
     described(f"Fixes {URL}\n\n{COMPLETE_REPORT}")
@@ -1156,6 +1194,27 @@ def test_the_integration_reads_the_report_from_the_pull_request_description(work
     assert report.startswith("**Work issue:** #5") and BEGIN not in report
     assert ["pr", "view", "7"] == gh.calls[0][:3] and not any(
         call[:2] == ["issue", "create"] for call in gh.calls)
+
+
+def test_integration_accepts_an_authorized_fix_and_closes_only_its_pull_request(worktree, gh):
+    report = COMPLETE_REPORT.replace("**Work issue:** #5",
+                                     "**Work issue:** none, authorized fix")
+    body = f"Work issue: none, authorized fix\n\n{report}"
+    gh.pull_request = {
+        "number": 7, "url": "https://git.example/owner/repo/pull/7",
+        "headRefName": BRANCH, "headRefOid": TIP, "body": body,
+    }
+
+    pull, checked, issue, number = work_tickets.pull_request_report(
+        worktree, 7, "git.example/owner/repo")
+    closeout = work_tickets.closeout_plan(
+        "git.example/owner/repo", "git.example/owner/repo", 7, None,
+        "abc1234", "Integrated.", [])
+
+    assert pull["headRefName"] == BRANCH and checked.startswith("**Work issue:** none")
+    assert issue is None and number is None
+    assert [step.action for step in closeout.steps] == ["comment_pull", "close_pull"]
+    assert not any(call[:2] == ["issue", "view"] for call in gh.calls)
 
 
 def test_escalate_comments_through_a_body_file_labels_and_prints_the_escalation_message(
@@ -1618,6 +1677,32 @@ def test_deliver_writes_the_report_into_the_pull_request_on_origin_and_files_no_
     assert BEGIN in gh.bodies[-1]
     assert "**Release kind:** minor" in gh.bodies[-1]
     assert not any(call[0] == "issue" and call[1] != "view" for call in gh.calls)
+
+
+def test_deliver_publishes_an_authorized_fix_without_a_work_issue(
+        worktree, gh, monkeypatch, capsys):
+    gh.pull_request = None
+    report = worktree / ".se" / "work" / "field-report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        COMPLETE_REPORT.replace("**Work issue:** #5",
+                                "**Work issue:** none, authorized fix"),
+        encoding="utf-8",
+    )
+    pushed: list[str] = []
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets, "push", lambda root, branch: pushed.append(branch))
+    monkeypatch.setattr(
+        work_tickets.process_door, "run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
+    )
+
+    assert run(worktree, "deliver") == 0
+
+    assert pushed == [BRANCH]
+    assert gh.bodies[-1].startswith(f"Work issue: none, authorized fix\n\n{BEGIN}")
+    assert not any(call[0] == "issue" for call in gh.calls)
+    assert "field report in PR #7" in capsys.readouterr().out
 
 
 def test_deliver_without_origin_refuses_naming_the_remedy(worktree, gh, monkeypatch, capsys):
@@ -3755,6 +3840,50 @@ def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
     assert git_run(main_checkout.parent / "origin.git", "rev-parse", "--verify", f"refs/heads/{landing}").returncode != 0
 
 
+def test_integrate_runs_the_checks_and_closes_only_the_pull_request_for_an_authorized_fix(
+        main_checkout, monkeypatch, github, capsys):
+    head, calls = delivered_worker(main_checkout, monkeypatch)
+    report = reported_at(head).replace("**Work issue:** #5",
+                                       "**Work issue:** none, authorized fix")
+    description = f"Work issue: none, authorized fix\n\n{report}"
+    real_run_gh = work_tickets.run_gh
+
+    def run_gh(root: Path, arguments: list[str]) -> str:
+        if arguments[:2] == ["pr", "view"]:
+            calls.append(arguments)
+            return json.dumps({
+                "number": 7, "url": "https://git.example/owner/repo/pull/7",
+                "headRefName": "feature/worker", "headRefOid": head, "body": description,
+            })
+        return real_run_gh(root, arguments)
+
+    monkeypatch.setattr(work_tickets, "run_gh", run_gh)
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: True)
+    monkeypatch.setattr(work_tickets, "push_gate", lambda root, branch: None)
+    monkeypatch.setattr(work_tickets, "guard_pushed_tree", lambda root, commit: None)
+    suite_runner = work_tickets.run_suite
+    suite_calls: list[Path] = []
+    monkeypatch.setattr(work_tickets, "run_suite",
+                        lambda root, **kwargs: suite_calls.append(root) or suite_runner(root, **kwargs))
+    public_checks: list[Path] = []
+    monkeypatch.setattr(work_tickets, "run_public_check",
+                        lambda root, previous: public_checks.append(root))
+    review_runner = work_tickets.review_gate
+    reviews: list[int] = []
+    monkeypatch.setattr(
+        work_tickets, "review_gate",
+        lambda *args, **kwargs: reviews.append(args[6]) or review_runner(*args, **kwargs),
+    )
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert commit is not None
+    assert suite_calls == [main_checkout] and public_checks == [main_checkout] and reviews == [7]
+    assert [call[0] for call in github.calls][-2:] == ["comment", "close_pull"]
+    assert not any(call[0] in ("issue", "close_issue") for call in github.calls)
+    assert "Integrating an authorized fix without a work issue" in capsys.readouterr().out
+
+
 def test_a_major_landing_without_the_next_majors_upgrade_section_is_refused(main_checkout,
                                                                            monkeypatch, github):
     """The release would refuse it (#1873 for #1840 of 24 Nov held v15.0.0): the landing does."""
@@ -5505,7 +5634,8 @@ def test_integrate_chooses_the_hand_off_where_gh_is_not_signed_in(
     assert run(main_checkout, "integrate", "7") == 1
     error = capsys.readouterr().err
     assert "hands its GitHub steps to the session, as gh is not signed in" in error
-    assert "--pr-description <file> --issue-body <file> --branch" in error
+    assert "--pr-description <file> --branch" in error
+    assert "for a numbered work issue also pass --issue-body <file>" in error
     assert github.calls == []
 
 

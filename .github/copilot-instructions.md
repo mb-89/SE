@@ -13,10 +13,14 @@
 - On a Windows checkout, the plugin build tolerates CRLF, but its byte-for-byte tests require
   canonical generator output. Regenerate those bytes from `se_plugin.expected()` before those
   checks rather than changing the generator or weakening the tests to hide checkout conversion.
-- Check the publication path before working without a work issue: `work_tickets.py push` requires
-  an intake snapshot even when the person authorized issue-free work. For such an authorized fix,
-  push with `git push` and the hooks active (the pre-push public check still runs) and open the
-  pull request with `gh pr create`; never invent an issue snapshot or push with `--no-verify`.
+- Check the active checkout's root and branch before editing after a handoff; paths in summarized
+  history can name a sibling checkout.
+- For a worktree-scoped command, pass its required `--worktree` explicitly even when running from
+  that checkout; check the command's help before retrying.
+- Keep validation bounded: run focused tests first and stop any command that exceeds its timebox,
+  reporting the limited validation rather than waiting on a broader suite.
+- For an authorized issue-free fix, use `field-report --draft --authorized-fix`, then the checked
+  `work_tickets.py push` or `deliver` path; never invent an issue snapshot or bypass the hooks.
 - Prefer `work_tickets.py guard` when checking a report's removed tests and prose, rather than
   composing long inline probes. If introspection is necessary, read the helper's actual name
   first: the test-removal helper is `deleted_test_places`, not `deleted_tests`.

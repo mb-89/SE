@@ -1,6 +1,7 @@
 #!/usr/bin/env -S uv run python
 # se:template se/python-script 1.0.0
-"""CI's issue rule: a pull request into the integration branch names an open work issue it does.
+"""CI's issue rule: a pull request into the integration branch names its open work issue, or
+explicitly declares an authorized fix without one.
 
 The rule is the work model's (src/skills/work-model/SKILL.md "Integration branch"); this script
 enforces it in the job `check` of .github/workflows/check.yml. It reads the pull request from the
@@ -11,6 +12,7 @@ A reference is `Refs`, `Closes`, `Fixes` or `Lands`, then `#<n>` or this reposit
 `https://github.com/<owner>/<repo>/issues/<n>` (or `/pull/<n>`). The pull request passes when:
 
 - one reference names an issue of this repository that is open and labelled `work`; or
+- its description and field report both say `Work issue: none, authorized fix`; or
 - a retro report names its open retro issue with `Refs #<n>` and
   `<!-- se:retro-report <n> -->`; or
 - one `Lands` reference names a pull request (a landing's work pull request) whose description
@@ -64,8 +66,15 @@ RELEASE_LANDING = re.compile(r"land/release-v\d+\.\d+\.\d+")  # work_tickets.py 
 RETRO_REPORT = re.compile(r"<!-- se:retro-report ([1-9]\d*) -->")
 KEYWORDS = ("refs", "closes", "fixes", "lands")
 RETRY_SECONDS = 5  # the wait before the one read again after a server error
+AUTHORIZED_FIX_LINE = re.compile(r"^(?:\*\*)?Work issue:(?:\*\*)?[ \t]*none, authorized fix$")
+AUTHORIZED_FIX_HEADER = re.compile(
+    r"(?m)^\*\*Work issue:\*\*[ \t]*none, authorized fix[ \t]{2,}\*\*Branch:\*\*"
+)
+FIELD_REPORT_BEGIN = "<!-- se:field-report -->"
+FIELD_REPORT_END = "<!-- se:field-report:end -->"
 REMEDY = ("name the work issue in the description's first line, `Refs <issue url>` (work_tickets.py "
-          "pr-body writes it), or file a work issue first")
+          "pr-body writes it), or declare `Work issue: none, authorized fix` in a field report "
+          "when this is an authorized fix")
 
 
 class SetupError(Exception):
@@ -91,6 +100,18 @@ def work_issue(body: str, repository: str) -> int | None:
     """The number of the issue the first line of `body` names in `repository`; None without one."""
     found = references(body.split("\n", 1)[0], repository)
     return found[0][1] if found else None
+
+
+def authorized_fix(body: str, repository: str | None = None) -> bool:
+    """Whether the description's first line and its marked field report both authorize no issue."""
+    first = body.split("\n", 1)[0].strip()
+    start, end = body.find(FIELD_REPORT_BEGIN), body.find(FIELD_REPORT_END)
+    if not AUTHORIZED_FIX_LINE.fullmatch(first) or start < 0 or end <= start:
+        return False
+    if repository is not None and references(body, repository):
+        return False
+    report = body[start + len(FIELD_REPORT_BEGIN):end]
+    return AUTHORIZED_FIX_HEADER.search(report) is not None
 
 
 class Api:
@@ -154,6 +175,9 @@ def is_open_retro(item: dict | None) -> bool:
 def names_work_issue(api: Api, body: str, out: list[str], lands: bool) -> bool:
     """Whether `body` names an open work issue; with `lands`, a `Lands` reference to a pull request
     counts when that pull request's description names one. Writes one line per reference."""
+    if authorized_fix(body, api.repository):
+        out.append("  Work issue: none, authorized fix")
+        return True
     passed = False
     marker = RETRO_REPORT.search(body)
     for keyword, number in references(body, api.repository):
@@ -282,7 +306,11 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             return 2
         number = work_issue(args.work_issue.read_text(encoding="utf-8"), repository)
         if number is None:
-            return 1
+            text = args.work_issue.read_text(encoding="utf-8")
+            if not authorized_fix(text, repository):
+                return 1
+            print("none")
+            return 0
         print(number)
         return 0
     try:

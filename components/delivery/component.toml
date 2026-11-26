@@ -4,7 +4,7 @@ contract = 1
 help = "A worker's delivery: the field report and its guard, sync and identity, the gated push and the pull request, the Stop hook's check and the claim's beat."
 
 [commands."work_tickets.py field-report"]
-usage = "work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)\n                             [--issue-body FILE] [--comment-count N] [--newest-comment ID]\n                             [--check-runs FILE] [--component-kinds-to FILE]"
+usage = "work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)\n                             [--authorized-fix] [--issue-body FILE] [--comment-count N]\n                             [--newest-comment ID] [--check-runs FILE]\n                             [--component-kinds-to FILE]"
 summary = "draft or check the field report a pull request description carries, ..."
 group = "Delivery"
 help = "draft or check the field report a pull request description carries, laid out as .github/pull_request_template.md lays it out"
@@ -42,7 +42,7 @@ class = "batch"
 usage = "work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]"
 summary = "se_templates.py check-files --changed origin/<integration branch> first"
 group = "Delivery"
-help = "se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (docs/fleet.md \"Work publication\"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
+help = "se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for, or its checked field report declares an authorized fix without one (docs/fleet.md \"Work publication\"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
 class = "batch"
 
 [commands."work_tickets.py verified"]
@@ -53,10 +53,10 @@ help = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> whe
 class = "batch"
 
 [commands."work_tickets.py pr-body"]
-usage = "work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL\n                        --field-report FILE"
+usage = "work_tickets.py pr-body [--worktree WORKTREE] [--issue-body ISSUE_BODY]\n                        [--issue-url ISSUE_URL] --field-report FILE"
 summary = "print the pull request description deliver writes: Fixes <issue> ..."
 group = "Delivery"
-help = "print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers"
+help = "print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers; without a work issue, the report states `Work issue: none, authorized fix`"
 class = "batch"
 
 [commands."work_tickets.py stop-check"]

@@ -1,8 +1,10 @@
 <!-- se:field-report -->
-<!-- The worker's field report, the description of its pull request: one per work issue, written by
-     the worker at delivery between the se:field-report markers, which the integration reads. -->
+<!-- The worker's field report, the description of its pull request: one per work issue or explicitly
+     authorized fix without one, written by the worker at delivery between the se:field-report markers. -->
 
 **Work issue:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
+<!-- For an authorized fix, replace the issue number with "none, authorized fix"; it must be
+     complete and have "None" under Not delivered. -->
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 **Branch tip:** `<tip>` <!-- the branch commit this report describes; field-report --check --worktree <worktree> fills it from the branch -->
 **Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](../skills/work-model/SKILL.md#release-kind) says, never the branch name; field-report --draft only proposes one -->

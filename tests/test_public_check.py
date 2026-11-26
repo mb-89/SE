@@ -1885,7 +1885,7 @@ def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path, firs
     result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 1
-    assert "::error::field-report: the description's first line names no work issue" in result.stdout
+    assert "::error::field-report: the description's first line must name a work issue" in result.stdout
 
 
 @pytest.mark.parametrize("message, refused", [("Fix the build", False),
