@@ -490,6 +490,25 @@ def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():
     assert build_docs.obs_warnings(output) == ["obs-document: warning: one.md:3: long paragraph"]
 
 
+def test_obs_child_environment_ignores_callers_project_environment(monkeypatch):
+    caller_settings = ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
+                       "UV_PROJECT", "UV_WORKING_DIR", "UV_ISOLATED", "UV_ENV_FILE")
+    for name in caller_settings:
+        monkeypatch.setenv(name, "caller")
+    monkeypatch.setenv("UV_NATIVE_TLS", "1")
+    monkeypatch.setenv("UV_SYSTEM_CERTS", "1")
+    monkeypatch.setenv("UV_LOCKED", "1")
+
+    environment = build_docs.child_environment()
+
+    for name in caller_settings:
+        assert name not in environment
+        assert os.environ[name] == "caller"
+    assert environment["UV_SYSTEM_CERTS"] == "1"
+    assert "UV_NATIVE_TLS" not in environment
+    assert environment["UV_LOCKED"] == "1"
+
+
 def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(tmp_path, monkeypatch, fake_processes):
     """uv run would set VIRTUAL_ENV, which obs hands on to obs-html's own uv run."""
     obs, python = tmp_path / "obs", tmp_path / "obs" / ".venv" / "bin" / "python3"

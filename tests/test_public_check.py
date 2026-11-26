@@ -150,8 +150,9 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, door_fake: fake_git.Fa
     check; checked without the machine's ~/.se/local.toml or a machine-level list. Its git is the
     fake in memory, or the state file where the test takes `shared_fake_git` (tests/conftest.py
     `door_fake`), as its child processes run git."""
-    for variable in ("HOME", "USERPROFILE"):
-        monkeypatch.setenv(variable, str(tmp_path / "home"))
+    from conftest import use_home
+
+    use_home(monkeypatch, tmp_path / "home")
     monkeypatch.delenv(public_check.MACHINE_ENV, raising=False)
     se_checkout(door_fake)
     path = tmp_path / "repo"
@@ -1260,6 +1261,8 @@ def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_iden
     (folder / "commit-msg.sample").write_text("#!/bin/sh\n", encoding="utf-8")
     (repo / ".gitignore").write_text("build/", encoding="utf-8")
     (repo / "se.toml").write_text('[project]\nidentity = "alice <alice>"\n', encoding="utf-8")
+    if kind == "powershell":
+        assert (Path(os.environ["USERPROFILE"]) / "AppData" / "Local").is_dir()
     result = setup_hooks(kind, repo)
     assert result.returncode == 0, result.stdout + result.stderr
     named = next(line for line in result.stdout.splitlines() if "no longer run" in line)

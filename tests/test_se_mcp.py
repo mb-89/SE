@@ -40,6 +40,11 @@ def launch(kind: str, home: Path | None, project: Path, stdin: str, se: Path = R
     environment = {key: value for key, value in os.environ.items() if key not in dropped}
     if home is not None:
         environment.update(HOME=str(home), USERPROFILE=str(home))
+        if WINDOWS and kind == "powershell":
+            for name, folder in (("LOCALAPPDATA", "Local"), ("APPDATA", "Roaming")):
+                path = home / "AppData" / folder
+                path.mkdir(parents=True, exist_ok=True)
+                environment[name] = str(path)
     environment.update(env)
     if kind == "bash":
         command = [BASH, sh(se / "scripts" / "se_mcp.sh"), "--root", sh(project)]
@@ -75,6 +80,8 @@ def test_without_the_binary_the_launcher_answers_at_once_naming_the_setup(tmp_pa
     project.mkdir()
     result = launch(kind, home, project, "".join(json.dumps(m) + "\n" for m in SESSION))
     assert result.returncode == 0, result.stderr
+    if WINDOWS and kind == "powershell":
+        assert (home / "AppData" / "Local").is_dir()
     got = answers(result)
     assert sorted(got, key=str) == sorted([1, 2, "c", 4], key=str), "the notification has no answer"
     assert got[1]["result"]["serverInfo"]["name"] == "se"

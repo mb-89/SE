@@ -22,7 +22,7 @@ import fake_git
 import hygiene
 import pytest
 from conftest import (MACHINE_HOME, REAL_GIT, XDG_VARIABLES, RefusedGit, door_backend, door_variable,
-                      machine_caches, runner_variables)
+                      machine_caches, runner_variables, use_machine_home)
 from hygiene import binary_findings, git_door_findings, large_findings, marker_findings
 from test_public_check import commit, repo, se_checkout  # noqa: F401  (repo: the public check's fixture)
 
@@ -217,12 +217,21 @@ def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None
     assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]
 
 
-# Each test's home is its own and empty (tests/conftest.py `own_home`); the machine's caches stay
+# Each test's home has no user data (tests/conftest.py `own_home`); the machine's caches stay
 # where the machine keeps them (`machine_caches`).
 
 def test_each_test_runs_in_an_empty_home_of_its_own_that_reads_no_git_configuration(own_home) -> None:
     assert Path.home() == own_home and os.environ["HOME"] == os.environ["USERPROFILE"] == str(own_home)
-    assert list(own_home.iterdir()) == [] and own_home != Path(MACHINE_HOME["HOME"] or "/")
+    if os.name == "nt":
+        assert os.environ["APPDATA"] == str(own_home / "AppData" / "Roaming")
+        assert os.environ["LOCALAPPDATA"] == str(own_home / "AppData" / "Local")
+        assert sorted(path.name for path in (own_home / "AppData").iterdir()) == ["Local", "Roaming"]
+        assert not list((own_home / "AppData" / "Local").iterdir())
+        assert not list((own_home / "AppData" / "Roaming").iterdir())
+        assert [path.name for path in own_home.iterdir()] == ["AppData"]
+    else:
+        assert list(own_home.iterdir()) == []
+    assert own_home != Path(MACHINE_HOME["HOME"] or "/")
     assert [name for name in XDG_VARIABLES if name in os.environ] == []
     assert "GIT_CONFIG_GLOBAL" not in os.environ and os.environ["GIT_CONFIG_NOSYSTEM"] == "1"
     (own_home / ".se").mkdir()  # what a test writes under ~ is its own: the next test's home is empty
@@ -230,6 +239,14 @@ def test_each_test_runs_in_an_empty_home_of_its_own_that_reads_no_git_configurat
 
 def test_the_next_test_finds_nothing_the_last_one_wrote_under_its_home(own_home) -> None:
     assert not (Path.home() / ".se").exists()
+
+
+def test_obs_setup_restores_the_machines_windows_app_data(monkeypatch) -> None:
+    for name in ("APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, "isolated")
+    use_machine_home(monkeypatch)
+    for name in ("APPDATA", "LOCALAPPDATA"):
+        assert os.environ.get(name) == MACHINE_HOME[name]
 
 
 def test_the_machine_caches_are_where_each_tool_finds_them_without_its_variable() -> None:
