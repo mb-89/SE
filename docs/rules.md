@@ -2,7 +2,7 @@
 
 # Rules
 
-The 76 rules in force: the rule book's 64 and 12 guidance notes, the notes after the book.
+The 77 rules in force: the rule book's 65 and 12 guidance notes, the notes after the book.
 
 | Rule | What it says |
 |---|---|
@@ -69,6 +69,7 @@ The 76 rules in force: the rule book's 64 and 12 guidance notes, the notes after
 | `pub-005` | Private terms stay local |
 | `pub-006` | Never bypass the hooks |
 | `pub-007` | One se version per check |
+| `pub-008` | Roles, not personal names |
 | `p-go-001` | The rule of five |
 | `discover-cheap-load-late` | Progressive disclosure and lazy loading: what a command or module is comes from its declaration alone, and its code loads on first use. Read it before you add, list or rewrite a command, a component or a module. |
 | `flake-at-base` | How to tell a flake from your own failure: rerun the one test at the integration branch with a high repeat count. Load it before treating a red test as yours. |

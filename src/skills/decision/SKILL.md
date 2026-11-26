@@ -33,6 +33,8 @@ it, how others solve it, and which solutions there are.
 - **Frontmatter:** `obs: {bless: pending}` when a person must bless the decision; no frontmatter
   when the note is only a record of a decision the agent took itself.
 - **The heading:** `# <the decision>`, the question in a few words.
+- **People:** name people only by their role, never by name; names are private data
+  ([pub-008](../work-model/references/rules.md#pub-008-roles-not-personal-names)).
 - **`## Current situation`:** what exists today and who uses it, in plain technical English,
   with no stock first sentence: the note opens on the situation itself (`deck.py build` refuses a
   chapter that opens with one of its `STOCK_OPENINGS`). The person: "Just write the current
@@ -159,15 +161,16 @@ against their own total ("Task 1 of 2"), each with what to do, where, and what i
 
 ## Bringing decisions to the person
 
-The decisions the person must bless go to them as one deck, in one turn. `<se>/scripts/deck.py` builds,
-serves and reads it; its `--help` owns what each subcommand does.
+The decisions the person must bless go to them as one deck, in one turn. `<se>/scripts/deck.py`
+builds standalone HTML and reads answers; its `--help` owns what each subcommand does.
+Never start a server or serve a deck.
 
 A deck may also carry record chapters, notes without a bless request and without a `pugh` fence, such as
 what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
 
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
    `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html --host <host>`.
-   - `<host>` is the host the answers go back to: `claude-app`, `claude-code` or `copilot`
+   - `<host>` selects the deck adapter: `claude-app`, `claude-code` or `copilot`
      (`local` for any other).
    - Its chapters and their versions are in `<deck>.document.json` beside it, the obs Document it
      was built from; never decode the built page for them.
@@ -184,13 +187,13 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
      - Read `answers.json` with the Artifact tool's `read` and `path: "answers.json"`. Where it is
        missing or older than the comment, take the payload from the comment's `answers.json:` part,
        or from its lines where the payload did not fit.
-   - **Claude Code and Copilot** (local), `--host claude-code` or `--host copilot`: run
-     `uv run python <se>/scripts/deck.py serve <deck>.html` in the background (under Copilot, a
-     background terminal) and send the person the URL it prints first.
-     - Their Send posts the answers to that server, which writes `answers.json` beside
-       `<deck>.html`; the deck tells them it was sent to Claude Code or to Copilot.
-     - Read that file on your next turn, when the person says they sent; stop the server once it
-       is read.
+   - **Local review** (Claude Code, Copilot or any host with local files): build the standalone
+     `<deck>.html` to disk and give the person a clickable Markdown link to its absolute
+     filesystem path, not a server URL.
+     - The person reviews that local HTML and may give their answers in chat, as step 4 accepts.
+       No server or listening process is needed.
+     - If the person provides a saved `answers.json`, read that file on your next turn. Do not
+       claim a local Send submits or saves answers unless that mechanism has been verified.
 3. Run `uv run python <se>/scripts/deck.py answers <answers.json>` and act on what it prints; add
    `--record <notes> --destination <record>.html` for [the record](#the-record).
    - Any verdict may carry a comment, Bless included: act on the comment too.

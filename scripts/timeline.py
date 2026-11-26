@@ -711,7 +711,7 @@ def sibling(name: str):
 COMPONENTS = (sibling("se_components").Group(
     "render", "Render",
     "The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py builds a deck of "
-    "decisions, serves it and reads its answers.",
+    "decisions and reads its answers.",
     ("",)),)
 #: The commands that go through kern where it runs (se_components.routed): none, as the Timeline
 #: writes its page.

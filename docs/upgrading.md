@@ -433,6 +433,20 @@ On main, released as 17.0.0 at the next release.
   deck; do not ask for field feedback.
 - **Check:** `uv run pytest -q <se>/tests/test_retro.py <se>/tests/test_retro_deck.py` passes.
 
+## SE 19
+
+### Standalone decision decks
+
+- **Change:** SE no longer serves decision decks or posts their answers to a local server.
+- **Steps:** stop any old deck-serving process by its recorded process ID, and remove local
+  serving steps from deck workflows.
+  - Build with `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html
+    --host <host>` and send a clickable Markdown link to the absolute HTML path.
+  - Local Send offers answers to copy into chat; do not claim it saves a file.
+  - The Claude App artifact workflow and `answers --record` are unchanged.
+- **Check:** `uv run python <se>/scripts/deck.py --help` lists only `build` and `answers`.
+  Open the HTML directly, without a server; local Send names its host and offers answers to copy.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

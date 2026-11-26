@@ -63,9 +63,9 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
    them.
 4. **Hand it over and end your turn.** Hand the deck to the person as the decision skill's
    [Bringing decisions to the person](../skills/decision/SKILL.md#bringing-decisions-to-the-person)
-   says, step 2, and end your turn: never wait on their answers (no `deck.py serve --wait`, no
-   polling). Their answers come back later: the comment that wakes this session in the Claude
-   app, or `answers.json` beside the deck, which you read when the person says they sent.
+   says, step 2: locally, link the standalone HTML by its absolute filesystem path, never serve
+   it. End your turn without waiting or polling. Their answers come back later in chat, in the
+   Claude App artifact, or in a saved answers file the person provides.
 5. **Record outcomes.** Run `deck.py answers <answers.json>` for findings that need their
    decision; clear fixes are records, not approval requests. Record each answer in the finding
    and the decisions in the draft's last step; a finding the person declines leaves the block. A finding

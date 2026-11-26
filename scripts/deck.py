@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run python
 # se:template se/python-script 1.0.0
-"""Bring decisions to the person as one deck: build it with obs, serve it locally and read its answers.
+"""Bring decisions to the person as one standalone deck: build it with obs and read its answers.
 
 Reader: the agent that asks the person for decisions, and whoever changes this command. The decision
 skill (src/skills/decision/SKILL.md) says when to use it; this file owns what each subcommand does.
@@ -31,11 +31,6 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       the answers as text to copy. `downloads` keeps obs-html's file offers (its download and export
       links) working, which without it do nothing (obs-html's spec/capabilities/file-offers.md). The
       bundle's header owns how Send uses them and how the reader is told.
-  serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
-      then, once the person sends, the answers payload as one JSON line (also written to answers.json
-      beside HTML). For Claude Code, Copilot and any local browser. Without --wait it serves until stopped
-      and writes answers.json beside HTML at each send, so a session that runs it in the background reads
-      that file on its next turn and never waits on the person.
   answers ANSWERS [--record FOLDER --destination HTML]   Prints, per decision, what to act on: the
       verdict, the picked option, the comment and the weights, marks, vetoes, lifted vetoes, datum and
       rulings the person changed.
@@ -45,7 +40,7 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
 
 The answers payload's fields are owned by obs's src/obs/answers.schema.json. Exit code 0: done;
 1: the build failed, obs warned, no chapter or no decision asks for a bless, or the answers are
-malformed, or a decision does not explain its problem and how others solve it before its options; 2: setup error, or no answers within --timeout.
+malformed, or a decision does not explain its problem and how others solve it before its options; 2: setup error.
 """
 
 from __future__ import annotations
@@ -63,10 +58,9 @@ import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hosts  # noqa: E402
-import process_door  # noqa: E402
 import se_components  # noqa: E402
 import templates  # noqa: E402
-from build_docs import QUOTED, child_environment, obs_dir, obs_document, ready_adapter  # noqa: E402
+from build_docs import QUOTED, obs_dir, obs_document  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
 BUNDLE_ID = "se-answers"  # The id deck_answers.js registers with.
@@ -424,19 +418,6 @@ def _refusal(chapters: list[dict], recorded: bool, asks: bool = True) -> str | N
     return None
 
 
-def serve(artifact: Path, wait: bool, timeout: str | None) -> int:
-    """Serve ``artifact`` with obs-html's serve command, from its folder as obs-document --serve runs it,
-    installed first where it is missing."""
-    adapter, refusal = ready_adapter(obs_dir())
-    if adapter is None:
-        print(f"deck: {refusal}", file=sys.stderr)
-        return 2
-    sys.stdout.flush()
-    return process_door.run([*adapter["serve"], str(artifact.resolve()), *(["--wait"] if wait else []),
-                           *(["--timeout", timeout] if timeout is not None else [])],
-                          cwd=adapter["folder"], env=child_environment(), check=False).returncode
-
-
 def _changes(name: str, change: dict) -> list[str]:
     """One line per kind of change the person made to decision figure ``name``.
 
@@ -498,9 +479,9 @@ def answers(path: Path, record: Path | None, destination: Path | None) -> int:
 #: deck.py's commands in the render component timeline.py names (docs/start.md "Commands as
 #: components"); each command's usage and help come from make_parser.
 COMPONENTS = (se_components.script("timeline").COMPONENTS[0]._replace(
-    commands=("build", "serve", "answers")),)
+    commands=("build", "answers")),)
 #: The commands that go through kern where it runs (se_components.routed): none, as build writes,
-#: serve waits for the person, and answers is read by the agent, not a person.
+#: answers is read by the agent, not a person.
 INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
@@ -515,10 +496,6 @@ def make_parser() -> argparse.ArgumentParser:
     built.add_argument("--host", choices=HOSTS, help="the host the answers go back to (default: the one this runs "
                                                      "under: claude-app in Claude's cloud, claude-code under Claude "
                                                      "Code, copilot under Copilot's hooks, else local)")
-    served = commands.add_parser("serve", help="serve a deck locally and print the answers it is sent")
-    served.add_argument("artifact", type=Path)
-    served.add_argument("--wait", action="store_true", help="exit after the first answers, printing them")
-    served.add_argument("--timeout", metavar="S", help="with --wait: fail after S seconds without answers")
     read = commands.add_parser("answers", help="print what the answers ask the agent to act on")
     read.add_argument("answers", type=Path)
     read.add_argument("--record", type=Path, metavar="FOLDER", help="build FOLDER again with the answers")
@@ -537,8 +514,6 @@ def main(argv: list[str] | None = None) -> int:
         return routed
     if arguments.command == "build":
         return build(arguments.folder, arguments.destination, host=arguments.host)
-    if arguments.command == "serve":
-        return serve(arguments.artifact, arguments.wait, arguments.timeout)
     if bool(arguments.record) != bool(arguments.destination):
         parser.error("--record and --destination go together")
     return answers(arguments.answers, arguments.record, arguments.destination)

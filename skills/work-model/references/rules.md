@@ -1083,6 +1083,22 @@ A repository that pins se is checked only by se at that pin.
     ([Public safety](../../../AGENTS.md#public-safety)).
 - **Related:** wrk-003, gen-003
 
+### pub-008 Roles, not personal names
+
+Decision documents and all tracked or public output (commits, issues, pull requests, comments and
+decks) name people only by role, never by name, and personal names live only as private scan terms
+in the ignored, local-only `.public-check.local`, never in a tracked or public term list or other
+VCS content.
+
+- **Why:** names are private data, and publishing a name in a scan list leaks the same data.
+- **Without it:** a decision, report or privacy list identifies the person it should protect.
+- **Prevents:** personal names in public output, including examples and the lists that check it.
+- **Implementations:**
+  - se: the decision skill's [note shape](../../decision/SKILL.md#the-decision-note) uses roles;
+    the public check applies private scan terms from the local list and names only locations
+    and labels in refusals ([Public safety](../../../AGENTS.md#public-safety)).
+- **Related:** pub-001, pub-005
+
 ## p-go: the Go line on main (frozen)
 
 ### p-go-001 The rule of five

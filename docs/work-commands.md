@@ -151,13 +151,12 @@ report, and facts lists a checkout's pruning facts.
 #### Render
 
 `components/render`: The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py
-builds a deck of decisions, serves it and reads its answers.
+builds a deck of decisions and reads its answers.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `deck.py answers` | `deck.py answers [--record FOLDER] [--destination DESTINATION] answers` | print what the answers ask the agent to act on |
 | `deck.py build` | `deck.py build --destination DESTINATION [--host {claude-app,claude-code,copilot,local}] folder` | build a folder of decision notes into one deck |
-| `deck.py serve` | `deck.py serve [--wait] [--timeout S] artifact` | serve a deck locally and print the answers it is sent |
 | `timeline.py` | `timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT] [--config CONFIG]` | Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first. |
 
 #### Scaffold

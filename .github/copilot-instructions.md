@@ -54,3 +54,9 @@
   queue otherwise, retry `cannotSteer` with the identical queued message, and verify once.
 - When a requested guidance change replaces a protected sentence, update its existing assertion
   to enforce the new rule and retained safeguards, rather than leaving the old rule in the test.
+- Deliver local decks as standalone HTML through an absolute-path Markdown link, never a
+  background server; accept chat verdicts and do not assume a local Send saves answers.
+- Use roles, never personal names, in decision notes and tracked or public output; private
+  names belong only in the ignored local scan list, never a committed example or term list.
+- A timeboxed full-tree report guard is incomplete, not passed; targeted introspection can
+  inventory replaced text but cannot stand in for the acceptance check.
