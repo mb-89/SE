@@ -1232,6 +1232,22 @@ def test_bless_goes_from_answered_draft_to_closed_with_gate_open_in_one_call(
     assert "blessed and closed; filing gate open" in capsys.readouterr().out
 
 
+def test_bless_closes_a_draft_without_findings_with_the_gate_open_in_one_call(
+        checkout, tmp_path, monkeypatch, blessing, capsys):
+    draft = tmp_path / "answered.md"
+    draft.write_text(judged_draft(checkout, classes=[], findings=[]), encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "integration_ref",
+                        lambda root: pytest.fail("bless must not need a landed doc or sync"))
+    assert retro.main(["bless", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert blessing.seconds < 60
+    assert blessing.closed and blessing.gate_open_at_bless
+    assert retro.filing_state(blessing.given).phase == "blessed"
+    work_tickets.filing_check(checkout, REPO, "file", blessing,
+                             datetime(2026, 11, 26, 9, 2, tzinfo=timezone.utc))
+    assert "blessed and closed; filing gate open" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("fail_after", [1, 2, 4])
 def test_bless_resumes_after_a_lost_write_response_without_duplicate_comments(
         checkout, tmp_path, blessing, fail_after, capsys):
