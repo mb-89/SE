@@ -145,6 +145,15 @@ REPORT_MARKER = "<!-- se:retro-report -->"
 DOC_TEMPLATE = "retro-doc"
 DOC_MARKER = sibling("interfaces").generated(DOC_TEMPLATE)["message"]
 DOC_PATTERN = re.compile(r"<!-- se:retro-doc ([0-9a-f]{40}) (\S+) -->")
+# Where no commit of the integration branch holds the draft, `file` posts its judged block on the
+# retro issue itself, as numbered comments each holding one fenced piece of the block's JSON under
+# BLOCK_PART; `posted_block` joins them back. Filing a retro needs no landing.
+BLOCK_PART = "<!-- se:retro-block {index}/{total} -->"
+BLOCK_PART_PATTERN = re.compile(r"<!-- se:retro-block (\d+)/(\d+) -->\n(`{3,})json\n(.*?)\n\3[ \t]*$",
+                                re.MULTILINE | re.DOTALL)
+# Each draft's one known path on the machine, so any session finds it: DRAFTS under the home,
+# then the tracker's path, then `retro-<n>.md` (`draft_path`).
+DRAFTS = Path(".se") / "retros"
 # GitHub's limit on an issue comment's body, in characters; a part's label needs at most
 # PART_ROOM of them.
 COMMENT_LIMIT = 65536
@@ -2089,6 +2098,63 @@ def steps_problems(text: str) -> list[str]:
     return [finding.fix for finding in found if finding.severity == templates().REFUSE]
 
 
+STEP_COMMENT = re.compile(r"\s*<!-- ([a-z_]+): [^\n]*?-->")
+NUMBERED = re.compile(r"## \d+\.\s+(.+?)\s*$")
+
+
+def current_form(text: str) -> str | None:
+    """The draft `text` laid out as the retro template is now, where only its step headings differ:
+    each `## ` section whose first line is a field's comment (`<!-- <field>: -->`) takes that
+    field's heading, and a numbered step the template no longer has (an older template's field
+    feedback) moves, under a `### ` heading of its title, to the top of the next step. None where
+    nothing changes or a step it would move has no next step to go to."""
+    cut = min((index for index in (text.find(JUDGE_BEGIN), text.find(BLOCK_MARKER)) if index >= 0),
+              default=len(text))
+    headings = {field.name: field.heading for field in retro_template().fields}
+    out, carry = [], ""
+    for section in re.split(r"(?m)^(?=## )", text[:cut]):
+        title, newline, rest = section.partition("\n")
+        comment = STEP_COMMENT.match(rest) if section.startswith("## ") else None
+        if comment is None:
+            out.append(section)
+        elif comment[1] in headings:
+            end = comment.end()
+            moved = f"\n\n{carry.rstrip()}\n" if carry else ""
+            out.append(f"## {headings[comment[1]]}{newline}{rest[:end]}{moved}{rest[end:]}")
+            carry = ""
+        elif NUMBERED.match(title):
+            carry += f"### {NUMBERED.match(title)[1]}\n\n{rest[comment.end():].strip()}\n\n"
+        else:
+            out.append(section)
+    converted = "".join(out) + text[cut:]
+    return None if carry or converted == text else converted
+
+
+def draft_path(tracker: str, number: int, home: Path | None = None) -> Path:
+    """Retro `number`'s draft at its one known path on this machine: DRAFTS under the home, the
+    tracker's `<owner>/<repo>`, then `retro-<number>.md`."""
+    names = work_tickets.owner_repo(tracker)
+    return (home or Path.home()) / DRAFTS / names["owner"] / names["repo"] / f"retro-{number}.md"
+
+
+def read_draft(path: Path | None, tracker: str, number: int, command: str) -> tuple[Path, str]:
+    """The draft `command` reads: `path`, else its known path (`draft_path`), in the current
+    template's form (`current_form`), saying so where it converted it; refused, naming the
+    command that writes it, where there is none."""
+    path = path or draft_path(tracker, number)
+    if not path.is_file():
+        raise QueueError(f"retro.py {command}: no draft of retro #{number} at {path}; write it "
+                         f"with `retro.py collect {number}` (it writes there), or pass --draft")
+    text = work_tickets.read_file(path, "the retro draft")
+    if steps_problems(text):
+        converted = current_form(text)
+        if converted is not None and not steps_problems(converted):
+            print(f"retro.py {command}: the draft {path} follows an older retro template; read "
+                  f"it in the current form ({retro_template().path or TEMPLATE_NAME})")
+            return path, converted
+    return path, text
+
+
 def class_key_lines(keys: dict) -> list[str]:
     """A class's optional keys as the report shows them; none without."""
     lines = []
@@ -2148,11 +2214,12 @@ def judged_class_lines(classes: list[dict], block: dict, named_only: bool = Fals
     return lines
 
 
-def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
+def report(block: dict, number: int, doc: str | None, url: str, sha: str, text: str,
            root: Path | None = None) -> str:
     """The retro's report proper: the five draft steps, each judged class and finding, and a link
     to the committed retro doc `doc` at commit `sha` (`url`), which holds the facts and block the
-    next collect reads."""
+    next collect reads; where no commit holds the draft (`doc` None), the drafted facts
+    themselves, the block following in its own comments (`block_parts`)."""
     template = retro_template()
     drafted = steps_of(text).fields
     classes = judged_classes(block, root)
@@ -2171,10 +2238,11 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
                f"{DECISION} findings are "
                + (", ".join(map(str, decisions)) or "none") + "."]
     fields = {
-        "collect": f"The facts (sizes, landed issues, rule checks, metrics, the field reports' "
-                   f"answers and what they did not deliver, the last retro's classes measured "
-                   f"again) and the block the next retro reads are in the committed retro doc "
-                   f"[{doc}]({url}), at {sha[:12]}.",
+        "collect": (f"The facts (sizes, landed issues, rule checks, metrics, the field reports' "
+                    f"answers and what they did not deliver, the last retro's classes measured "
+                    f"again) and the block the next retro reads are in the committed retro doc "
+                    f"[{doc}]({url}), at {sha[:12]}." if doc
+                    else (drafted.get("collect") or "None.")),
         "timeline": drafted.get("timeline") or "None.",
         "matrix": drafted.get("matrix") or "None.",
         "answers": drafted.get("answers") or "None.",
@@ -2182,8 +2250,8 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
         "decisions": "\n\n".join(part for part in decided if part),
     }
     body = templates().render(template, fields)
-    return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n\n"
-            f"{doc_marker(sha, doc)}\n")
+    return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n"
+            + (f"\n{doc_marker(sha, doc)}\n" if doc else ""))
 
 
 def finding_reference(kind: str, number: int, finding: str = "<k>") -> str:
@@ -2224,23 +2292,52 @@ def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
     return [f"{chunk.rstrip(chr(10))}\n\n{label}\n" for chunk, label in zip(chunks, labels)]
 
 
-def committed_doc(root: Path, draft: Path, text: str, ref: str) -> tuple[str, str]:
+def committed_doc(root: Path, draft: Path, text: str, ref: str) -> tuple[str, str] | None:
     """(the draft's path in the checkout, the commit of `ref`) where `ref` holds the draft as
-    `text` reads; refused otherwise, since the report links to it for its facts and block."""
+    `text` reads; None otherwise, and the report then carries the facts and the block itself."""
     try:
         doc = draft.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        raise QueueError(f"The draft {draft} is not in the checkout {root}: the report links to "
-                         "the committed retro doc for its facts and block, so commit the draft "
-                         f"under docs/ and land it on {ref.split('/')[-1]} first") from None
+        return None
     sha = work_tickets.checked_git(root, "rev-parse", f"{ref}^{{commit}}").strip()
     shown = work_tickets.run_git(root, "show", f"{sha}:{doc}")
     if shown.returncode != 0 or shown.stdout.replace("\r\n", "\n") != text.replace("\r\n", "\n"):
-        raise QueueError(f"{ref} at {sha[:12]} does not hold the draft {doc} as it stands: the "
-                         "report links to the committed retro doc for its facts and block, so "
-                         f"land the draft on {ref.split('/')[-1]} first (sync and file again), "
-                         "and nothing was written")
+        return None
     return doc, sha
+
+
+def block_parts(text: str, limit: int | None = None) -> list[str]:
+    """The draft's block as the comments that post it on the retro issue, where no commit holds
+    the draft: its JSON on one line, cut into pieces that fit `limit` (COMMENT_LIMIT), each under
+    its BLOCK_PART line in a fence longer than any backtick run it holds."""
+    data = json.dumps(read_block(text), ensure_ascii=False, separators=(",", ":"))
+    size = (limit or COMMENT_LIMIT) - PART_ROOM - 2 * 20
+    pieces = [data[start:start + size] for start in range(0, len(data), size)] or [""]
+    comments = []
+    for index, piece in enumerate(pieces, 1):
+        fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", piece)), default=0))
+        comments.append(f"{BLOCK_PART.format(index=index, total=len(pieces))}\n{fence}json\n"
+                        f"{piece}\n{fence}\n")
+    return comments
+
+
+def embedded_block(texts: list[str]) -> dict | None:
+    """The block the last complete run of BLOCK_PART comments in `texts` holds; None where none."""
+    found, run = None, []
+    for text in texts:
+        for match in BLOCK_PART_PATTERN.finditer(text.replace("\r\n", "\n")):
+            index, total = int(match[1]), int(match[2])
+            run = [match[4]] if index == 1 else run + [match[4]] if len(run) == index - 1 else []
+            if run and len(run) == total:
+                found, run = "".join(run), []
+    if found is None:
+        return None
+    try:
+        data = json.loads(found)
+    except json.JSONDecodeError as error:
+        raise QueueError(f"The {BLOCK_PART.split(' {')[0]} comments do not join into JSON: "
+                         f"{error}") from error
+    return data if isinstance(data, dict) else None
 
 
 def doc_url(repo: str, sha: str, doc: str) -> str:
@@ -2258,11 +2355,16 @@ def git_show(root: Path):
 
 def posted_block(texts: list[str], number: int, show) -> dict | None:
     """The judged block of filed retro `number`: from the retro doc the last of `texts` (its
-    body and comments) links (DOC_MARKER), read with `show(sha, path)`; None where none links
-    one."""
+    body and comments) links (DOC_MARKER), read with `show(sha, path)`, else from the block
+    comments posted on the issue (`embedded_block`); None where neither is there."""
     links = [match for text in texts for match in DOC_PATTERN.finditer(text)]
     if not links:
-        return None
+        data = embedded_block(texts)
+        if data is None:
+            return None
+        fenced = json.dumps(data, ensure_ascii=False, indent=1)
+        fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", fenced)), default=0))
+        return judged(f"{BLOCK_MARKER}\n{fence}json\n{fenced}\n{fence}\n", number, filed=True)
     sha, doc = links[-1][1], links[-1][2]
     text = show(sha, doc)
     if text is None:
@@ -2395,22 +2497,23 @@ def record_outcome(root: Path, tracker: str, reference: FindingRef, kind: str, v
 def run_file(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
     tracker = work_tickets.resolve_repo(root, args.repo)
-    text = work_tickets.read_file(args.draft, "the retro draft")
+    draft, text = read_draft(args.draft, tracker, args.retro, "file")
     block = judged(text, args.retro)
     open_steps = steps_problems(text)
     if open_steps:
         raise QueueError(f"The draft of retro #{args.retro} leaves a step of the retro template "
                          f"({retro_template().path or TEMPLATE_NAME}) open, so nothing was written: "
                          + "; ".join(open_steps))
-    doc, sha = committed_doc(root, args.draft, text, work_tickets.integration_ref(root))
-    url = doc_url(work_tickets.remote_repo(root) or tracker, sha, doc)
+    linked = committed_doc(root, draft, text, work_tickets.integration_ref(root))
+    doc, sha = linked if linked else (None, "")
+    url = doc_url(work_tickets.remote_repo(root) or tracker, sha, doc) if doc else ""
     posted = report(block, args.retro, doc, url, sha, text, root)
     refused = [finding.fix for finding in templates().check(retro_template(), templates().parse(
         retro_template(), posted)) if finding.severity == templates().REFUSE]
     if refused:
         raise QueueError(f"The report of retro #{args.retro} breaks the retro template, so nothing "
                          "was written: " + "; ".join(refused))
-    comments = parts(posted, args.retro)
+    comments = parts(posted, args.retro) + ([] if doc else block_parts(text))
     steps = file_steps(tracker, args.retro, comments, len(block["findings"]))
     door = work_tickets.filing_door(root, tracker)
     if door is None:
@@ -2423,7 +2526,9 @@ def run_file(args: argparse.Namespace) -> int:
         print(f"Posted the report of retro #{args.retro}{status}")
     sizes = ", ".join(f"{len(comment)}" for comment in comments)
     print(f"Retro #{args.retro}: the report in {len(comments)} comment(s) of {sizes} characters "
-          f"(limit {COMMENT_LIMIT}), linking {doc} at {sha[:12]} for the facts and the block")
+          f"(limit {COMMENT_LIMIT}), "
+          + (f"linking {doc} at {sha[:12]} for the facts and the block" if doc
+             else "carrying the facts and the block itself, as no commit holds the draft"))
     kinds = [item["kind"] for item in block["findings"]]
     print(f"Retro #{args.retro}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
           f"{DECISION} finding(s); SE records an outcome for each after the report is in")
@@ -2515,7 +2620,8 @@ def deck_parts(block: dict, text: str, root: Path | None = None
 
 def run_deck(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
-    text = work_tickets.read_file(args.draft, "the retro draft")
+    tracker = "" if args.draft else work_tickets.resolve_repo(root, None)
+    _, text = read_draft(args.draft, tracker, args.retro, "deck")
     block = judged(text, args.retro)
     open_steps = steps_problems(text)
     if open_steps:
@@ -2589,9 +2695,13 @@ def run_collect(args: argparse.Namespace) -> int:
     found.breaking = breaking_releases(root)
     output = (json.dumps({**found.data(), **found.extras()}, indent=2, ensure_ascii=False) + "\n"
               if args.json else draft(found))
-    if args.out:
-        args.out.write_text(output, encoding="utf-8", newline="\n")
-        print(f"Wrote the retro draft of #{args.retro} to {args.out}: "
+    out = args.out
+    if out is None and not args.json:
+        out = draft_path(tracker, args.retro)
+        out.parent.mkdir(parents=True, exist_ok=True)
+    if out is not None and str(out) != "-":
+        out.write_text(output, encoding="utf-8", newline="\n")
+        print(f"Wrote the retro draft of #{args.retro} to {out}: "
               + ", ".join(f"{value} {name}" for name, value in found.sizes.items()))
     else:
         sys.stdout.write(output)
@@ -2689,7 +2799,9 @@ def make_parser() -> argparse.ArgumentParser:
                        help="start the window where the closed retro issue ISSUE closed, and "
                             "score its findings")
     collect_command.add_argument("--out", type=Path, metavar="FILE",
-                                 help="write the draft to FILE (default: print it)")
+                                 help="write the draft to FILE, `-` to print it (default: the "
+                                      "draft's known path, ~/.se/retros/<owner>/<repo>/"
+                                      "retro-<n>.md, where deck and file read it; --json prints)")
     collect_command.add_argument("--json", action="store_true",
                                  help="the block's data as JSON instead of the draft")
     collect_command.add_argument("--signals", type=Path, nargs="+", metavar="FILE",
@@ -2725,8 +2837,9 @@ def make_parser() -> argparse.ArgumentParser:
                     "its sole default answer. It writes the one HTML "
                     "file DESTINATION and nothing beside it, and never waits for the answers.")
     deck_command.add_argument("retro", type=int, help="the retro issue's number")
-    deck_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
-                              help="the draft retro.py collect wrote, its block judged")
+    deck_command.add_argument("--draft", type=Path, metavar="FILE",
+                              help="the draft retro.py collect wrote, its block judged (default: "
+                                   "its known path, where collect writes it)")
     deck_command.add_argument("--destination", type=Path, required=True, metavar="HTML",
                               help="the deck's HTML file")
     deck_command.add_argument("--host", choices=sibling("deck").HOSTS,
@@ -2741,14 +2854,16 @@ def make_parser() -> argparse.ArgumentParser:
         "file", help="check a judged retro draft and move the retro issue to report state",
         description="Check the judgment the judge wrote into the draft's block, refusing an "
                     "incomplete one and writing nothing; post the report (each finding with its "
-                    f"proposed fix and kind, {WORK} or {DECISION}, and a link to the draft "
-                    "committed on the integration branch, which holds the facts and the block) "
+                    f"proposed fix and kind, {WORK} or {DECISION}, and the facts and the block: "
+                    "a link to the draft where the integration branch holds it as it stands, "
+                    "else the drafted facts and the block posted on the issue itself) "
                     f"as comments in numbered parts over {COMMENT_LIMIT} characters, then leave "
-                    "the issue open while SE files, declines or merges each finding.")
+                    "the issue open while SE files, declines or merges each finding. A draft of "
+                    "an older retro template is read in the current form.")
     file_command.add_argument("retro", type=int, help="the retro issue's number")
-    file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
-                              help="the draft retro.py collect wrote, its block judged, "
-                                   "committed on the integration branch as it stands")
+    file_command.add_argument("--draft", type=Path, metavar="FILE",
+                              help="the draft retro.py collect wrote, its block judged (default: "
+                                   "its known path, where collect writes it)")
     file_command.add_argument("--worktree", default=".",
                               help="the checkout of the repository (default: .)")
     file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "

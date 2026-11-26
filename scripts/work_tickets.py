@@ -6788,6 +6788,14 @@ def filing_check(root: Path, repo: str, command: str, door=None,
                                          f"state; file only its findings with `work_tickets.py file "
                                          f"--finding {names.removeprefix('#')}:<k>`, or record "
                                          f"declined/merged outcomes with `retro.py outcome`; {held}")
+                number = found[kind].open[0]
+                if len(states) == 1:
+                    raise ReviewDueError(
+                        f"work_tickets.py {command}: the retro {names} is open and its report is "
+                        f"not in; post it with `uv run python {SE_ROOT.as_posix()}/scripts/retro.py "
+                        f"file {number} --worktree {root.as_posix()}` (it reads the draft at "
+                        f"{retro.draft_path(repo, number)}, which `retro.py collect {number}` "
+                        f"writes), then file its findings with `--finding {number}:<k>`; {held}")
             raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
     for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
         if found[kind].due:

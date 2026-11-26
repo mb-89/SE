@@ -128,9 +128,9 @@ an overhaul is due or open.
 | Command | Usage | What it does |
 |---|---|---|
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
-| `retro.py deck` | `retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
+| `retro.py deck` | `retro.py deck [--draft FILE] --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
-| `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
+| `retro.py file` | `retro.py file [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
 | `retro.py outcome` | `retro.py outcome (--issue ISSUE \| --declined REASON \| --merged-into FINDING) [--worktree WORKTREE] [--repo REPO] RETRO:FINDING` | record a finding's issue, declined or merged outcome on its retro |
 
 #### Overhaul
@@ -316,7 +316,13 @@ Steps 3 to 5 it builds from the same record:
   `open`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
-commands read from the committed draft. `--json` prints the block's data alone.
+commands read from the filed retro. `--json` prints the block's data alone.
+
+The draft has one known path on the machine, `~/.se/retros/<owner>/<repo>/retro-<n>.md`.
+`collect` writes it there unless `--out` names another file (`--out -` prints it).
+
+`deck` and `file` read it from there unless `--draft` names another, so no session searches
+another's folders. Where none is there, they name that path and `retro.py collect <n>`.
 
 `--sessions <file>` adds the cloud sessions' costs: the file holds each session `list_sessions`
 lists, with its `list_events` result events (kinds `["result"]`) as `"events"`. Each session is
@@ -328,10 +334,9 @@ Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](../src/skills/work-model/SKILL.md#without-gh)).
 
-`retro.py file` files a judged retro, the draft committed as the retro doc on the integration
-branch. The judge completes the collected facts, timeline, matrix, answers to the standing
-questions, and classes and homes; the decisions step leaves findings open for the deck. The judge
-also fills the draft's block:
+`retro.py file` files a judged retro from its draft. The judge completes the collected facts,
+timeline, matrix, answers to the standing questions, and classes and homes; the decisions step
+leaves findings open for the deck. The judge also fills the draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
@@ -346,27 +351,34 @@ a finding on the rule book, or on a check that recurred, that is not controversi
 went well.
 
 It refuses, too, a draft whose steps break the retro template, a step or a standing question left
-open among them, and a draft the integration branch does not hold as it stands: land it there
-first.
+open among them. A draft of an older retro template whose steps differ only in their headings (the
+six-step template's field feedback first) is read in the current form: its field feedback moves
+under Collect as a `### Field feedback` section, and `file` and `deck` say so.
 
 It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report proper as the retro issue's closing comment and closes the issue.
+it posts the report proper on the retro issue and leaves it open for the findings' outcomes.
 
-The report opens with `<!-- se:retro-report -->` and is a document of the retro template. It links
-the committed retro doc for the collected facts and block, and carries the drafted timeline,
-standing-question matrix and answers, and the judged classes, strongest home first, each with its
-cause, fix, home and state against the tree, and its findings, numbered, each with its home and its
-kind:
+The report opens with `<!-- se:retro-report -->` and is a document of the retro template. Where
+the integration branch holds the draft as it stands, it links that retro doc for the collected
+facts and block.
+
+Otherwise it carries the drafted facts itself, and the block follows in its own comments, each a
+`<!-- se:retro-block <k>/<n> -->` line over a fenced piece of the block's JSON, so filing needs no
+landing.
+
+It carries the drafted timeline, standing-question matrix and answers, and the judged classes,
+strongest home first, each with its cause, fix, home and state against the tree, and its findings,
+numbered, each with its home and its kind:
 
 - `work`: SE bundles these into as few work issues as the work needs, each naming
   `retro #<n> finding <k>` for every finding it takes;
 - `decision`: for the owner's decision list.
 
 It then records what went well and leaves each finding open until its outcome is recorded. The
-standalone deck carries the person's decisions. The facts and the block stay in the retro doc,
-which the report links at the integration branch's commit (the message `templates/retro-doc.md`),
-where the next collect and overhaul read them.
+standalone deck carries the person's decisions. The next collect and overhaul read the facts and
+the block from the retro doc the report links (the message `templates/retro-doc.md`), or from the
+block comments where it links none.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
 without its markers, so no part is checked as a whole report: `file` checked the whole first.

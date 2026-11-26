@@ -1690,6 +1690,36 @@ class SEState:
     pin: str | None = None  # the project's [components.se] version range
     stays: str = ""  # why the boot leaves SE as it is
     error: str = ""
+    ahead: tuple[str, Version, str] | None = None  # another remote of SE's checkout, its newer release, SE's path
+
+
+def _other_remotes(se_root: Path) -> list[tuple[str, str]]:
+    """Each remote of SE's checkout but origin, with its URL: a mirror's origin may lag one."""
+    if not (se_root / ".git").exists():
+        return []
+    names = git_door.run("remote", root=se_root)
+    found = []
+    for name in (names.stdout.split() if names.returncode == 0 else []):
+        if name == "origin":
+            continue
+        url = git_door.run("remote", "get-url", name, root=se_root)
+        if url.returncode == 0 and url.stdout.strip():
+            found.append((name, url.stdout.strip()))
+    return found
+
+
+def _ahead(se_root: Path, newest: Version | None, world: World) -> tuple[str, Version, str] | None:
+    """The remote of SE's checkout holding the newest release above origin's `newest`, where one
+    does: origin is a mirror behind it, and no update takes that release until origin has it."""
+    best = None
+    for name, url in _other_remotes(se_root):
+        try:
+            top = max(world.remote(url), default=None)
+        except (RemoteError, OSError, subprocess.SubprocessError):
+            continue
+        if top is not None and (newest is None or top > newest) and (best is None or top > best[1]):
+            best = (name, top, se_root.as_posix())
+    return best
 
 
 def se_state(se_root: Path, root: Path | None, local, world: World) -> SEState:
@@ -1715,7 +1745,7 @@ def se_state(se_root: Path, root: Path | None, local, world: World) -> SEState:
     if due and (se_root / ".git").exists() and (
             (root is not None and root.resolve() == se_root.resolve()) or _development(se_root)):
         stays = "a development checkout, the boot leaves it"
-    return SEState(item, newest, due, pinned, stays)
+    return SEState(item, newest, due, pinned, stays, ahead=_ahead(se_root, newest, world))
 
 
 def se_line(state: SEState, moved: str = "") -> str:
@@ -1734,6 +1764,11 @@ def se_line(state: SEState, moved: str = "") -> str:
         verdict += (f"; {_v(state.newest)} lies beyond the pin, not taken; to take it, set version = "
                     f"\"^{state.newest[0]}.{state.newest[1]}\" in [components.se] of the project's "
                     f"{se_modules.MANIFEST}")
+    if state.ahead:
+        name, version, path = state.ahead
+        verdict += (f"; but remote {name} holds {_v(version)}: origin is a mirror behind it, so "
+                    f"sync origin from {name} first, then run "
+                    f"`uv run python {path}/scripts/se_start.py update`")
     return f"{head}: {verdict}"
 
 

@@ -20,3 +20,13 @@
 - Prefer `work_tickets.py guard` when checking a report's removed tests and prose, rather than
   composing long inline probes. If introspection is necessary, read the helper's actual name
   first: the test-removal helper is `deleted_test_places`, not `deleted_tests`.
+- A default argument binds a module constant when the function is defined, so a test that
+  monkeypatches the constant does not reach it; write `limit=None` and `limit or CONSTANT`
+  in the body.
+- A refusal names its cause and the one command that removes it (`retro.py file <n>`,
+  `retro.py collect <n>`, the sync of a lagging mirror); a refusal that only says "no" costs
+  a round trip to SE and was read as a gate to respect.
+- Origin may be a mirror that lags another remote: an "is SE current" check that reads only
+  origin's tags reports current while a newer release exists; read the other remotes too.
+- When inserting a test above another with the edit tool, end `new_str` with the following
+  test's `def` line intact; dropping it silently merges two tests.

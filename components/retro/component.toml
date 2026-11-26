@@ -11,14 +11,14 @@ help = "read a retro's window from GitHub and write its draft"
 class = "batch"
 
 [commands."retro.py deck"]
-usage = "retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}]\n              [--answers FILE] [--worktree WORKTREE]\n              retro"
+usage = "retro.py deck [--draft FILE] --destination HTML\n              [--host {claude-app,claude-code,copilot,local}] [--answers FILE]\n              [--worktree WORKTREE]\n              retro"
 summary = "build the retro's one report, a deck, from its judged draft"
 group = "Retro"
 help = "build the retro's one report, a deck, from its judged draft"
 class = "batch"
 
 [commands."retro.py file"]
-usage = "retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro"
+usage = "retro.py file [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro"
 summary = "check a judged retro draft and move the retro issue to report state"
 group = "Retro"
 help = "check a judged retro draft and move the retro issue to report state"

@@ -2090,6 +2090,20 @@ def test_the_boot_lists_se_and_every_pin_with_pinned_locked_and_newest_version(b
     assert se_modules.checkout_version(booted["se"]) == (1, 0, 0)
 
 
+def test_the_boot_names_a_remote_whose_release_origin_lacks_and_the_sync_it_needs(booted):
+    """SE's origin is a mirror that lags another remote: the boot says so at once, with the one
+    command after the sync, rather than calling SE current."""
+    git(booted["se"], "remote", "add", "public", "https://git.example.org/team/se-public")
+    remote = booted["world"].remote
+    booted["world"] = dataclasses.replace(booted["world"], remote=lambda url: (
+        [(3, 0, 0)] if url.endswith("se-public") else remote(url)))
+    line = boot(booted)[0][2]
+    assert line.startswith("SE: installed 1.0.0, newest 2.0.0: the upgrade takes 2.0.0; but remote "
+                           "public holds 3.0.0: origin is a mirror behind it, so sync origin from "
+                           "public first, then run `uv run python ")
+    assert line.endswith(f"{booted['se'].as_posix()}/scripts/se_start.py update`")
+
+
 def test_the_upgrade_moves_se_and_each_lock_within_its_pin_and_takes_no_breaking_release(booted):
     lines, failed = boot(booted, upgrade=True)
     assert not failed, lines

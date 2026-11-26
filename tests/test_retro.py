@@ -1319,28 +1319,84 @@ def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkey
 
 
 @pytest.mark.parametrize("where", ["outside", "uncommitted", "changed"])
-def test_file_refuses_a_draft_main_does_not_hold_and_writes_nothing(checkout, tmp_path,
-                                                                     monkeypatch, where):
-    writes = []
+def test_file_posts_the_block_on_the_issue_where_main_does_not_hold_the_draft(
+        checkout, tmp_path, monkeypatch, capsys, where):
+    """Filing needs no landing: where no commit of main holds the draft as it stands, the report
+    carries the drafted facts and the block follows in its own comments, which the next collect
+    reads back (`posted_block`)."""
+    tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
-    monkeypatch.setattr(work_tickets, "run_plan", lambda plan, actions: writes.append(plan))
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(retro, "COMMENT_LIMIT", 2000)
     text = judged_draft(checkout)
     if where == "outside":
         draft = tmp_path / "draft.md"
-        draft.write_text(text, encoding="utf-8")
-        refusal = "is not in the checkout"
     else:
         draft = checkout / "docs" / "retro-30.md"
         if where == "changed":
             commit_doc(checkout, text.replace("Lost reports", "Lost", 1))
         draft.parent.mkdir(exist_ok=True)
-        draft.write_text(text, encoding="utf-8")
-        refusal = "does not hold the draft docs/retro-30.md as it stands"
+    draft.write_text(text, encoding="utf-8")
 
-    with pytest.raises(work_tickets.QueueError, match=refusal):
-        retro.run_file(retro.make_parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
-                                                  REPO, "--worktree", str(checkout)]))
-    assert writes == []
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+
+    bodies = [arguments["body"] for name, arguments in tracker.calls if name == "comment_issue"]
+    assert not any(retro.DOC_PATTERN.search(body) for body in bodies)
+    blocks = [body for body in bodies if body.startswith("<!-- se:retro-block ")]
+    assert len(blocks) > 1 and all(len(body) <= 2000 for body in blocks)
+    assert bodies[-1].startswith("<!-- se:retro-state report findings=2 -->")
+    block = retro.posted_block(bodies, 30, lambda sha, path: None)
+    assert [item["title"] for item in block["findings"]] == [
+        item["title"] for item in retro.judged(text, 30)["findings"]]
+    assert "carrying the facts and the block itself" in capsys.readouterr().out
+
+
+def test_file_reads_a_draft_of_the_older_six_step_template_in_the_current_form(
+        checkout, tmp_path, monkeypatch, capsys):
+    """A draft answered under the six-step template (field feedback first) files: its field
+    feedback moves under Collect and the steps take their current headings."""
+    text = judged_draft(checkout)
+    headings = {"## 1. Collect": "## 2. Collect", "## 2. Table of what happened":
+                "## 3. Table of what happened", "## 3. The standing questions":
+                "## 4. The standing questions", "## 4. Classes and homes": "## 5. Classes and homes",
+                "## 5. The person decides": "## 6. The person decides"}
+    old = text
+    for new, before in headings.items():
+        old = old.replace(f"\n{new}\n", f"\n{before}\n", 1)
+    first = old.index("## 2. Collect")
+    old = (old[:first] + "## 1. Field feedback\n\n<!-- field_feedback: The person's answer. -->\n\n"
+           "Retros take too long.\n\n" + old[first:])
+    assert retro.steps_problems(old)
+    converted = retro.current_form(old)
+    assert converted is not None and not retro.steps_problems(converted)
+    assert "### Field feedback\n\nRetros take too long." in converted
+    assert retro.current_form(text) is None
+
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    draft = tmp_path / "old.md"
+    draft.write_text(old, encoding="utf-8")
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert "follows an older retro template" in capsys.readouterr().out
+
+
+def test_file_reads_the_draft_at_its_known_path_and_names_collect_where_none_is(
+        checkout, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    known = retro.draft_path(REPO, 30)
+    assert known == tmp_path / "home" / ".se" / "retros" / "owner" / "repo" / "retro-30.md"
+    command = ["file", "30", "--repo", REPO, "--worktree", str(checkout)]
+    assert retro.main(command) == 1
+    err = capsys.readouterr().err
+    assert f"no draft of retro #30 at {known}" in err and "`retro.py collect 30`" in err
+    known.parent.mkdir(parents=True)
+    known.write_text(judged_draft(checkout), encoding="utf-8")
+    assert retro.main(command) == 0
+    assert "GitHub plan: the report of retro #30" in capsys.readouterr().out
 
 
 def test_file_without_gh_posts_report_state_and_leaves_findings_open(checkout, monkeypatch, capsys):
