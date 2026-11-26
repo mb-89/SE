@@ -121,8 +121,11 @@ every package, so work issues and session prompts never repeat it.
    - The focused tests are those of what changed plus every one the project's `AGENTS.md` names
      for the kind of file changed (in se, the docs build for published Markdown), so a rule a
      check enforces fails in the focused step, not first in the complete suite.
-   - A failing test is yours only once it passes at base, as the guidance note
-     [`flake-at-base`](../../guidance/pull-request/field-report/flake-at-base.md) says.
+   - Right: treat a red integration branch as the most urgent work and deliver only after every
+     check reports zero failures, zero errors and zero warnings. Wrong: "fails at base too, so the
+     branch is fine"—a failure at base still blocks delivery; use
+     [`flake-at-base`](../../guidance/pull-request/field-report/flake-at-base.md) to diagnose it,
+     never to excuse it.
    - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests). A worker
      never runs the suite to time it: the integrator's landing measures it against its budget.
    - A new test that builds a path follows the guidance note

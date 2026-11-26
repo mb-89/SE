@@ -1,9 +1,9 @@
 ---
 name: flake-at-base
-description: 'How to tell a flake from your own failure: rerun the one test at the integration branch with a high repeat count. Load it before treating a red test as yours.'
+description: 'How to diagnose a failing test without excusing it: repeat the test at the integration branch, then fix the red check before delivery.'
 ---
 
-A failing test is yours only once it passes at base. Before treating it as your own, rerun that
-one test at the integration branch with a high repeat count: `go test -count=500 -run <test>` for
-Go, the test in a loop of as many runs for Python. One that fails there too is a flake already at
-base; name it, with both counts, in the field report.
+Every failed test, including one reproduced at the integration branch, is a failure to fix; deliver
+only when checks report zero failures, zero errors and zero warnings. Right: repeat the test at base
+to diagnose it (`go test -count=500 -run <test>` for Go, or a loop for Python), then fix it. Wrong:
+"fails at base too, so the branch is fine"—no base failure is an acceptable state.

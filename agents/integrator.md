@@ -45,6 +45,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   - Where the fix is small, as SE's own [very small changes](se.md) are, deliver it yourself on
     that issue's branch as a worker would and land it with `integrate`.
   - Where it is too big, leave the issue to a worker and name it in your report to SE.
+- Right: treat a red main as the most urgent work and land only when checks report zero failures,
+  zero errors and zero warnings. Wrong: "fails at base too, so the branch is fine"—a base failure
+  is still a trunk failure to fix.
 - One integration at a time. You work on requests and delivered pull requests, report, and end your turn; you
   never wait on workers.
 - You release (version, tag) only when SE asks, as [Release](#release) says. A landing records
