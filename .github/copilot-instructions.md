@@ -16,7 +16,8 @@
 - Check the active checkout's root and branch before editing after a handoff; paths in summarized
   history can name a sibling checkout.
 - For a worktree-scoped command, pass its required `--worktree` explicitly even when running from
-  that checkout; check the command's help before retrying.
+  that checkout; check its help, and create its destination's parent directory when needed
+  (`field-report --draft` does not create it).
 - Keep validation bounded: run focused tests first and stop any command that exceeds its timebox,
   reporting the limited validation rather than waiting on a broader suite.
 - For an authorized issue-free fix, use `field-report --draft --authorized-fix`, then the checked
