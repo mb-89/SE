@@ -28,3 +28,5 @@
   a full path to `sh.EXE`, `python.exe` or `gh.CMD` must reach the same handler as its bare name.
 - Run obs and its adapter through their in-process entry points in tests, with their git door faked;
   starting their real commands defeats the spawn guard even when their output is correctly asserted.
+- When a test's fixture parameter changes, the removal guard can flag its unchanged name as
+  deleted; list the name and say its assertions remain in the field report, then run the guard again.
