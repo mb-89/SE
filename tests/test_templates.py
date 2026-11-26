@@ -2005,8 +2005,9 @@ def retro_report() -> str:
 
 def overhaul_report() -> str:
     sections = "".join(
-        f"## {item.heading}\n\n" + "".join(f"### {question.heading}\n\nNone.\n\n"
-                                           for question in item.nested.fields)
+        f"## {item.heading}\n\n" + "".join(
+            f"### {question.heading}\n\n{'None.' if question.none_ok else 'The tests.'}\n\n"
+            for question in item.nested.fields)
         for item in (overhaul.overhaul_template().field(name) for name in overhaul.QUESTION_FIELDS))
     text = marked_block(overhaul.BLOCK_MARKER, overhaul_block()).replace(
         "The facts.\n\n", "The facts.\n\n" + sections, 1)

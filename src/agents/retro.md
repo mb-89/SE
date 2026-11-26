@@ -61,7 +61,9 @@ retro doc (`docs/retro-*.md`) lands without a work issue, a field report or runn
    its cause, its fix and its home, the first of the home order that holds. The collected reports
    and records are the sources, SE's input among them: judge it by the same standard as every
    other piece of evidence, and give a finding drawn from it `"source": "se"`, which the deck
-   marks "from SE".
+   marks "from SE". Read the collected answers to the tooling questions (what took the longest,
+   the tool wished for, the tooling starfish) side by side: a gap or a removal two reports name is
+   a finding, its class the gap.
    Apply and record clear fixes within your authority; ask the person only real choices, as the
    decision skill's [Ask only real choices](../skills/decision/SKILL.md#ask-only-real-choices) says.
    An option leaving another problem unsolved is not a loss of that option.

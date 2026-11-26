@@ -504,8 +504,12 @@ def test_without_gh_read_prints_its_reads_round_by_round_and_takes_the_answers(
 
 def answered(text: str) -> str:
     """The draft `text` with every standing question and every question of the overhaul's own
-    answered: the first "The suite stays fast.", the rest None."""
-    text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
+    answered: the first "The suite stays fast.", each "None" does not answer "The tests.", the rest
+    None."""
+    open_ended = {item.name for item in retro.questions().fields if not item.none_ok}
+    text = re.sub(r"^(### [^\n]+\n\n)<!-- (\w+): [^\n]*-->$",
+                  lambda match: match[1] + ("The tests." if match[2] in open_ended else "None."),
+                  text, flags=re.MULTILINE)
     return text.replace("None.", "The suite stays fast.", 1)
 
 

@@ -123,8 +123,12 @@ def steps() -> str:
 
 
 def fill_steps(text: str) -> str:
-    """The draft `text` with every standing question answered None and decisions left open."""
-    text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
+    """The draft `text` with every standing question answered None ("The tests." where None does not
+    answer it) and decisions left open."""
+    open_ended = {item.name for item in retro.questions().fields if not item.none_ok}
+    text = re.sub(r"^(### [^\n]+\n\n)<!-- (\w+): [^\n]*-->$",
+                  lambda match: match[1] + ("The tests." if match[2] in open_ended else "None."),
+                  text, flags=re.MULTILINE)
     return re.sub(r"^(<!-- decisions: [^\n]*-->)$", r"\1\n\nOpen: The deck carries the person's answer.",
                   text, count=1, flags=re.MULTILINE)
 
@@ -148,16 +152,20 @@ def run(conclusion: str, completed: str | None, name: str = "check") -> dict:
             "conclusion": conclusion if completed else None, "completed_at": completed}
 
 
+# The tool two field reports of the window wished was present: one gap, named twice.
+WISHED = "In SE: a command that runs only the tests a change touches."
+
+
 def answers(checkout: Path) -> dict[str, object]:
     """A window after retro #5 closed: #11 landed after one refused delivery, #12 landed but
     escalated and its landing's check failed, #13 a duplicate, #14 closed without a field report;
     #25 landed naming no work issue and one commit reached main by hand."""
     commit = shas(checkout)
     previous = {"version": 1, "sizes": {"closed": 7, "landed": 5, "duplicates": 0, "escalated": 3}}
-    work_a = report(answered(goes_well="the fake door", goes_badly="a slow fixture"),
+    work_a = report(answered(goes_well="the fake door", goes_badly="a slow fixture", wished_tool=WISHED),
                     "- The live run against GitHub: no token in the container.\n"
                     "- A second item\n  that wraps.").replace(issue_url(0), issue_url(11))
-    work_b = report(answered(bad_output_cause="`src/agents/worker.md`: say it once"),
+    work_b = report(answered(bad_output_cause="`src/agents/worker.md`: say it once", wished_tool=WISHED),
                     "None").replace(issue_url(0),
                                                                           issue_url(12))
     return {
@@ -251,8 +259,8 @@ def test_the_window_gives_the_sizes_and_the_per_issue_counts(checkout):
     assert (by[11].landing_pull, by[11].report_pull) == (21, 22)
     assert (by[12].refused, by[12].escalations, by[12].suite_seconds) == (0, 1, 40.0)
     assert by[13].duplicate and not by[13].landed and not by[14].landed
-    assert by[11].retro == {"goes_well": "the fake door", "goes_badly": "a slow fixture"}
-    assert by[12].retro == {"bad_output_cause": "`src/agents/worker.md`: say it once"}
+    assert by[11].retro == {"goes_well": "the fake door", "goes_badly": "a slow fixture", "wished_tool": WISHED}
+    assert by[12].retro == {"bad_output_cause": "`src/agents/worker.md`: say it once", "wished_tool": WISHED}
     assert by[11].not_delivered == ["The live run against GitHub: no token in the container.",
                                     "A second item that wraps."]
     assert by[12].not_delivered == []
@@ -940,6 +948,18 @@ def test_the_relay_and_gh_doors_read_cut_off_and_the_answer_files_whole(tmp_path
 LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a field report",
                 "fix": "`integrate` refuses a landing without one",
                 "home": "scripts/work_tickets.py", "home_kind": "refusal"}
+
+
+def test_collect_lists_the_windows_answers_to_the_tooling_questions_so_a_gap_named_twice_shows(checkout):
+    """The owner, 26 Nov: every field report says what took the longest and what tool it wished was
+    present; the retro's collect lists the window's answers by question, so a gap two reports name
+    stands together."""
+    lines = retro.answer_lines(collected(checkout))
+    names = [item.name for item in retro.questions().fields]
+    assert names[-3:] == ["longest", "wished_tool", "tooling_starfish"]
+    heading = retro.questions().field("wished_tool").heading
+    at = lines.index(f"#### {heading}")
+    assert lines[at + 2:at + 4] == [f"- #11: {WISHED}", f"- #12: {WISHED}"]
 
 
 def judged_draft(checkout: Path, **changes: object) -> str:

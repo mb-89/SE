@@ -1,9 +1,11 @@
 ---
 # The standing questions, asked alike by the retro, the overhaul and the field report: each one
 # a section, its heading the question. The three templates nest this block; scripts/templates.py's
-# docstring owns this note's format.
+# docstring owns this note's format. The last three, the tooling questions, are the owner's of 26 Nov:
+# "all agents that provide a field report, no matter what they use, need to answer that"; every role
+# answers them in every report, in any project, and "None" does not answer them.
 name: standing-questions
-version: 1.0.1
+version: 2.0.0
 kind: block
 reader: fleet
 says: "The standing questions every retro, overhaul and field report answers, one section each."
@@ -64,6 +66,15 @@ fields:
     kind: text
     required: true
     none_ok: true
+  - name: longest
+    kind: text
+    required: true
+  - name: wished_tool
+    kind: text
+    required: true
+  - name: tooling_starfish
+    kind: text
+    required: true
 example:
   fields:
     real_use: "None."
@@ -79,6 +90,9 @@ example:
     thoughts_actions: "None."
     start_stop: "None."
     bad_output_cause: "None."
+    longest: "Waiting 40 minutes for the full suite, as no command ran only the tests of the change."
+    wished_tool: "In SE: a command that runs the tests a diff touches."
+    tooling_starfish: "Start: run the touched tests first. Stop: nothing. Keep: the commit hooks. More: refusals that name their fix. Less: hand-written shell sequences."
 ---
 
 ## What came back from real use since the last retro?
@@ -132,3 +146,15 @@ example:
 ## Which rule, prompt or tool made each bad output, and what change stops it?
 
 <!-- bad_output_cause: Each bad output, the rule, prompt or tool behind it, and the change, with its target file. "None" where nothing applies. -->
+
+## What took the longest, and why?
+
+<!-- longest: The step that took the most time in this run, how long it took, and its cause. Always answered: there is always a longest step. -->
+
+## What tool did you wish was present: in SE, kern, the project, or anything outside our tooling?
+
+<!-- wished_tool: Each tool, command, helper, data field or template whose presence would have made this run short, and where it belongs: SE, kern, the project, or something outside our tooling to add to it. Name each other place where the same gap probably costs time. Always answered: say where nothing was missing and why. -->
+
+## Tooling starfish: what should our tooling start, stop, keep, do more of and do less of? Removals count too.
+
+<!-- tooling_starfish: One line each for our tooling (SE, kern, the project's own and anything we use beside them): start, stop, keep, more and less, a removal among them where something should go. Always answered. -->

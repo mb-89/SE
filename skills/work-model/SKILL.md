@@ -83,6 +83,16 @@ One issue in, one issue out; the same for local sessions and cloud agents.
     whose sole default answer is "Nothing else".
   - The standing questions are one block, asked alike by the retro, the overhaul and every field
     report; the overhaul adds its own.
+  - Its last three are the tooling questions, which every role answers in every field report, in
+    any project, whatever it used; "None" does not answer them, and `field-report --check` refuses
+    a report that leaves one empty, naming it:
+    - What took the longest, and why?
+    - What tool did you wish was present: in SE, kern, the project, or anything outside our
+      tooling?
+    - Tooling starfish: what should our tooling start, stop, keep, do more of and do less of?
+      Removals count too.
+  - The retro's collect lists the window's answers by question; a gap two reports name is a
+    finding.
 
     The person reviews the prefilled report and blesses it. `retro.py bless <issue>` records that
     blessing, opens the filing gate immediately, posts the report and closes the retro in one call,

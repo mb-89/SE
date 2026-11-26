@@ -8,7 +8,7 @@
 # the agent's judgment: retro.py deck renders the cover once and every decision as a decision note.
 # scripts/templates.py's docstring owns this note's format.
 name: retro
-version: 3.1.0
+version: 4.0.0
 kind: document
 reader: fleet
 says: "A retro's report and its draft: the five steps, the standing questions nested in step 3."
@@ -33,7 +33,7 @@ fields:
   - name: answers
     kind: node
     required: true
-    node: standing-questions@1.0.1
+    node: standing-questions@2.0.0
   - name: classes
     kind: text
     required: true
@@ -45,14 +45,14 @@ example:
     collect: "Two issues landed; one delivery was refused."
     timeline: "| chapter | steps |\n|---|---|\n| 1 | #11 |"
     matrix: "| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |"
-    answers: "### What came back from real use since the last retro?\n\nNone.\n\n### Which scripts did the AI write that a machine could own?\n\nNone.\n\n### Anything worth porting to other projects, or so bad we remove it?\n\nNone.\n\n### Has the process gone stale?\n\nNone.\n\n### What would have stopped this from being produced at all?\n\nNone.\n\n### What did the shell do that a command could have done? Name it.\n\nNone.\n\n### Did anything local earn promotion upstream?\n\nNone.\n\n### For each failed check, what rule would have caught it?\n\nNone.\n\n### What goes well, and what makes it go well?\n\nNone.\n\n### What goes badly, each with its moment in the log?\n\nNone.\n\n### What do the thoughts say that the actions do not?\n\nNone.\n\n### Start, stop, keep, more, less.\n\nNone.\n\n### Which rule, prompt or tool made each bad output, and what change stops it?\n\nNone."
+    answers: "### What came back from real use since the last retro?\n\nNone.\n\n### Which scripts did the AI write that a machine could own?\n\nNone.\n\n### Anything worth porting to other projects, or so bad we remove it?\n\nNone.\n\n### Has the process gone stale?\n\nNone.\n\n### What would have stopped this from being produced at all?\n\nNone.\n\n### What did the shell do that a command could have done? Name it.\n\nNone.\n\n### Did anything local earn promotion upstream?\n\nNone.\n\n### For each failed check, what rule would have caught it?\n\nNone.\n\n### What goes well, and what makes it go well?\n\nNone.\n\n### What goes badly, each with its moment in the log?\n\nNone.\n\n### What do the thoughts say that the actions do not?\n\nNone.\n\n### Start, stop, keep, more, less.\n\nNone.\n\n### Which rule, prompt or tool made each bad output, and what change stops it?\n\nNone.\n\n### What took the longest, and why?\n\nJudging the classes, as the record named no cause.\n\n### What tool did you wish was present: in SE, kern, the project, or anything outside our tooling?\n\nIn SE: a list of the window's causes by class.\n\n### Tooling starfish: what should our tooling start, stop, keep, do more of and do less of? Removals count too.\n\nStart: classes by cause. Stop: nothing. Keep: the record. More: refusals that name their fix. Less: hand steps."
     classes: "#### Lost reports\n\nCause: a landing without a field report. Fix: `integrate` refuses it. Home: check, `scripts/work_tickets.py`. Tree: open."
     decisions: "Open: Lost reports, for the person's decision."
 ---
 
 ## 1. Collect
 
-<!-- collect: Per project, what retro.py collect read: what came back, refusals, escalations, suite times, session costs, scripts run three or more times, planning misses, the field reports' answers to the standing questions, and the last retro's classes measured again, rate before against rate now. SE's input: the retro asks the top-level SE session named in its prompt once, in one message, for a file of what SE saw go wrong, the local notes register with it; it does not wait for the answer. Read SE's file with the field reports and judge it by the same standard as every other piece of evidence; where SE did not answer, say so here. -->
+<!-- collect: Per project, what retro.py collect read: what came back, refusals, escalations, suite times, session costs, scripts run three or more times, planning misses, the field reports' answers to the standing questions (by question, so a gap the tooling questions name in two reports stands together and is a finding), and the last retro's classes measured again, rate before against rate now. SE's input: the retro asks the top-level SE session named in its prompt once, in one message, for a file of what SE saw go wrong, the local notes register with it; it does not wait for the answer. Read SE's file with the field reports and judge it by the same standard as every other piece of evidence; where SE did not answer, say so here. -->
 
 ## 2. Table of what happened
 

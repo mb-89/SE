@@ -4,6 +4,7 @@ file it writes."""
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -45,6 +46,17 @@ def test_the_cover_names_retro_report_once_as_its_document_type(tmp_path):
     front = (tmp_path / "manifest.md").read_text(encoding="utf-8").split("---")[1]
     assert front.count("Retro report") == 1
     assert f'document type: "{retro_deck.DOCUMENT_TYPE}"' in front and "subtitle" not in front
+
+
+@pytest.mark.spawns("tool: the retro's deck builds with the real obs, obs-document in obs's own Python "
+                    "environment, which runs only as a process")
+def test_the_built_cover_is_exactly_the_title_and_retro_report_once(tmp_path, obs):
+    """Retro #20's cover, checked in a browser: the title and one "Retro report", nothing else."""
+    destination = tmp_path / "retro-30.html"
+    assert retro_deck.build(deck_text(), destination, "copilot") == 0
+    page = destination.read_text(encoding="utf-8")
+    cover = json.loads(html.unescape(re.search(r'id="running-header-script" data-header-metadata="([^"]*)"', page)[1]))
+    assert list(cover.values()) == ["example: Retro #30", "Retro report"]
 
 
 def test_a_free_form_decision_chapter_is_refused_naming_it():

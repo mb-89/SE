@@ -80,7 +80,11 @@ requirements they share, and why (one function changed together, or a test-only 
      Under "What goes badly, each with its moment in the log?", record all friction, including
      resolved friction, with evidence, impact and outcome; follow the shared work model's
      "Friction and observation". "None" means there truly was none.
-     field-report --draft writes them in; the check refuses a report that leaves one out. -->
+     The last three, the tooling questions, every role answers in every report, in any project, and
+     "None" does not answer them: what took the longest and why; what tool you wished was present
+     (in SE, kern, the project, or outside our tooling); and the tooling starfish, removals included.
+     field-report --draft writes them in; the check refuses a report that leaves one out or empty,
+     naming it. -->
 
 <!-- se:standing-questions -->
 

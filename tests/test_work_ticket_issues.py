@@ -176,9 +176,10 @@ EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
 
 
 BEGIN, END = work_tickets.REPORT_BEGIN, work_tickets.REPORT_END
-# The standing questions as a field report answers them: the first, then "None" for the rest.
+# The standing questions as a field report answers them: the first and each that "None" cannot
+# answer, then "None" for the rest.
 ANSWERED_QUESTIONS = "\n".join(
-    f"### {item.heading}\n\n{'The tests.' if index == 0 else 'None.'}\n"
+    f"### {item.heading}\n\n{'The tests.' if index == 0 or not item.none_ok else 'None.'}\n"
     for index, item in enumerate(work_tickets.standing_questions().fields))
 COMPLETE_REPORT = BEGIN + """
 **Work issue:** #5  **Branch:** `feature/example-20261104`  **Result:** complete
@@ -238,8 +239,12 @@ def reported_at(tip: str) -> str:
     return COMPLETE_REPORT.replace("**Branch tip:** `abc1234`", f"**Branch tip:** `{tip}`")
 
 def answer_questions(report: str) -> str:
-    """`report`, as field-report --draft writes it, with each standing question answered None."""
-    return re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", report, flags=re.MULTILINE)
+    """`report`, as field-report --draft writes it, with each standing question answered None, or
+    "The tests." where None does not answer it."""
+    open_ended = {item.name for item in work_tickets.standing_questions().fields if not item.none_ok}
+    return re.sub(r"^(### [^\n]+\n\n)<!-- (\w+): [^\n]*-->$",
+                  lambda match: match[1] + ("The tests." if match[2] in open_ended else "None."),
+                  report, flags=re.MULTILINE)
 
 
 def fill_evidence_rows(report: str) -> str:
@@ -7366,6 +7371,19 @@ def test_integrate_leaves_an_issue_with_open_points_of_the_landed_head_open(
     assert ("Stays open for the review's open points, which a worker takes on this issue: "
             "3. Name it") in bodies[0]
     assert "#5 stays open for the review's open points" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["longest", "wished_tool", "tooling_starfish"])
+@pytest.mark.parametrize("answer", ["", "None."])
+def test_the_check_refuses_a_report_that_leaves_a_tooling_question_empty_naming_it(name, answer):
+    """The owner, 26 Nov: every role answers in every field report what took the longest, what tool it
+    wished was present, and the tooling starfish; a report that leaves one empty is refused, naming it."""
+    heading = next(item.heading for item in work_tickets.standing_questions().fields if item.name == name)
+    report = COMPLETE_REPORT.replace(f"### {heading}\n\nThe tests.\n", f"### {heading}\n\n{answer}\n")
+    assert report != COMPLETE_REPORT
+    assert work_tickets.field_report_problems(COMPLETE_REPORT, None) == []
+    problems = work_tickets.field_report_problems(report, None)
+    assert len(problems) == 1 and heading in problems[0] and '"## Retro"' in problems[0]
 
 
 def test_open_points_are_requirements_of_every_delivery_but_the_head_they_passed():
