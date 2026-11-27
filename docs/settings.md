@@ -17,13 +17,16 @@ version = "1.4.2"
 ```
 
 `identity = "Name <email>"` is the project's commit identity. `work_tickets.py sync` writes it into
-the checkout's git config (`user.name`, `user.email`), so every later commit and merge there
-carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
+the checkout's git config (`user.name`, `user.email`, and `commit.gpgsign false`), so every later
+commit and merge there carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
 identity as it is.
 
 The plugin's session start (`scripts/bootstrap.sh --hook`) and the setup scripts write it the same
 way (`work_tickets.py identity`), so a fresh clone's first commit never carries the host's default
 identity.
+
+Signing is off in the checkout, as a host that turns `commit.gpgsign` on globally signs with its own
+key, which matches no project identity and so verifies nothing.
 
 `work_tickets.py push` refuses without one, and `work_tickets.py release` commits its release
 with that identity explicitly, whatever the checkout's configuration or environment says. The
