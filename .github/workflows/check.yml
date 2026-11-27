@@ -11,13 +11,15 @@
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
 # record of exactly the tree checked out, and the suite, the Go checks and kern-platforms do not run;
-# a nightly run is the safety net (docs/tests.md "Trusted landings"). SE keeps it off: everything runs.
-# A pull request's edit or label change (edited, labeled, unlabeled) checks the field report and the
-# issue rule again and takes the result of the suite, the Go checks and kern-platforms from the
-# newest completed run for the same head that ran them on the same tree and Component kinds, naming
-# that run; a failed result stays failed, and where there is none, or the newest completed run was
-# cancelled, or the run is a re-run, everything runs (scripts/ci_reuse.py, docs/tests.md "Edits reuse the
-# suite"). Every other event runs everything, as always.
+# a nightly run is the safety net (docs/tests.md "Trusted landings"). SE keeps it off: everything runs, once per tree.
+# A tree's suite runs once per landing: every pull request event and every push to main checks the
+# field report and the issue rule again and takes the result of the suite, the Go checks,
+# kern-platforms and showcase from the newest completed run of this landing's own pull requests (the
+# pull request's head and the work pull request its landing description links; on a push the pull
+# requests that landed the commit) that ran them on the same tree and Component kinds, naming that
+# run; a failed result stays failed, and where there is none, or the head's newest completed run was
+# cancelled, or the run is a re-run, everything runs (scripts/ci_reuse.py, docs/tests.md "One suite
+# run per tree"). The nightly schedule runs everything, as always.
 name: check
 
 on:
@@ -35,6 +37,8 @@ permissions:
   # The trust job reads the integrator's record and its run; a full pass marks its commit.
   checks: write
   actions: read
+  # The trust job reads the pull requests of a landing, whose runs may hold its tree's result.
+  pull-requests: read
 
 jobs:
   check:
@@ -176,8 +180,14 @@ jobs:
       # touch.
       # The suite's docs and deck builds run through obs's adapter component obs-html (docs/documentation.md
       # "Documentation"), installed first.
+      # With the runner's token, so github.com lists obs's components within the token's own rate
+      # limit, into the obs folder the suite reads (tests/conftest.py OBS_LOCAL_FOLDER), so the suite's
+      # obs fixture finds it installed and reads no github.com to install it again.
       - name: Install obs's adapter component obs-html
         if: needs.trust.outputs.suite == 'run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OBS_LOCAL_FOLDER: ${{ github.workspace }}/.se/obs-local
         run: uv run python scripts/build_docs.py --install-html
       - name: The complete suite and the suites beside it, within their budgets
         if: needs.trust.outputs.suite == 'run'
@@ -205,8 +215,8 @@ jobs:
           name: test-reports
           path: ${{ runner.temp }}/test-reports
           if-no-files-found: ignore
-      # An edit or label change that took an earlier run's result (the job trust's decision,
-      # scripts/ci_reuse.py): passes or fails as that run did, naming it.
+      # A run that took an earlier run's result of this tree (the job trust's decision,
+      # scripts/ci_reuse.py): passes or fails as that run did, naming it; showcase's result is taken too.
       - name: The suite, the Go checks and kern-platforms of an earlier run of this tree
         if: needs.trust.outputs.suite == 'reused'
         env:
@@ -215,7 +225,7 @@ jobs:
           WHY: ${{ needs.trust.outputs.why }}
         run: |
           if [ "$RESULT" = success ]; then
-            echo "::notice title=se reused check::the suite, the Go checks and kern-platforms did not run again: $WHY ($SOURCE)"
+            echo "::notice title=se reused check::the suite, the Go checks, kern-platforms and showcase did not run again: $WHY ($SOURCE)"
           else
             echo "::error title=se reused check::$WHY ($SOURCE): push the fix, or re-run all jobs of this run, which runs everything"
             exit 1
@@ -343,9 +353,9 @@ jobs:
   # Whether this run runs the suite, the Go checks and kern-platforms (output suite: run), or passes
   # on the integrator's record of exactly this tree (trusted, docs/tests.md "Trusted landings": only where
   # se.toml [tests] trust_integrator is on, never on the safety net's runs; its full history counts
-  # the landings for se.toml [tests] full_every), or, on an edit or label change, takes an earlier
-  # run's result for this tree (reused, with source, result and why; docs/tests.md "Edits reuse the
-  # suite"). The decision step is named with this run's reuse key, from which a later run reads it.
+  # the landings for se.toml [tests] full_every), or takes an earlier run's result for this tree
+  # (reused, with source, result and why; docs/tests.md "One suite run per tree"). The decision step
+  # is named with this run's reuse key, from which a later run reads it.
   trust:
     runs-on: ubuntu-26.04
     outputs:

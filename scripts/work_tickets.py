@@ -9183,6 +9183,15 @@ class GitHub:
         runs = self.api(f"commits/{sha}/check-runs?check_name={name}").get("check_runs") or []
         return max(runs, key=lambda run: int(run.get("id") or 0)) if runs else None
 
+    def check_workflow_runs(self, head: str) -> list[dict[str, object]]:
+        """The pull_request runs of the workflow `check` for the head commit `head`, of any status."""
+        listed = self.api(f"actions/runs?head_sha={head}&event=pull_request&per_page=100")
+        return [run for run in listed.get("workflow_runs") or [] if run.get("name") == CHECK_NAME]
+
+    def run_jobs(self, run: dict[str, object]) -> list[dict[str, object]]:
+        """The jobs of the workflow run `run`, with their steps."""
+        return list(self.api(f"actions/runs/{run['id']}/jobs?per_page=100").get("jobs") or [])
+
     def newest_run(self, workflow: str) -> int:
         """The id of the newest workflow_dispatch run of `workflow`, 0 before any."""
         runs = self.api(f"actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=1")
@@ -9692,6 +9701,32 @@ def relay_work_issue(relay, pull_number: int, tracker: str, report: str, work_nu
     return {"body": body}
 
 
+def taken_verdict(root: Path, remote: str, head: str) -> str | None:
+    """The suite's verdict on the landing's tree taken from CI instead of running it again
+    (docs/tests.md "One suite run per tree"): where a run of `check` on the work pull request's
+    head `head` passed exactly this tree, with no Component kinds, as the landing reads none, it is
+    recorded as the suite's verdict and named; else None, saying why, and the suite runs here."""
+    commit = clean_commit(root)
+    if not head or commit is None:
+        return None
+    reuse = sibling("ci_reuse")
+    key = reuse.reuse_key(checked_git(root, "rev-parse", f"{commit}^{{tree}}").strip(), None)
+    feedback.phase(f"read {CHECK_NAME}'s runs of {head[:12]}")
+    try:
+        door = GitHub(root, remote)
+        decision = reuse.earlier_result(key, door.check_workflow_runs(head), door.run_jobs, (head,))
+    except QueueError as error:
+        print(f"Suite: {CHECK_NAME}'s runs of {head[:12]} could not be read ({error}); it runs here")
+        return None
+    if (decision.suite, decision.result) != ("reused", "success"):
+        print(f"Suite: runs here, as no run of {CHECK_NAME} passed this tree: {decision.why}")
+        return None
+    tree = sibling("verdicts").record(root, SUITE_VERDICT, commit, True, None)
+    print(f"Suite verdict taken from {decision.source}: passed on tree {tree[:12]} (commit "
+          f"{commit[:12]}); the suite does not run again")
+    return f"not run here: {decision.why} ({decision.source})"
+
+
 def integrate(
     root: Path,
     pull_number: int,
@@ -9827,8 +9862,9 @@ def integrate(
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
-        suite_result = run_suite(root, read_ci=True, ci_skipped=CI_SKIPPED_ON_RELAY if (
-            handing_off and relay_door(root, remote) is not None) else "")
+        suite_result = (None if handing_off else taken_verdict(root, remote, head)) or run_suite(
+            root, read_ci=True, ci_skipped=CI_SKIPPED_ON_RELAY if (
+                handing_off and relay_door(root, remote) is not None) else "")
         tested = checked_git(root, "rev-parse", "HEAD").strip()
         if build_command:
             feedback.phase(f"output regeneration: {build_command}")

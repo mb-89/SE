@@ -282,8 +282,8 @@ jobs:
 ```
 
 Its permissions are `checks: write` (the marks) and `actions: read` (the record's run). SE keeps
-`trust_integrator` off: its `check` runs the full suite and kern-platforms on every pull request
-and push.
+`trust_integrator` off: its `check` runs the full suite and kern-platforms once per tree, and
+every later run of that tree takes that run's result ([One suite run per tree](#one-suite-run-per-tree)).
 
 A kern application gets the same shortcut from its battery: its copy of `kern-battery.yml`'s job
 `trust` runs the action from SE at the pin the copy names ([Workflows](running.md#workflows)), and the vet
@@ -296,8 +296,9 @@ To turn it on, the application also grants those two permissions, adds the `sche
 Free minutes for a private repository, which the owner sets up:
 
 - Linux runners only (`ubuntu-*`): a Windows minute counts double.
-- `check` on pull requests only, so a landing is not run again on its push to main; the nightly
-  `schedule` keeps main covered.
+- `check` on pull requests only, so a push to main starts no run at all; the nightly `schedule`
+  keeps main covered. Where it runs on the push, it takes its landing's result
+  ([One suite run per tree](#one-suite-run-per-tree)).
 - Never on data-only pushes: `paths-ignore` for the files no test reads.
 - An Actions budget of $0 in the account's billing settings, so a month past the free minutes
   stops the runs instead of billing them.
@@ -370,27 +371,39 @@ until GitHub fails it after 24 hours, and `check` with it.
 - **Tested** against a fake of the jobs API and a fake clock (`tests/test_ci_queue.py`); GitHub's
   own queue, cancel and re-run are not reproducible there.
 
-## Edits reuse the suite
+## One suite run per tree
 
-A pull request's description and labels change many times without a new commit: the worker
-corrects its field report, the integrator moves labels. Each change starts `check` again, on a tree
-already checked, so such a run checks again only what it can change and takes the rest from an
-earlier run ([scripts/ci_reuse.py](../scripts/ci_reuse.py)).
+A landing checks one tree several times: the work pull request's run, the landing pull request's
+and the push to main check the same tree where nothing moved between them, and a pull request's
+description and labels change many times without a new commit. So every run checks again only what
+it can change and takes the rest from an earlier run of the same tree
+([scripts/ci_reuse.py](../scripts/ci_reuse.py)).
 
-- **What runs again.** On `edited`, `labeled` and `unlabeled` the gate of the commits, the issue
-  rule, the field report and every other cheap step run as always.
-- **What is taken.** The suite, the Go checks and kern-platforms: the job `trust` reads the runs of
-  `check` for the same head, newest first, and takes the first result of the same reuse key.
+- **What runs again.** The gate of the commits, the issue rule, the field report and every other
+  cheap step run as always, on every event.
+- **What is taken.** The suite, the Go checks, kern-platforms and showcase: the job `trust` reads
+  the runs of `check` of the landing's own pull requests, newest first, and takes the first result
+  of the same reuse key.
+  - On a pull request: its head's runs, and those of the work pull request its landing description
+    links (`<!-- se:field-report-in <n> -->`, [Landing on main](settings.md#landing-on-main)).
+  - On a push to main: the runs of the merged pull requests that landed the commit, and of the work
+    pull requests they link.
   - The key is the tree checked out, the merge of the head into its base, so a base that moved is
-    another tree; and the Component kinds the description gives the suite's release guard.
+    another tree; and the Component kinds the description gives the suite's release guard, where
+    no kinds stated and none set are one key, as the guard reads them alike.
+  - A run of the same key checked out the same tree, so it ran the same workflow and tests: its
+    result is the tree's, whichever of the landing's pull requests it ran for.
   - Each run names its decision step with its key, `Reuse an earlier result of this tree (reuse
     key <key>)`, which a later run reads in the jobs API; a run that took a result or stopped
     before the suite holds none, and the run before it is read.
-- **A failure stays.** A failed suite, Go check or leg of that tree keeps `check` failed, as an
-  error naming the run it came from; a pass is a notice naming it.
-- **Everything runs** where no completed run of the head holds a result for the key, where the
-  newest completed one was cancelled, on a re-run attempt (re-run all jobs to run them again), and
-  where the runs cannot be read. Every other event runs everything, as always.
+- **The integrator too.** `integrate` reads the runs of `check` on the work pull request's head
+  the same way, where `gh` is signed in, and takes a pass of exactly the landing's tree, with no
+  Component kinds, as the suite's verdict instead of running it again; anything else runs it.
+- **A failure stays.** A failed suite, Go check, leg or showcase of that tree keeps `check` failed,
+  as an error naming the run it came from; a pass is a notice naming it.
+- **Everything runs** where no completed run of those heads holds a result for the key, where the
+  head's newest completed run was cancelled, on a re-run attempt (re-run all jobs to run them
+  again), where the runs cannot be read, and on the nightly `schedule`, the safety net.
 - **Tested** against a fake of the runs and jobs API and through a local GitHub
   (`tests/test_ci_reuse.py`), with the steps of `check` that act on the decision run as the runner
   runs them.
