@@ -111,8 +111,11 @@ def test_filing_is_refused_while_a_retro_is_open_naming_it_and_nothing_is_filed(
     open_retro = issue(40, "retro-due-20261120", created="2026-11-20T00:00:00Z", labels=("retro",))
     for command in ("file", "backlog file"):
         with pytest.raises(work_tickets.ReviewDueError,
-                           match=rf"^work_tickets.py {command}: the retro #40 is open; {command} "
-                                 "files no other issue until every finding has an outcome"):
+                           match=rf"^work_tickets.py {command}: the retro #40 is open and its report "
+                                 r"is not in; post it with `uv run python .*/scripts/retro.py file 40 "
+                                 rf".*`retro.py collect 40` writes\), then file its findings with "
+                                 rf"`--finding 40:<k>`; {command} files no other issue until every "
+                                 "finding has an outcome"):
             check(tmp_path, Door(opened=[open_retro], **landed(25)), command)
     assert filed == []
     found = retro.countdowns(Door(opened=[open_retro], **landed(3, "2026-11-21T00:00:00Z")),

@@ -1,8 +1,7 @@
 """The decision deck command (scripts/deck.py) and its Claude-app answers bundle (scripts/deck_answers.js).
 
-The warning refusal, the answers summary and the bundle's ways out run on fakes; one end-to-end test
-builds a deck with the real obs, serves it with `deck serve --wait`, sends from a browser and reads the
-answers, and one opens a real deck on a fake of the Claude app's runtime that appears late, at phone width,
+The warning refusal, the answers summary and the bundle's ways out run on fakes; local decks open
+offline and offer answers to copy, while one opens a real deck on a fake of the Claude app's runtime that appears late, at phone width,
 for the drafts obs-html keeps over a reload (a comment with no verdict among them) and how obs's notice
 center tells the reader what Send did: its passing line under the top band, the bundle's entry for a
 partial send, and obs's entry with the answers to copy where nothing was sent.
@@ -61,6 +60,33 @@ def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys, fake_pro
     assert deck.build(folder, tmp_path / "deck.html") == 1
     err = capsys.readouterr().err
     assert "long paragraph" in err and "deck: 1 obs warning(s)" in err
+
+
+@pytest.mark.parametrize("host", ["copilot", "claude-code"])
+def test_build_embeds_the_local_host_in_a_standalone_deck(tmp_path, monkeypatch, fake_processes, host):
+    document = {"manifest": {"title": "Decisions"},
+                "chapters": [{"id": "pick", "content": [], "bless": {"version": "v1"}}]}
+
+    def obs_document(call):
+        words = call.words
+        Path(words[words.index("--document") + 1]).write_text(json.dumps(document), encoding="utf-8")
+        if "--destination" in words:
+            vault = Path(words[words.index("--source") + 1])
+            bundle = (vault / deck.BUNDLE_FILE).read_text(encoding="utf-8")
+            Path(words[words.index("--destination") + 1]).write_text(
+                f"<html><script>{bundle}</script></html>", encoding="utf-8")
+        return Answer(0, "", "")
+
+    monkeypatch.setattr(deck, "obs_dir", lambda: tmp_path)
+    monkeypatch.setitem(build_docs._PYTHON, tmp_path, "obs-python")
+    fake_processes.on("obs-python", obs_document)
+    monkeypatch.setattr(build_docs, "ready_adapter", lambda obs: ({"name": build_docs.ADAPTER}, ""))
+    destination = tmp_path / "deck.html"
+    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick")})
+    assert deck.main(["build", str(folder), "--destination", str(destination), "--host", host]) == 0
+    data = destination.read_text(encoding="utf-8").split("Object.freeze(", 1)[1].split(");\n", 1)[0]
+    assert json.loads(data)["host"] == host
+    assert deck.BUNDLE.read_text(encoding="utf-8") in destination.read_text(encoding="utf-8")
 
 
 RECORD = "# %s\n\nThis was decided without the person.\n"
@@ -223,21 +249,24 @@ const actions = {
             .notes.filter(note => obsArtifact.isDocument(note) && note.slug !== "home")
             .map(note => [note.slug, note.bless?.version ?? null]));
     },
-    // A served deck whose `chapters` are blessed one by one (a verdict never walks on), then sent: the
-    // passing line it shows.
-    send: async (page, {url, chapters}) => {
-        await page.setViewportSize({width: 1280, height: 720});
-        await page.goto(url);
-        await page.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
-        for (const chapter of chapters) {
-            await page.evaluate(name => obsArtifact.activateChapter(name), chapter);
-            await page.locator('[data-bless-key="bless"]:visible').click();
+    local: async (page, {uri}) => {
+        const context = await page.context().browser().newContext({offline: true});
+        try {
+            const tab = await context.newPage(), requests = [];
+            tab.on("request", request => {
+                if (/^https?:/.test(request.url())) requests.push(request.url());
+            });
+            await tab.goto(`${uri}#pick`);
+            await tab.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
+            await tab.locator('[data-bless-key="bless"]:visible').click();
+            await tab.locator("[data-bless-send]").click();
+            const answers = tab.locator('[data-notice="answers"]');
+            await answers.waitFor();
+            return {text: await answers.innerText(), requests,
+                    verdicts: await tab.evaluate(() => obsBless.verdicts())};
+        } finally {
+            await context.close();
         }
-        const send = page.locator("[data-bless-send]");
-        await page.waitForFunction(() => /^Send (\\d+)\\/\\1$/.test(document.querySelector("[data-bless-send]").textContent));
-        await send.click();
-        await page.locator("[data-bless-pill]", {hasText: "sent"}).waitFor({timeout: 10000});
-        return await page.locator("[data-brief-notice]:not([hidden])").innerText({timeout: 3000});
     },
     // A deck opened in a fresh tab of its own, where the Claude app's runtime is a fake that appears
     // only after the page loaded (`claude` is set on load): `files` and `comment` are what
@@ -517,46 +546,35 @@ def _host(bundled: dict[str, dict], host: str, **where: object) -> dict:
     return _bundle(bundled, files="ok", comment="ok", deck={"title": "Retro", "decisions": [], "host": host}, **where)
 
 
+@pytest.mark.spawns("contract: JavaScript answers runtime, one VM run exercises every host adapter")
 @pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
-def test_under_copilot_or_claude_code_send_reaches_the_session_through_obs_html_serve(bundled, host, name):
-    """The regression of retro #1810 finding 16: under Copilot the deck said its answers did not reach Claude.
-    Its sink is the host's own, named after it, and posts to the server that writes answers.json."""
-    calls = _host(bundled, host, served=True, late=True, never=True)
-    assert (calls["id"], calls["name"]) == (host, name)
-    assert calls["result"] == {"ways": ["server"], "written": "answers.json"}
-    assert [post["body"] for post in calls["posted"]] == [PAYLOAD]
-    assert (calls["published"], calls["comments"], calls["warnings"]) == ([], [], [])
-
-
-@pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
-def test_an_unserved_copilot_or_claude_code_deck_names_its_own_host_never_claude(bundled, host, name):
+def test_a_standalone_local_send_names_its_host_and_offers_answers_to_copy(bundled, host, name):
     calls = _host(bundled, host, late=True, never=True)
+    assert (calls["id"], calls["name"]) == (host, name)
     assert calls["result"] is None
     message = calls["error"]["message"]
     assert message.startswith("sending is not available here") and f"reached {name}." in message
-    assert "deck.py serve" in message and "reached Claude." not in message
+    assert "Copy the answers" in message and "reached Claude." not in message
+    assert (calls["posted"], calls["published"], calls["comments"], calls["warnings"]) == ([], [], [], [])
 
 
-def test_a_copilot_deck_never_takes_the_claude_app_runtime(bundled):
-    calls = _host(bundled, "copilot")
+@pytest.mark.parametrize("host", ["copilot", "claude-code"])
+def test_a_local_host_never_takes_the_claude_app_runtime(bundled, host):
+    calls = _host(bundled, host)
     assert calls["result"] is None and calls["published"] == [] and calls["comments"] == []
+    assert calls["posted"] == []
 
 
-def test_a_claude_code_deck_published_in_the_claude_app_after_all_takes_its_runtime(bundled):
-    calls = _host(bundled, "claude-code")
-    assert calls["name"] == "Claude Code" and calls["result"]["ways"] == ["answers.json", "comment"]
-    assert _host(bundled, "claude-code", served=True)["result"]["ways"] == ["server"]
+def test_the_claude_app_adapter_uses_only_its_runtime(bundled):
+    calls = _host(bundled, "claude-app")
+    assert calls["name"] == "Claude" and calls["result"]["ways"] == ["answers.json", "comment"]
+    assert calls["order"] == ["comment", "comment sent", "publish"] and calls["posted"] == []
+    unavailable = _host(bundled, "claude-app", late=True, never=True)
+    assert unavailable["result"] is None and unavailable["posted"] == []
 
 
-def test_the_claude_app_adapter_takes_its_runtime_first_and_the_server_after(bundled):
-    assert _host(bundled, "claude-app", served=True)["result"]["ways"] == ["answers.json", "comment"]
-    calls = _host(bundled, "claude-app", served=True, late=True, never=True)
-    assert calls["result"] == {"ways": ["server"], "written": "answers.json"} and calls["name"] is None
-
-
-@pytest.mark.parametrize("where", [{}, {"served": True}], ids=["file", "served"])
-def test_a_local_deck_registers_no_sink_so_obs_html_takes_the_answers(bundled, where):
-    calls = _host(bundled, "local", **where)
+def test_a_local_deck_registers_no_sink_so_obs_html_takes_the_answers(bundled):
+    calls = _host(bundled, "local")
     assert calls["registered"] is False and calls["application"] == [deck.BUNDLE_ID, []]
     assert calls["warnings"] == [] and calls["posted"] == []
 
@@ -648,11 +666,9 @@ function page() {
     if (!mode.noNotices) globalThis.obsNotices = {post: entry => calls.notices.push(["post", entry]),
                                                   reveal: id => calls.notices.push(["reveal", id]),
                                                   remove: id => calls.notices.push(["remove", id])};
-    if (mode.served) globalThis.ObsHtmlAnswers = {server: () => "http://127.0.0.1:1/answers"};
-    // obs-html serve's answer to the page's post: it writes answers.json beside the deck.
-    globalThis.fetch = async (url, init) => {
-        calls.posted.push({url, body: JSON.parse(init.body)});
-        return {ok: true, status: 200, json: async () => ({written: "answers.json"})};
+    globalThis.fetch = async (...args) => {
+        calls.posted.push(args);
+        throw new Error("No network is available to this standalone deck");
     };
     globalThis.obsArtifact = {
         registerApplication: application => { calls.application = [application.id, application.actions]; },
@@ -712,7 +728,6 @@ function page() {
 # Every mode a test below runs the bundle in.
 BUNDLE_MODES = [
     {"files": "ok", "comment": "ok"},
-    {"files": "ok", "comment": "ok", "served": True},
     {"files": "ok", "comment": "ok", "deck": {"title": "Storage", "decisions": ["record", "open"]}},
     {"files": "ok", "comment": "ok", "deck": {"title": "Storage"}},
     {"files": "ok", "comment": "ok", "deck": {"title": 1, "decisions": []}},
@@ -725,7 +740,7 @@ BUNDLE_MODES = [
     *({"files": "ok", "comment": "ok", "canSend": state} for state in ("no_session", "writers_only", "off")),
     *({"files": "ok", "comment": "ok", "deck": {"title": "Retro", "decisions": [], "host": host}, **where}
       for host in ("claude-app", "claude-code", "copilot", "local", "vscode")
-      for where in ({}, {"served": True}, {"late": True, "never": True}, {"served": True, "late": True, "never": True})),
+      for where in ({}, {"late": True, "never": True})),
 ]
 
 
@@ -770,11 +785,6 @@ def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude(bundled):
     assert len(comment["text"].encode()) <= 4096
     assert calls["name"] == "Claude"
     assert (calls["elements"], calls["notices"], _send_warnings(calls)) == (0, [["remove", "se-answers-partly"]], [])
-
-
-def test_where_obs_html_serve_served_the_page_the_sink_names_no_reader(bundled):
-    calls = _bundle(bundled, files="ok", comment="ok", served=True)
-    assert calls["id"] == "claude-artifact" and calls["name"] is None
 
 
 def test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data(bundled):
@@ -875,7 +885,7 @@ def test_a_claude_runtime_that_appears_after_the_first_run_takes_the_answers(bun
     assert calls["result"]["ways"] == ["answers.json", "comment"]
 
 
-def test_without_claude_or_a_server_send_rejects_so_the_text_to_copy_shows(bundled):
+def test_without_the_claude_runtime_send_rejects_so_the_text_to_copy_shows(bundled):
     calls = _bundle(bundled, files="ok", comment="ok", late=True, never=True)
     assert calls["registered"] and calls["result"] is None
     assert "sending is not available here" in calls["error"]["message"]
@@ -925,28 +935,17 @@ def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(de
         assert {"- cache: decline: Too slow.", "- queue: comment: Later."} <= set(sent["text"].splitlines())
 
 
-@pytest.mark.spawns("entry: scripts/deck.py serve --wait, end to end: obs-html's server waits for the "
-                    "browser's send, and both run only as processes")
-def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, page, capsys):
-    built, artifact = decks["send"]
-    assert built.returncode == 0, built.stderr
-    served = subprocess.Popen([sys.executable, str(SCRIPTS / "deck.py"), "serve", str(artifact), "--wait",
-                               "--timeout", "60"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        url = served.stdout.readline().strip()
-        assert url.startswith("http://127.0.0.1:"), served.stderr.read()
-        assert page("send", url=url, chapters=["cache", "queue"]) == "Sent."
-        out, err = served.communicate(timeout=30)
-    finally:
-        served.kill()
-    assert served.returncode == 0, err
-    printed = json.loads(out.strip().splitlines()[-1])
-    assert [(item["chapter"], item["verdict"]) for item in printed["verdicts"]] == [("cache", "bless"), ("queue", "bless")]
-    answers = artifact.parent / "answers.json"
-    assert json.loads(answers.read_text(encoding="utf-8")) == printed
-    assert deck.main(["answers", str(answers)]) == 0
-    shown = capsys.readouterr()
-    assert shown.out == "cache: bless\nqueue: bless\n", shown.err
+@pytest.mark.spawns("contract: browser, standalone decks offer host-named answers to copy while offline")
+@pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
+def test_a_built_local_deck_offers_answers_to_copy_without_a_server(page, tmp_path, obs, host, name):
+    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick")})
+    destination = tmp_path / "deck.html"
+    assert deck.build(folder, destination, host=host) == 0
+    result = page("local", uri=destination.as_uri())
+    assert f"They did not reach {name}." in result["text"]
+    assert "Copy the answers" in result["text"] and '"chapter": "pick"' in result["text"]
+    assert result["verdicts"]["pick"]["verdict"] == "bless" and result["requests"] == []
+    assert not (tmp_path / "answers.json").exists()
 
 
 @pytest.mark.parametrize("text, problems", [
