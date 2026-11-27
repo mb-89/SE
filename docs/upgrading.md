@@ -433,6 +433,16 @@ On main, released as 17.0.0 at the next release.
   deck; do not ask for field feedback.
 - **Check:** `uv run pytest -q <se>/tests/test_retro.py <se>/tests/test_retro_deck.py` passes.
 
+## SE 19
+
+### `[plugin] draft_skills` is gone
+
+- **Change:** the plugin build includes no draft skills: `se.toml` `[plugin] draft_skills` is
+  refused as an unknown key, and `drafts/skills/` is read by nothing.
+- **Steps:** remove `draft_skills` from the project's `se.toml` `[plugin]` table; move a draft
+  the project still wants into `src/skills/` as a skill, or file it as work.
+- **Check:** `uv run python <se>/scripts/se_plugin.py build` exits 0.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

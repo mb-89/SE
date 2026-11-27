@@ -845,89 +845,23 @@ def test_a_powershell_hooks_value_the_build_cannot_read_is_refused(tmp_path, cap
     assert '`powershell_hooks = "bash"|"handoff"`' in capsys.readouterr().err
 
 
-# Draft skills: `se.toml` `[plugin] draft_skills` includes a draft of drafts/skills by name.
-DRAFT = ("---\nname: {name}\ndescription: 'Does one thing.'\ndisable-model-invocation: true\n---\n\n"
-         "# Draft\n\nRead [the reference](references/more.md) and [the work model](../../../src/skills/x/SKILL.md).\n")
-
-
-def drafts_copy(tmp_path: Path, setting: str = "") -> Path:
-    """A small source with one skill and one draft, `setting` as its `[plugin]` table's body."""
+# A small source: one agent and one skill.
+def small_copy(tmp_path: Path, setting: str = "") -> Path:
+    """A small source with one agent and one skill, `setting` as its `[plugin]` table's body."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n# SE\n")
     write_source(tmp_path, "src/skills/x/SKILL.md", "---\nname: x\ndescription: 'X.'\n---\n")
-    write_source(tmp_path, "drafts/skills/try/SKILL.md", DRAFT.format(name="try"))
-    write_source(tmp_path, "drafts/skills/try/references/more.md", "More.\n")
     (tmp_path / "se.toml").write_text(f'[project]\nversion = "1.0.0"\n[plugin]\n{setting}\n', encoding="utf-8", newline="\n")
     return tmp_path
 
 
-def test_unset_or_empty_draft_skills_builds_exactly_what_no_draft_builds(tmp_path):
-    root = drafts_copy(tmp_path / "unset")
-    without = se_plugin.expected(root)
-    assert not any("try" in path.parts for path in without)
-    assert se_plugin.expected(drafts_copy(tmp_path / "empty", "draft_skills = []")) == without
-    shutil.rmtree(root / "drafts")
-    assert se_plugin.expected(root) == without
-
-
-def test_a_listed_draft_is_built_into_the_layout_and_adds_only_its_folders(tmp_path):
-    without = se_plugin.expected(drafts_copy(tmp_path / "unset"))
-    root = drafts_copy(tmp_path / "set", 'draft_skills = ["try"]')
-    files = se_plugin.expected(root)
-    added = {path for path in files if path not in without}
-    assert added == {PurePosixPath("skills", "try", name) for name in ("SKILL.md", "references/more.md")}
-    assert {path: data for path, data in files.items() if path in without and path not in se_plugin.PAGES} == {
-        path: data for path, data in without.items() if path not in se_plugin.PAGES}
-    assert b"| `try` | Does one thing. |" in files[PurePosixPath("docs/skills.md")]
-    text = files[PurePosixPath("skills/try/SKILL.md")].decode("utf-8")
-    assert text.startswith(DRAFT.format(name="try").split("\n\n")[0] + "\n")
-    assert se_plugin.notice("drafts/skills/try/SKILL.md") in text
-    assert "](references/more.md)" in text and "](../x/SKILL.md)" in text
-    assert se_plugin.main(["build", "--root", str(root)]) == 0
-    assert se_plugin.differences(root) == []
-    (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8", newline="\n")
-    assert se_plugin.differences(root) == ["docs/skills.md: differs from its source (edited by hand?)"] + [
-        f"skills/try/{name}: not generated from src/; remove it or add its source"
-        for name in ("SKILL.md", "references/more.md")]
-
-
-@pytest.mark.parametrize(("setting", "change", "refusal"), [
-    ('draft_skills = ["try"]', ("disable-model-invocation: true\n", ""),
-     "drafts/skills/try/SKILL.md: a listed draft needs `disable-model-invocation: true`"),
-    ('draft_skills = ["try"]', ("disable-model-invocation: true", "disable-model-invocation: false"),
-     "drafts/skills/try/SKILL.md: a listed draft needs `disable-model-invocation: true`"),
-    ('draft_skills = ["gone"]', None, "draft_skills names 'gone', but drafts/skills/gone/SKILL.md is no draft"),
-    ('draft_skills = ["try", "try"]', None, "draft_skills names 'try' twice"),
-    ('draft_skills = "try"', None, '`draft_skills = ["<draft>", ...]`'),
-    ('draft_skills = [1]', None, '`draft_skills = ["<draft>", ...]`'),
-])
-def test_a_draft_skills_entry_the_build_cannot_include_is_refused_naming_it(tmp_path, capsys, setting, change,
-                                                                           refusal):
-    root = drafts_copy(tmp_path, setting)
-    if change:
-        skill = root / "drafts" / "skills" / "try" / "SKILL.md"
-        skill.write_text(skill.read_text(encoding="utf-8").replace(*change), encoding="utf-8", newline="\n")
+def test_a_draft_skills_key_is_refused_as_unknown(tmp_path, capsys):
+    """The build includes no drafts: `[plugin] draft_skills` is no setting it reads."""
+    root = small_copy(tmp_path, 'draft_skills = ["try"]')
     assert se_plugin.main(["build", "--root", str(root)]) == 2
-    assert refusal in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "[plugin] holds only `root_mcp = true|false`" in err and "`draft_skills = " not in err
     assert not (root / "skills").exists()
-
-
-def test_a_draft_that_shares_a_skills_name_is_refused(tmp_path, capsys):
-    root = drafts_copy(tmp_path, 'draft_skills = ["x"]')
-    write_source(root, "drafts/skills/x/SKILL.md", DRAFT.format(name="x"))
-    assert se_plugin.main(["check", "--root", str(root)]) == 2
-    assert "draft_skills names 'x', which is a skill of src/skills already" in capsys.readouterr().err
-
-
-def test_a_listed_draft_holds_to_the_rules_of_every_skill(tmp_path, capsys):
-    root = drafts_copy(tmp_path, 'draft_skills = ["try"]')
-    write_source(root, "drafts/skills/try/references/more.md", "Run `scripts/x.py`.\n")
-    assert se_plugin.main(["build", "--root", str(root)]) == 2
-    assert "drafts/skills/try/references/more.md:1: names a script without SE's root" in capsys.readouterr().err
-
-
-def test_ses_own_se_toml_includes_no_draft():
-    assert se_plugin.draft_skills(ROOT) == []
 
 
 # Guidance notes: each note of the project's guidance tree is also a skill in the layout
@@ -939,14 +873,14 @@ NOTE = ("---\nname: {name}\ndescription: 'How to tell a flake from your own fail
 def guidance_copy(tmp_path: Path, tags: str = "worker") -> Path:
     """A small source with one skill, one template tagged `work, testing, worker` and one note in
     `guidance/work/testing/`, its own tags `tags`."""
-    root = drafts_copy(tmp_path)
+    root = small_copy(tmp_path)
     write_source(root, "templates/worker.md", '---\nname: worker\ntags: ["work", "testing", "worker"]\n---\n')
     write_source(root, "guidance/work/testing/repeat-count.md", NOTE.format(name="repeat-count", tags=tags))
     return root
 
 
 def test_build_writes_each_guidance_note_as_a_skill(tmp_path, capsys):
-    without = se_plugin.expected(drafts_copy(tmp_path / "without"))
+    without = se_plugin.expected(small_copy(tmp_path / "without"))
     root = guidance_copy(tmp_path / "with")
     files = se_plugin.expected(root)
     added = {path for path in files if path not in without}
@@ -1000,7 +934,7 @@ def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tm
     """A copy of the generator alone (se_plugin.py, agent_lint.py, generated.py, whose marker it
     writes, and interfaces.py with the schemas its pages and that marker are written through)
     checks its layout as before."""
-    root = drafts_copy(tmp_path)
+    root = small_copy(tmp_path)
     (root / "scripts").mkdir()
     for name in ("se_plugin.py", "agent_lint.py", "generated.py", "interfaces.py"):
         shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
