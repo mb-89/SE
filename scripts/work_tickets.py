@@ -90,6 +90,8 @@ PROTECTED_QUESTION = "\uE002"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
+# The integration-branch commit a field report was tested against, where its inputs are frozen.
+TESTED_AGAINST_PATTERN = re.compile(r"\*\*Tested against `[^`\n]+`:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 #: The field report's Branch, the pull request's head branch: `**Branch:** `<branch>``.
 REPORT_BRANCH_PATTERN = re.compile(r"\*\*Branch:\*\*[ \t]*`([^`\n]+)`")
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
@@ -1050,7 +1052,7 @@ sibling = se_script.loader(__file__)
 
 
 def finding_ref(value: str):
-    """Parse a retro finding lazily, after the command modules have finished importing."""
+    """Parse a run's finding lazily, after the command modules have finished importing."""
     return sibling("retro").FindingRef(value)
 
 
@@ -2407,31 +2409,61 @@ QUESTIONS_PLACEHOLDER = "<!-- se:standing-questions -->"
 QUESTIONS_SECTION = "Retro"
 
 
-def standing_questions():
-    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`)."""
-    return sibling("templates").own(STANDING_QUESTIONS)
+def standing_questions(at: str | None = None):
+    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`); with
+    `at`, as they stood at that commit of the se checkout (`frozen_at`), else as they stand now."""
+    templates = sibling("templates")
+    found = templates.own_at(STANDING_QUESTIONS, at) if at else None
+    return found if found is not None else templates.own(STANDING_QUESTIONS)
 
 
-def field_report_template() -> str:
+def frozen_at(body: str) -> str | None:
+    """The commit a field report `body` names as **Tested against**, where the se checkout this
+    script runs from holds its field-report template there (`template_at`): a piece of work's
+    inputs are frozen at its start, so its report is judged by the template it was started from
+    (SE#2006) and no queued delivery fails for a template that changed after it. None otherwise (no
+    such line, a commit of another repository, or one se does not hold), for the template as it
+    stands."""
+    found = TESTED_AGAINST_PATTERN.search(body)
+    return found[1] if found is not None and template_at(found[1]) is not None else None
+
+
+_TEMPLATE_AT: dict[str, str | None] = {}
+
+
+def template_at(commit: str) -> str | None:
+    """The pull request template at `commit` of the se checkout, None where it holds none there."""
+    if commit not in _TEMPLATE_AT:
+        shown = run_git(Path(__file__).resolve().parents[1], "show",
+                        f"{commit}:{FIELD_REPORT_TEMPLATE}")
+        text = shown.stdout if shown.returncode == 0 else ""
+        _TEMPLATE_AT[commit] = text if REPORT_BEGIN in text and REPORT_END in text else None
+    return _TEMPLATE_AT[commit]
+
+
+def field_report_template(at: str | None = None) -> str:
     """The pull request template, the field report's one template, markers included, its
-    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section."""
-    path = Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
-    questions = sibling("templates").sections(standing_questions(), 3).rstrip("\n")
+    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section; with `at`, both
+    as they stood at that commit of the se checkout (`frozen_at`)."""
+    text = template_at(at) if at else None
+    if text is None:
+        try:
+            text = (Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE).read_text(
+                encoding="utf-8")
+        except OSError as error:
+            raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
+    questions = sibling("templates").sections(standing_questions(at), 3).rstrip("\n")
     return text.replace(QUESTIONS_PLACEHOLDER, questions, 1)
 
 
-def question_problems(lines: list[str] | None) -> list[str]:
+def question_problems(lines: list[str] | None, at: str | None = None) -> list[str]:
     """What keeps the field report's QUESTIONS_SECTION, its `lines`, from answering every standing
     question, each refusal of the block's own check; none where the section is missing, which the
     structure check names."""
     if lines is None:
         return []
     templates = sibling("templates")
-    block = standing_questions()
+    block = standing_questions(at)
     return [f'section "## {QUESTIONS_SECTION}": {finding.fix.replace("`## ", "`### ")} (one '
             f'"### <question>" per standing question, {block.path or STANDING_QUESTIONS}; '
             '"None" answers one that does not apply)'
@@ -3779,8 +3811,8 @@ def partial_left(report: str) -> list[str]:
     """What a partial field report naming no planned piece left undone: one item per top-level
     bullet of its "Not delivered" (its bold lead without a trailing `:` or `.`, else its first
     line), else that section's first paragraph on one line, else `NOTHING_LEFT_NAMED`; none for
-    a complete report or a planned split (`planned_pieces`). Its issue stays open at the landing,
-    as a partial is not done and only SE drops or moves what it left."""
+    a complete report or a planned split (`planned_pieces`). Each must name its home
+    (`unhomed_pieces`) before the landing, which then closes the issue."""
     result = FIELD_REPORT_RESULT_PATTERN.search(report)
     if result is None or result.group(1) != "partial" or planned_pieces(report):
         return []
@@ -3799,6 +3831,50 @@ def partial_left(report: str) -> list[str]:
     if not paragraph or paragraph.rstrip(".").casefold() == "none":
         return [NOTHING_LEFT_NAMED]
     return [paragraph]
+
+
+# The homes a partial landing's remainder must name, one per piece left (SE#2006): a comment on a
+# named next issue for a fix, `se-person` with the issue it flags for what needs the person, or a
+# new work issue for a feature. No issue closes half done, and none stays open for a remainder.
+COMMENT_HOME = re.compile(r"/issues/\d+#issuecomment-\d+")
+ISSUE_HOME = re.compile(r"(?:^|[\s(])#(\d+)\b|/issues/(\d+)\b")
+PARTIAL_HOMES = ("a new work issue for a feature (`#<n>`)",
+                 "a comment on a named next issue for a fix (its `#issuecomment-` link)",
+                 "`se-person` with the issue it flags, for what needs the person")
+
+
+def left_pieces(report: str) -> list[tuple[str, str]]:
+    """The pieces a partial field report naming no planned piece left (`partial_left`), each with
+    its whole text: its top-level bullet of "Not delivered" and the lines under it, else the
+    section's first paragraph."""
+    names = partial_left(report)
+    if not names or names == [NOTHING_LEFT_NAMED]:
+        return [(name, "") for name in names]
+    left = section(markdown_sections(report), "not delivered")
+    texts: list[str] = []
+    for line in left.splitlines():
+        if TOP_BULLET_PATTERN.fullmatch(line.rstrip()):
+            texts.append(line)
+        elif texts:
+            texts[-1] += "\n" + line
+    return list(zip(names, texts or [left]))
+
+
+def piece_home(text: str, work_number: int | None) -> str | None:
+    """The home a piece left names (PARTIAL_HOMES): `comment`, `person` or `issue`; None for
+    none. The work issue itself is no home."""
+    if COMMENT_HOME.search(text):
+        return "comment"
+    issues = [int(match[1] or match[2]) for match in ISSUE_HOME.finditer(text)]
+    issues = [number for number in issues if number != work_number]
+    if not issues:
+        return None
+    return "person" if PERSON_LABEL in text else "issue"
+
+
+def unhomed_pieces(report: str, work_number: int | None) -> list[str]:
+    """The pieces a partial delivery left with no home (`piece_home`), which `integrate` refuses."""
+    return [name for name, text in left_pieces(report) if piece_home(text, work_number) is None]
 
 
 def pull_request_body(issue: dict[str, object] | None, report: str) -> str:
@@ -5669,7 +5745,9 @@ def field_report_problems(body: str, issue_body: str | None,
     the work issue's body, the evidence gate. A section whose template text
     allows "None" may say only that.
     """
-    template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
+    at = frozen_at(body)
+    template = report_in(field_report_template(at) if at else field_report_template(),
+                         FIELD_REPORT_TEMPLATE_NAME)
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
     try:
         issue_number = field_report_issue(body)
@@ -5706,7 +5784,7 @@ def field_report_problems(body: str, issue_body: str | None,
         template_header = next((line.strip() for line in expected if line.strip().startswith("|")), None)
         if template_header is not None:
             problems.extend(table_problems(where, template_header, text))
-    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold())))
+    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold()), at))
     header = "\n".join(report[""])
     problems.extend(
         f'header (above the first section): unfilled placeholder {placeholder}; '
@@ -6824,19 +6902,22 @@ def file_work_issue(
     repo = resolve_repo(root, repo)
     refuse_unchecked_filing(repo, "file", body)
     retro = sibling("retro")
-    if finding is not None:
-        if hold:
-            raise QueueError("file --finding cannot use --hold: a held issue is not a finding outcome")
-        match = retro.FINDING_REFERENCE.search(body)
-        if match is None or (int(match[1]), int(match[2])) != (finding.retro, finding.finding):
-            raise QueueError(f"file --finding {finding}: the work issue body must name exactly "
-                             f"`retro #{finding.retro} finding {finding.finding}`")
+    if finding is not None and hold:
+        raise QueueError("file --finding cannot use --hold: a held issue is not a finding outcome")
     refuse_dangling(repo, "file", body)
     prechecked = template_check(root, repo, "file", title.strip(), body, "work", hold=hold,
                                 given=given)
     check_door = filing_door(root, repo) if finding is not None else None
+    kind = None
     if gate or finding is not None:
-        filing_check(root, repo, "file", door=check_door, finding=finding)
+        kind = filing_check(root, repo, "file", door=check_door, finding=finding)
+    if finding is not None:
+        kinds = [retro.RUN_KINDS[kind]] if kind else list(retro.RUN_KINDS.values())
+        if not any((int(match[1]), int(match[2])) == (finding.run, finding.finding)
+                   for run in kinds for match in run.reference.finditer(body)):
+            raise QueueError(f"file --finding {finding}: the work issue body must name exactly "
+                             f"`{kind or '<retro|overhaul>'} #{finding.run} finding "
+                             f"{finding.finding}`")
     first = [label for label in labels if not blockers or label != "ready"]
     if hand_off() and blockers:
         raise QueueError(
@@ -6864,8 +6945,8 @@ def file_work_issue(
 
 
 class ReviewDueError(QueueError):
-    """A retro or an overhaul is due or open: only report-state retro findings may be filed
-    until every finding has an outcome (docs/fleet.md "Retro due")."""
+    """A retro or an overhaul is due or open: only the findings of a run in report state may be
+    filed until every finding has an outcome (docs/fleet.md "Retro due")."""
 
 
 REVIEW_HELP = 'docs/fleet.md "Retro due"'
@@ -6882,17 +6963,19 @@ def filing_door(root: Path, repo: str):
 
 
 def filing_check(root: Path, repo: str, command: str, door=None,
-                 now: datetime | None = None, finding=None) -> None:
+                 now: datetime | None = None, finding=None) -> str | None:
     """The filing check (docs/fleet.md "Retro due"), which every issue SE files passes first: while a
-    retro or an overhaul is open, refuse, naming it; where one is due, file it first (the retro
-    first where both are, as an overhaul reads the closed retros) and refuse, naming it. Running
-    work goes on: only filing is held. Where `command` only prints its plan (no gh, no relay),
+    run (retro.py RUN_KINDS: a retro or an overhaul) is open, refuse, naming it, unless it is the
+    one open run, its report is in and `finding` is one of its findings without an outcome; where
+    one is due, file it first (the retro first where both are, as an overhaul reads the closed
+    retros) and refuse, naming it. Running work goes on: only filing is held. Gives the run kind
+    of `finding` where it was checked. Where `command` only prints its plan (no gh, no relay),
     print the check's command first, for the session to run before the plan."""
     door = door if door is not None else filing_door(root, repo)
     if door is None:
         if finding is not None:
-            print(f"Before filing finding {finding}, read retro #{finding.retro}'s issue and its "
-                  f"comments through GitHub tools. It must have a "
+            print(f"Before filing finding {finding}, read run #{finding.run}'s issue (a retro or "
+                  f"an overhaul) and its comments through GitHub tools. It must have a "
                   "`<!-- se:retro-state report findings=<count> -->` marker "
                   "with this finding in range and no outcome marker for it; after the work issue "
                   f"is created, run `retro.py outcome {finding} --issue <number>`.")
@@ -6900,81 +6983,76 @@ def filing_check(root: Path, repo: str, command: str, door=None,
             print(f"Before filing: run `uv run python {SE_ROOT.as_posix()}/scripts/retro.py due "
                   f"--worktree {root.as_posix()}` and its plan; while it names a retro or an "
                   f"overhaul due or open, file nothing else ({REVIEW_HELP})")
-        return
+        return None
     retro = sibling("retro")
     found = retro.countdowns(door, repo, integration_branch(root), root,
                              now or datetime.now(timezone.utc))
     if found is None:
         raise QueueError(f"work_tickets.py {command}: the filing check could not read GitHub; "
                          f"run `retro.py due --worktree {root.as_posix()}` ({REVIEW_HELP})")
-    held = (f"{command} files no other issue until every finding has an outcome and the retro is "
+    held = (f"{command} files no other issue until every finding has an outcome and the run is "
             f"done; running work goes on ({REVIEW_HELP})")
+    # A blessed run (a retro its blessing closed, an overhaul its report closed) holds nothing:
+    # its findings stay fileable, open or closed. Every other open run holds the filing.
+    opened = [(kind, number, retro.filing_state(door.comments(number)))
+              for kind in retro.RUN_KINDS for number in found[kind].open]
+    if getattr(door, "missing", []):
+        raise QueueError(f"work_tickets.py {command}: the open runs' comments are missing; read "
+                         "them before filing")
+    holding = [(kind, number, state) for kind, number, state in opened
+               if state.marker_phase != "blessed"]
+    names = ", ".join(f"{kind} #{number}" for kind, number, _ in holding) or "none"
     if finding is not None:
         if command != "file":
             raise ReviewDueError(f"work_tickets.py {command}: --finding is supported only by file")
-        if found["overhaul"].open:
-            names = ", ".join(f"#{number}" for number in found["overhaul"].open)
-            raise ReviewDueError(f"work_tickets.py file --finding: the overhaul {names} is open; "
-                                 f"file nothing until it is closed ({REVIEW_HELP})")
-        state = retro.filing_state(door.comments(finding.retro))
-        blessed = state.marker_phase == "blessed"
-        if blessed:
-            target = door.issue(finding.retro)
-            if not target or not retro.is_retro(retro.issue_of(target)):
-                raise ReviewDueError(f"work_tickets.py file --finding {finding}: "
-                                     f"#{finding.retro} is not a retro issue")
-        elif len(found["retro"].open) != 1 or found["retro"].open[0] != finding.retro:
-            names = ", ".join(f"#{number}" for number in found["retro"].open) or "none"
-            raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
-                                 f"#{finding.retro} is not the only open retro ({names})")
+        state = retro.filing_state(door.comments(finding.run))
         if getattr(door, "missing", []):
-            raise QueueError(f"work_tickets.py file --finding {finding}: the retro's comments "
-                             "are missing; read them before filing")
+            raise QueueError(f"work_tickets.py file --finding {finding}: run #{finding.run}'s "
+                             "comments are missing; read them before filing")
+        target = door.issue(finding.run)
+        run = retro.run_kind_of(retro.issue_of(target)) if target else None
+        if run is None:
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: #{finding.run} is no "
+                                 f"run of {' or '.join(retro.RUN_KINDS)}")
+        kind = run.name
+        if state.marker_phase != "blessed" and [number for _, number, _ in holding] != [finding.run]:
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: {kind} "
+                                 f"#{finding.run} is not the only open run ({names})")
         if state.phase not in ("report", "blessed") or state.findings is None:
-            raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
-                                 f"#{finding.retro} is {state.phase}, not in report state")
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: {kind} "
+                                 f"#{finding.run} is {state.phase}, not in report state")
         if finding.finding > state.findings:
             raise ReviewDueError(f"work_tickets.py file --finding {finding}: finding "
                                  f"{finding.finding} is not in the report (1..{state.findings})")
         if finding.finding in state.outcomes:
-            kind, value = state.outcomes[finding.finding]
+            outcome, value = state.outcomes[finding.finding]
             raise ReviewDueError(f"work_tickets.py file --finding {finding}: already recorded as "
-                                 f"{kind} {value!r}")
-        return
-    for kind in ("retro", "overhaul"):
-        if found[kind].open:
-            names = ", ".join(f"#{number}" for number in found[kind].open)
+                                 f"{outcome} {value!r}")
+        return kind
+    if holding:
+        if len(holding) == 1:
+            kind, number, state = holding[0]
+            if state.phase == "report":
+                raise ReviewDueError(f"work_tickets.py {command}: {names} is in report "
+                                     f"state; file only its findings with `work_tickets.py file "
+                                     f"--finding {number}:<k>`, or record declined/merged "
+                                     f"outcomes with `retro.py outcome`; {held}")
             if kind == "retro":
-                states = [retro.filing_state(door.comments(number)) for number in found[kind].open]
-                if getattr(door, "missing", []):
-                    raise QueueError(f"work_tickets.py {command}: comments for retro {names} are "
-                                     "missing; read them before filing")
-                waiting = [(number, state) for number, state in zip(found[kind].open, states)
-                           if state.marker_phase != "blessed"]
-                if not waiting:
-                    continue
-                names = ", ".join(f"#{number}" for number, _ in waiting)
-                states = [state for _, state in waiting]
-                if len(states) == 1 and states[0].phase == "report":
-                    raise ReviewDueError(f"work_tickets.py {command}: retro {names} is in report "
-                                         f"state; file only its findings with `work_tickets.py file "
-                                         f"--finding {names.removeprefix('#')}:<k>`, or record "
-                                         f"declined/merged outcomes with `retro.py outcome`; {held}")
-                number = waiting[0][0]
-                if len(states) == 1:
-                    raise ReviewDueError(
-                        f"work_tickets.py {command}: the retro {names} is open and its report is "
-                        f"not in; post it with `uv run python {SE_ROOT.as_posix()}/scripts/retro.py "
-                        f"file {number} --worktree {root.as_posix()}` (it reads the draft at "
-                        f"{retro.draft_path(repo, number)}, which `retro.py collect {number}` "
-                        f"writes), then file its findings with `--finding {number}:<k>`; {held}")
-            raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
+                raise ReviewDueError(
+                    f"work_tickets.py {command}: the retro #{number} is open and its report is "
+                    f"not in; post it with `uv run python {SE_ROOT.as_posix()}/scripts/retro.py "
+                    f"file {number} --worktree {root.as_posix()}` (it reads the draft at "
+                    f"{retro.draft_path(repo, number)}, which `retro.py collect {number}` "
+                    f"writes), then file its findings with `--finding {number}:<k>`; {held}")
+        raise ReviewDueError(f"work_tickets.py {command}: the {names} "
+                             f"{'is' if len(holding) == 1 else 'are'} open; {held}")
     for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
         if found[kind].due:
             line = file_new(root, repo)
             article = "an" if kind == "overhaul" else "a"
             raise ReviewDueError(f"work_tickets.py {command}: {article} {kind} is due "
                                  f"({found[kind].reason}), filed first: {line.strip()}; {held}")
+    return None
 
 
 def today_stamp() -> str:
@@ -7216,7 +7294,6 @@ class SuiteBudget:
     limit_seconds: float
     setup: list[str] | None = None
     tier: str | None = None  # `<module>:<function>`, the project's tier function
-    over_limit: str = "fail"  # "warn": an overrun only warns (docs/tests.md "Test budget")
     beside: tuple["BesideSuite", ...] = ()  # `[tests.beside.<name>]`, run after the suite
     # `[tests] shards`: CI runs the suite in this many shards side by side, and the target and the
     # limit are each shard's; a whole-suite run is judged against `shards` times each.
@@ -7282,12 +7359,6 @@ NO_SLOWEST_TESTS = (
     "(the suite command's report directory) to name them"
 )
 clock = time.monotonic
-# Apart from 1 (failed tests and every other refusal), so a caller can tell a slow suite from a red one.
-SUITE_OVER_LIMIT_EXIT_CODE = 3
-
-
-class SuiteOverLimitError(QueueError):
-    """The complete suite passed but ran over its limit; exits with SUITE_OVER_LIMIT_EXIT_CODE."""
 
 
 def suite_budget(root: Path) -> SuiteBudget:
@@ -7313,12 +7384,6 @@ def suite_budget(root: Path) -> SuiteBudget:
             'a module importable from the project root, for example tier = "tests.tiers:tier"; '
             "fix it or remove it"
         )
-    over_limit = tests.get("over_limit", "fail")
-    if over_limit not in OVER_LIMIT_CHOICES:
-        raise QueueError(
-            f'{where}: over_limit must be "fail" (the default) or "warn", what a run over '
-            "limit_seconds does; fix it or remove it"
-        )
     shards = tests.get("shards", 1)
     if isinstance(shards, bool) or not isinstance(shards, int) or shards < 1:
         raise QueueError(
@@ -7327,7 +7392,7 @@ def suite_budget(root: Path) -> SuiteBudget:
         )
     values = budget_seconds(tests, where)
     return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier,
-                       over_limit, beside_suites(root, tests.get("beside", {})), shards)
+                       beside_suites(root, tests.get("beside", {})), shards)
 
 
 def budget_seconds(table: dict, where: str) -> dict[str, float]:
@@ -7392,7 +7457,6 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
     return tuple(suites)
 
 
-OVER_LIMIT_CHOICES = ("fail", "warn")
 TIER_SETTING = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
 
 
@@ -7506,6 +7570,9 @@ class SuitePart:
     workers: int  # its `workers` testsuite property (pytest: record_testsuite_property), else 1
     cases: list[tuple[float, str]]  # (seconds, test) of every test case
     setups: tuple[SuiteSetup, ...] = ()  # the test cases that report a setup time
+    # (test, seconds, budget) of each test case that records its own measurement: its
+    # `measured_seconds` and `budget_seconds` properties (tests/conftest.py `measure`)
+    measured: tuple[tuple[str, float, float], ...] = ()
 
     def line(self) -> str:
         """`<part>: <wall> s wall; <sum> s test time / <n> workers = <per worker> s; slowest <s> s`:
@@ -7552,7 +7619,7 @@ def read_part(report: Path) -> SuitePart:
     workers = [
         int(prop.get("value") or 0) for prop in root.iter("property") if prop.get("name") == "workers"
     ]
-    cases, setups = [], []
+    cases, setups, measured = [], [], []
     for case in root.iter("testcase"):
         test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
         cases.append((float(case.get("time") or 0), test))
@@ -7562,7 +7629,10 @@ def read_part(report: Path) -> SuitePart:
                 float(properties["setup_time"]), test,
                 properties.get("fixture") or case.get("classname") or test, properties.get("worker"),
             ))
-    return SuitePart(report.stem, wall, max([1, *workers]), cases, tuple(setups))
+        if properties.get("measured_seconds") and properties.get("budget_seconds"):
+            measured.append((test, float(properties["measured_seconds"]),
+                             float(properties["budget_seconds"])))
+    return SuitePart(report.stem, wall, max([1, *workers]), cases, tuple(setups), tuple(measured))
 
 
 def report_parts(reports: Path) -> list[SuitePart]:
@@ -7864,7 +7934,6 @@ CI_SUITE_TITLE = "se suite time"
 CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
 CI_SUITE_COMMITS = 8  # first-parent commits of the integration branch searched for CI's time
 CI_SUITE_RUNS = 5  # CI's time is the median of this many runs, so one slow runner does not count
-CI_MARGIN = 0.9  # CI within 10% of the limit: a local overrun refuses
 CI_READ_SECONDS = 10
 
 
@@ -8022,9 +8091,8 @@ def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str
     """CI's suite time of a sharded suite: the slowest shard's, as the shards run side by side.
     Prints each shard, then holds the run to the budget as the reference run: refuses a missing
     shard, and a failed one without printing a time, as a failed run's time is no suite time; prints
-    the notice ci_suite_time reads, and refuses a time over the limit with SuiteOverLimitError
-    unless `[tests]` over_limit is "warn". Its warnings are `::warning` annotations on stdout, in
-    order with what it printed before them."""
+    the notice ci_suite_time reads. A time over the target or the limit is recorded, never refused
+    (slow_line): a `::notice` annotation on stdout, in order with what it printed before it."""
     budget = suite_budget(root)
     shards = shard_times(directory)
     if not shards:
@@ -8049,37 +8117,42 @@ def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit)
     timing = (f"{seconds:.1f} s, the slowest of {len(shards)} shards (shard {slowest.name}) "
               f"(target {budget.target_seconds:g} s, limit {limit:g} s)")
-    if seconds > limit and budget.over_limit == "warn":
-        print(workflow_annotation("warning", over_limit_warning(seconds, limit)), flush=True)
-    elif seconds > limit:
-        raise SuiteOverLimitError(
-            f"Sharded suite passed but took {timing} on CI, the budget's reference, over its "
-            "limit ([tests] limit_seconds in se.toml). Remedy: make the slowest shard's tests "
-            "faster or split them across the shards more evenly."
-        )
-    elif seconds > budget.target_seconds:
-        print(workflow_annotation(
-            "warning", f"the sharded suite took {seconds:.1f} s, over its target of "
-                       f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml)"),
-              flush=True)
+    slow = slow_line("the sharded suite", seconds,
+                     (budget.target_seconds, "[tests] target_seconds in se.toml"),
+                     (limit, "[tests] limit_seconds in se.toml"))
+    if slow:
+        print(workflow_annotation("notice", slow), flush=True)
     return timing
 
 
-def host_load() -> str:
-    """The host's load averages over its CPUs, for a warning about a slow run."""
-    cpus = os.cpu_count() or 1
-    try:
-        one, five, fifteen = os.getloadavg()
-    except (AttributeError, OSError):  # Windows has no load average
-        return f"{cpus} CPUs, load average unknown"
-    return f"load {one:.1f}/{five:.1f}/{fifteen:.1f} (1/5/15 min) on {cpus} CPUs"
+def slow_line(what: str, seconds: float, target: tuple[float, str], limit: tuple[float, str]
+              ) -> str:
+    """The record of a passing run over its target or its limit, or "" under both. No time
+    budget refuses and none warns (docs/tests.md "Test budget"): the time is noted in the metrics
+    line, and the overhaul's facts collect it and turn the slowest into work. `target` and
+    `limit` are each (seconds, where the setting is)."""
+    if seconds <= target[0]:
+        return ""
+    (budget, where), name = (limit, "limit") if seconds > limit[0] else (target, "target")
+    return (f"Slow, recorded: {what} took {seconds:.1f} s, over its {name} of {budget:g} s "
+            f"({where}); not refused, the overhaul's facts collect it")
 
 
-def over_limit_warning(seconds: float, limit: float) -> str:
-    """The warning of an overrun where the project declares warn-only (`[tests] over_limit`)."""
-    return (f"warning: the complete suite took {seconds:.1f} s, over its limit of {limit:g} s; "
-            '[tests] over_limit = "warn" in se.toml, so the overrun is not refused; make the '
-            "slowest tests faster")
+def slow_lines(budget: "SuiteBudget", seconds: float, beside: list["BesideRun"],
+               measured: list[tuple[str, float, float]]) -> list[str]:
+    """The recorded lines of a passing run (slow_line): the whole suite, each suite beside, and
+    each test whose own measurement (a JUnit `measured_seconds` property) is over its budget."""
+    lines = [slow_line("the complete suite", seconds,
+                       (budget.whole_target, budget.limit_source("target_seconds")),
+                       (budget.whole_limit, budget.limit_source()))]
+    lines += [slow_line(run.suite.name, run.seconds,
+                        (run.suite.target_seconds, f"target_seconds of {run.suite.where()}"),
+                        (run.suite.limit_seconds, f"limit_seconds of {run.suite.where()}"))
+              for run in beside]
+    lines += [f"Slow, recorded: {test} measured {spent:.2f} s, over its budget of {allowed:g} s "
+              "(its own measurement); not refused, the overhaul's facts collect it"
+              for test, spent, allowed in measured if spent > allowed]
+    return [line for line in lines if line]
 
 
 #: Why a landing through kern's relay reads no CI suite time: it reads GitHub's check-run
@@ -8098,21 +8171,21 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
     (SuitePart.line) with its slow setups under it (SuitePart.setup_lines), its `slowest_count` slowest tests
     and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
-    warns above the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
+    records a time over the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
     its seconds per file there (with_file_seconds), and its `file seconds:` lines follow the Parts.
     With `keep_reports` the run's JUnit reports are copied there (time_suite), also from a failed
-    or over-limit run, and the line `Test reports kept in <DIR>: ...` is printed right after the
+    run, and the line `Test reports kept in <DIR>: ...` is printed right after the
     timed run; without it nothing is copied and nothing more is printed.
 
-    The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
-    refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
-    warns with the host's load and refuses only where CI's suite time on the integration
-    branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
-    limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
+    The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time;
+    any other run where `read_ci` prints CI's suite time on the integration branch (ci_suite_time)
+    and notes it. No time refuses or warns: the suite, each suite beside and each test's own
+    measurement over its target or limit is one recorded line (slow_lines) and the metrics line
+    notes it, for the overhaul's facts (docs/tests.md "Test budget").
     `ci_skipped` (a landing through kern's relay, CI_SKIPPED_ON_RELAY) reads no CI time and says
     so once: the time is unknown, as where it cannot be read.
     Then runs each `[tests.beside.<name>]` suite (time_beside), prints and returns its time beside
-    the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
+    the suite's, and refuses a failed one.
     A suite beside with `paths` runs only where the change touches one, or where `full`; a skip
     is one line in the output and the result (beside_to_skip).
     A suite beside that passed without running a test, as its output reads (suite_runs.py), is
@@ -8140,29 +8213,23 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
     reference = suite_is_reference()
-    over = seconds > limit
     ci, unknown = (None, "")
-    if not reference and (over or read_ci) and ci_skipped:
+    if not reference and read_ci and ci_skipped:
         unknown = ci_skipped
-        print(f"CI's suite time on {integration_branch(root)}: {ci_skipped}")
-    elif not reference and (over or read_ci):
+    elif not reference and read_ci:
         feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
+    measured = [entry for part in parts for entry in part.measured]
+    measured_over = {test: [seconds_, budget_] for test, seconds_, budget_ in measured
+                     if seconds_ > budget_}
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit,
                  **({"ci_suite_seconds": ci.seconds} if ci else {}),
                  **({"beside_seconds": {run.suite.name: round(run.seconds, 3) for run in beside},
                      "beside_limit_seconds": {run.suite.name: run.suite.limit_seconds
-                                              for run in beside}} if beside else {}))
-    close = ci is None or ci.seconds >= CI_MARGIN * budget.limit_seconds
-    enforced = budget.over_limit == "fail"
-    refused = over and enforced and (reference or close)
-    # A suite beside is small and has no CI reading of its own: over its limit, only the
-    # reference run (CI) refuses it; elsewhere it warns.
-    beside_over = [run for run in beside if run.seconds > run.suite.limit_seconds]
-    beside_refused = [run for run in beside_over if enforced and reference]
+                                              for run in beside}} if beside else {}),
+                 **({"measured_over": measured_over} if measured_over else {}))
     beside_failed = [run for run in beside if run.refusal()]
-    record_suite_verdict(root, commit, result.returncode == 0 and not refused and not beside_failed
-                         and not beside_refused, seconds)
+    record_suite_verdict(root, commit, result.returncode == 0 and not beside_failed, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
     if beside_failed and reference:
@@ -8178,43 +8245,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         f", {budget.shards} shards of {budget.limit_seconds:g} s)" if budget.shards > 1 else ")")
     if reference:
         print(suite_notice(seconds, limit))
-    ci_text = (ci_suite_text(ci, integration_branch(root)) if ci
-               else f"CI's suite time is unknown: {unknown}")
-    # CI's time is its slowest shard's, so it is held to the limit per shard
-    ci_limit = ("the limit" if budget.shards == 1
-                else f"the limit per shard, {budget.limit_seconds:g} s")
-    for run in beside_refused:
-        raise SuiteOverLimitError(
-            f"{run.suite.name} passed but took {run.seconds:.1f} s on CI, the budget's reference, "
-            f"over its limit of {run.suite.limit_seconds:g} s (limit_seconds of "
-            f"{run.suite.where()}). Remedy: make its slowest tests faster, or its build smaller."
-        )
-    if refused and reference:
-        raise SuiteOverLimitError(
-            f"Complete suite passed ({summary}) but took {seconds:.1f} s on CI, the budget's "
-            f"reference, over its limit of {limit:g} s ({budget.limit_source()}). Slowest "
-            f"tests:\n{listing}\n"
-            "Remedy: make the slowest tests above faster (the work model's test rules)."
-        )
-    if refused:
-        why = (f"{ci_text}, within 10% of {ci_limit}, so the suite is near its budget on the "
-               "reference too" if ci else f"{ci_text}, so this run decides")
-        raise SuiteOverLimitError(
-            f"Complete suite passed ({summary}) but took {seconds:.1f} s here ({host_load()}), "
-            f"over its limit of {limit:g} s ({budget.limit_source()}); "
-            f"{why}. Slowest tests:\n{listing}\n"
-            "Remedy: make the slowest tests above faster (the work model's test rules)."
-        )
-    if over and not enforced:
-        print(over_limit_warning(seconds, limit), file=sys.stderr)
-    elif over:
-        print(
-            f"warning: the complete suite took {seconds:.1f} s here ({host_load()}), over its "
-            f"limit of {limit:g} s ({budget.limit_source()}); {ci_text}, under 90% of "
-            f"{ci_limit}, so this host is slow and the run is not refused: CI's {CHECK_NAME} on "
-            "the landing pull request judges the budget",
-            file=sys.stderr,
-        )
+    if read_ci and not reference:
+        print(ci_suite_text(ci, integration_branch(root)) if ci
+              else f"CI's suite time on {integration_branch(root)}: {unknown}")
     own_lines = "\n".join(  # stdout only; the durations are listed below, as the slowest tests
         line for line in result.stdout.strip().splitlines()
         if not DURATION_LINE.match(line) and not any(noise.match(line) for noise in TAIL_NOISE)
@@ -8244,24 +8277,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     print(f"Slowest tests:\n{listing}")
     if tier_of and parts:
         print("Slowest per tier:\n" + "\n".join(f"  {line}" for line in tier_lines(parts, tier_of)))
-    if target < seconds <= limit:
-        print(
-            f"warning: the complete suite took {seconds:.1f} s, over its target of "
-            f"{target:g} s ({budget.limit_source('target_seconds')}); make the slowest "
-            "tests above faster",
-            file=sys.stderr,
-        )
-    for run in beside:
-        if run in beside_over:
-            print(f"warning: {run.suite.name} took {run.seconds:.1f} s here ({host_load()}), over "
-                  f"its limit of {run.suite.limit_seconds:g} s (limit_seconds of "
-                  f"{run.suite.where()}); " + (f"CI's {CHECK_NAME}, the reference, refuses it "
-                  "there" if enforced else '[tests] over_limit = "warn", so it is not refused'),
-                  file=sys.stderr)
-        elif run.seconds > run.suite.target_seconds:
-            print(f"warning: {run.suite.name} took {run.seconds:.1f} s, over its target of "
-                  f"{run.suite.target_seconds:g} s (target_seconds of {run.suite.where()})",
-                  file=sys.stderr)
+    for line in slow_lines(budget, seconds, beside, measured):
+        print(line)
     return "; ".join([f"{summary}; {timing}",
                       *(f"{run.suite.name} passed in {run.timing()}" for run in beside),
                       *skipped.values()])
@@ -9557,9 +9574,10 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
                   comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
     take it out of progress with its beat line, and close it unless something keeps it open:
-    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left; or
-    `left`, what a partial delivery naming no planned piece left (`partial_left`), which also takes
-    any `ready` off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
+    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left.
+    `left`, what a partial delivery naming no planned piece left (`partial_left`), each piece with
+    its home (`unhomed_pieces` refused before the merge), keeps nothing open: the comment names
+    them, and `ready` comes off before the close."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
     if work_number is None:
@@ -9569,8 +9587,7 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
             Step("close_pull", "update_pull_request",
                  {**pulls, "pullNumber": pull_number, "state": "closed"}),
         ), "the authorized fix has no work issue to close")
-    escalate = (label_step(tracker, work_number, "ready", add=False),
-                label_step(tracker, work_number, "escalated", add=True)) if left else ()
+    unready = (label_step(tracker, work_number, "ready", add=False),) if left else ()
     return Plan(f"close out #{work_number}", (
         Step("comment_pull", "add_issue_comment",
              {**pulls, "issue_number": pull_number, "body": landed}),
@@ -9580,8 +9597,8 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
         beat_step(tracker, work_number, write=False),
-        *escalate,
-        *(() if pending or left else (Step("close_issue", "issue_write", {
+        *unready,
+        *(() if pending else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
             "state_reason": "completed"}),)),
     ))
@@ -9762,6 +9779,16 @@ def integrate(
         raise QueueError(f"Pull request #{pull_number} has no head branch")
     feedback.phase(f"guard {branch} against its field report")
     guard(root, branch, report)
+    unhomed = unhomed_pieces(report, work_number)
+    if unhomed:
+        reason = (f"pull request #{pull_number} is a partial delivery whose Not delivered gives "
+                  f"no home to: {'; '.join(unhomed)}. A landing closes its work issue, so each "
+                  f"piece left names one of: {'; '.join(PARTIAL_HOMES)}; nothing was merged. SE "
+                  "gives each its home, names it in that piece of the description, and the "
+                  "integrator integrates again")
+        if work_number is not None:
+            integration_escalation(root, work_number, tracker, reason)
+        raise QueueError(reason)
 
     feedback.phase(f"sync {target}")
     sync(root)
@@ -10274,8 +10301,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         waits += ("Stays open for the planned pieces left, as the field report names them: "
                   + "; ".join(pieces) + "\n")
     if left:
-        waits += ("Stays open for what this partial delivery left, which SE re-scopes: "
-                  + "; ".join(left) + "\n")
+        waits += ("A partial delivery, a failure the next retro counts; each piece it left has "
+                  "its home under the field report's Not delivered: " + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, str(state.get("release_kind") or "patch"), list(state.get("component_tags") or []))} "
@@ -10325,9 +10352,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     if left:
-        print(interface_message("escalation", issue=str(work_number),
-                                question="stays open for what its partial delivery left; re-scope the "
-                                         f"issue or take it to the owner: {'; '.join(left)}"))
+        print(f"#{work_number} landed partial, a failure the next retro counts; each piece left has "
+              f"its home under the field report's Not delivered: {'; '.join(left)}")
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -11797,8 +11823,8 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
                   "labelled off-template and not ready (docs/templating.md \"Templates\")"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
-         arg("--finding", type=finding_ref, metavar="RETRO:FINDING",
-             help="file only this finding of a retro in report state"),
+         arg("--finding", type=finding_ref, metavar="RUN:FINDING",
+             help="file only this finding of a run, a retro or an overhaul, in report state"),
          arg("--label", action="append", default=[], metavar="LABEL",
              help="a further label, such as discovery, repeatable"),
          REPO)
@@ -11997,9 +12023,9 @@ def stated_component_kinds(root: Path) -> None:
           f"{os.environ[variable] or 'none stated'} ({report})")
 
 
-@command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
-                  "does; exit code 1 when tests fail, 3 when they pass over the limit and the "
-                  "budget refuses them (docs/tests.md \"Test budget\")",
+@command("suite", "run se.toml's complete suite and measure it against its [tests] time budget, "
+                  "as integrate does; exit code 1 when tests fail; a time over the budget is "
+                  "recorded, never refused (docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
              help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
@@ -12352,9 +12378,9 @@ def run_suite_shard(root: Path, args: argparse.Namespace) -> int:
 
 @command("suite-time", "in CI's check job, judge a sharded suite: its time is its slowest "
                        "shard's, from the records suite-shard wrote; prints it as the notice CI's "
-                       "suite time is read from, and no time when a shard failed; refusals and "
-                       "warnings are workflow annotations; exit code 1 when a shard failed or is "
-                       "missing, 3 when the time is over the limit and the budget refuses it "
+                       "suite time is read from, and no time when a shard failed; refusals are "
+                       "error annotations and a time over the target or limit a notice, never "
+                       "refused; exit code 1 when a shard failed or is missing "
                        "(docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--shards", required=True, type=Path, metavar="DIR",
@@ -12365,9 +12391,6 @@ def run_suite_time(root: Path, args: argparse.Namespace) -> int:
     # Its refusals are `::error` annotations on stdout, after the shards it listed.
     try:
         timing = suite_time_of_shards(root, args.shards, args.expect)
-    except SuiteOverLimitError as error:
-        print(workflow_annotation("error", str(error)), flush=True)
-        return SUITE_OVER_LIMIT_EXIT_CODE
     except QueueError as error:
         print(workflow_annotation("error", str(error)), flush=True)
         return 1
@@ -13880,9 +13903,6 @@ def run_command(args: argparse.Namespace) -> int:
     except MissingGhError as error:
         print(f"error: work_tickets.py {args.command} {error}", file=sys.stderr)
         return 1
-    except SuiteOverLimitError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return SUITE_OVER_LIMIT_EXIT_CODE
     except (QueueError, OSError, ValueError, KeyError, sibling("se_relay").RelayError) as error:
         print(f"error: {said(error)}", file=sys.stderr)
         return 1

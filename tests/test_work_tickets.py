@@ -2706,79 +2706,41 @@ def budget_suite(root: Path, monkeypatch, fake_processes, seconds: float, ci: fl
     return reads
 
 
-def test_a_slow_local_suite_with_a_fast_ci_time_passes_with_a_warning_and_notes_both_times(
-        worktree, monkeypatch, capsys, fake_processes):
+@pytest.mark.parametrize("reference", [True, False], ids=["ci", "local"])
+def test_a_suite_over_its_limit_passes_and_is_recorded_never_refused_or_warned(
+        worktree, monkeypatch, capsys, reference, fake_processes):
+    """The fix of the class (rule tst-003): no time budget refuses, on CI or anywhere else, and
+    none warns, as zero warnings is a gate; the overrun is one recorded line and the metrics line
+    notes it for the overhaul's facts."""
     path = worktree / "metrics.jsonl"
     monkeypatch.setenv("SE_METRICS", str(path))
-    budget_suite(worktree, monkeypatch, fake_processes, 130.0, 45.0)
-
-    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
-
-    captured = capsys.readouterr()
-    assert "warning: the complete suite took 130.0 s here (" in captured.err
-    assert re.search(r"here \((load [\d./]+ \(1/5/15 min\) on|\d+ CPUs, load average)", captured.err)
-    assert "CI's suite time on main is 45.0 s, from its last run (commit aaaaaaaaaaaa" in captured.err
-    assert "CI's check on the landing pull request judges the budget" in captured.err
-    assert "Suite: 3 passed; 130.0 s (target 60 s, limit 120 s)" in captured.out
-    line, = metrics_lines(path)
-    assert (line["suite_seconds"], line["ci_suite_seconds"]) == (130.0, 45.0)
-
-
-@pytest.mark.parametrize("ci", [108.0, 130.0, None])
-def test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses(
-        worktree, monkeypatch, capsys, ci, fake_processes):
-    budget_suite(worktree, monkeypatch, fake_processes, 130.0, ci)
-
-    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == \
-        work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
-    error = capsys.readouterr().err
-    assert "Complete suite passed (3 passed) but took 130.0 s here (" in error
-    assert "over its limit of 120 s" in error and "test_quick" in error
-    if ci is None:
-        assert "CI's suite time is unknown: no successful check run" in error
-        assert "so this run decides" in error
-    else:
-        assert f"CI's suite time on main is {ci:.1f} s" in error
-        assert "within 10% of the limit" in error
-
-
-def test_a_ci_suite_over_the_limit_fails_check_with_its_time_and_slowest_tests(
-        worktree, monkeypatch, capsys, fake_processes):
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    reads = budget_suite(worktree, monkeypatch, fake_processes, 130.0, 10.0)
-
-    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == \
-        work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
-
-    captured = capsys.readouterr()
-    assert "::notice title=se suite time::Suite time: 130.0 s (limit 120 s)" in captured.out
-    assert ("Complete suite passed (3 passed) but took 130.0 s on CI, the budget's reference, "
-            "over its limit of 120 s") in captured.err
-    assert "0.20s call tests/test_fast.py::test_quick" in captured.err
-    assert reads == []  # the reference reads no other time
-
-
-@pytest.mark.parametrize("reference", [True, False], ids=["ci", "local"])
-def test_an_overrun_only_warns_where_the_project_declares_warn_only(
-        worktree, monkeypatch, capsys, reference, fake_processes):
     if reference:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    budget_suite(worktree, monkeypatch, fake_processes, 130.0, 118.0, 'over_limit = "warn"\n')
+    reads = budget_suite(worktree, monkeypatch, fake_processes, 130.0, 118.0)
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
 
     captured = capsys.readouterr()
-    assert "warning: the complete suite took 130.0 s" in captured.err
-    assert ('over its limit of 120 s; [tests] over_limit = "warn" in se.toml, so the overrun '
-            "is not refused") in captured.err
     assert "Suite: 3 passed; 130.0 s (target 60 s, limit 120 s)" in captured.out
+    assert ("Slow, recorded: the complete suite took 130.0 s, over its limit of 120 s ([tests] "
+            "limit_seconds in se.toml); not refused, the overhaul's facts collect it") in captured.out
+    assert "warning" not in captured.err.lower() and "error" not in captured.err.lower()
+    assert reads == []  # only integrate reads CI's time, and no time is judged by it
+    line, = metrics_lines(path)
+    assert work_tickets.metrics.overruns(line) == ["suite 130.0 s over its budget 120 s"]
 
 
-def test_over_limit_takes_fail_or_warn_only(worktree, monkeypatch, capsys, fake_processes):
-    budget_suite(worktree, monkeypatch, fake_processes, 40.0, None, 'over_limit = "ignore"\n')
+def test_integrate_s_run_notes_ci_s_suite_time_beside_its_own(
+        worktree, monkeypatch, capsys, fake_processes):
+    noted: dict = {}
+    monkeypatch.setattr(work_tickets.metrics, "note", lambda **values: noted.update(values))
+    budget_suite(worktree, monkeypatch, fake_processes, 130.0, 45.0)
 
-    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
-    assert 'over_limit must be "fail" (the default) or "warn"' in capsys.readouterr().err
+    work_tickets.run_suite(worktree, read_ci=True)
+
+    out = capsys.readouterr().out
+    assert "CI's suite time on main is 45.0 s, from its last run (commit aaaaaaaaaaaa" in out
+    assert (noted["suite_seconds"], noted["ci_suite_seconds"]) == (130.0, 45.0)
 
 
 def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monkeypatch, capsys, fake_processes):
@@ -2907,11 +2869,11 @@ def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, mo
     assert reads == [1]
 
 
-def test_a_sharded_projects_whole_suite_is_judged_against_the_limit_per_shard_times_its_shards(
+def test_a_sharded_projects_whole_suite_is_measured_against_the_limit_per_shard_times_its_shards(
         worktree, monkeypatch, capsys, fake_processes):
     """obs's CI keeps each of 2 shards under 120 s; a local run of the whole suite (147 s) is
-    judged against 2 x 120 s, not against one shard's limit, so it does not warn on every landing;
-    over its target (2 x 60 s) it still warns, naming both settings."""
+    measured against 2 x 120 s, not against one shard's limit; over its target (2 x 60 s) it is
+    recorded, naming both settings."""
     path = worktree / "metrics.jsonl"
     monkeypatch.setenv("SE_METRICS", str(path))
     reads = budget_suite(worktree, monkeypatch, fake_processes, 147.0, 77.0, "shards = 2\n")
@@ -2920,28 +2882,11 @@ def test_a_sharded_projects_whole_suite_is_judged_against_the_limit_per_shard_ti
 
     captured = capsys.readouterr()
     assert "Suite: 3 passed; 147.0 s (target 120 s, limit 240 s, 2 shards of 120 s)" in captured.out
-    assert "over its limit" not in captured.err and reads == []
+    assert reads == []
     assert ("over its target of 120 s ([tests] target_seconds = 60 s per shard times [tests] "
-            "shards = 2 in se.toml, as CI runs the suite in shards)") in captured.err
+            "shards = 2 in se.toml, as CI runs the suite in shards)") in captured.out
     line, = metrics_lines(path)
     assert (line["suite_seconds"], line["suite_limit_seconds"]) == (147.0, 240.0)
-
-
-@pytest.mark.parametrize("ci, refused", [(77.0, False), (110.0, True)])
-def test_a_sharded_overrun_holds_cis_slowest_shard_to_the_limit_per_shard(
-        worktree, monkeypatch, capsys, ci, refused, fake_processes):
-    budget_suite(worktree, monkeypatch, fake_processes, 250.0, ci, "shards = 2\n")
-
-    code = work_tickets.main(["suite", "--worktree", str(worktree)])
-
-    error = capsys.readouterr().err
-    assert ("over its limit of 240 s ([tests] limit_seconds = 120 s per shard times [tests] "
-            "shards = 2 in se.toml") in error
-    if refused:
-        assert code == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
-        assert "within 10% of the limit per shard, 120 s" in error
-    else:
-        assert code == 0 and "under 90% of the limit per shard, 120 s, so this host is slow" in error
 
 
 @pytest.mark.parametrize("value", ["0", "true", "1.5"])
@@ -3012,24 +2957,19 @@ def test_the_shards_notice_round_trips_through_ci_suite_time(
     assert found is not None and found.seconds == 55.5
 
 
-@pytest.mark.parametrize("warn_only", [False, True], ids=["fail", "warn"])
-def test_a_sharded_overrun_fails_unless_the_project_declares_warn_only(
-        worktree, monkeypatch, capsys, warn_only, fake_processes):
-    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None, 'over_limit = "warn"\n' if warn_only else "")
+def test_a_sharded_overrun_is_a_notice_and_passes(worktree, monkeypatch, capsys, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 130.0)
 
     code = work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
 
     out = capsys.readouterr().out.splitlines()
-    level = "warning" if warn_only else "error"
-    annotation, = (line for line in out if line.startswith(f"::{level}::"))
-    assert out.index(annotation) > out.index("Shards:")
-    if warn_only:
-        assert code == 0 and '[tests] over_limit = "warn" in se.toml' in annotation
-    else:
-        assert code == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
-        assert "took 130.0 s, the slowest of 2 shards (shard slow)" in annotation
-        assert "over its limit ([tests] limit_seconds in se.toml)" in annotation
+    assert code == 0
+    assert not [line for line in out if line.startswith(("::error", "::warning"))]
+    recorded, = (line for line in out if line.startswith("::notice::"))
+    assert out.index(recorded) > out.index("Shards:")
+    assert ("the sharded suite took 130.0 s, over its limit of 120 s ([tests] limit_seconds in "
+            "se.toml); not refused") in recorded
 
 
 def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, capsys, fake_processes):
@@ -3053,7 +2993,7 @@ def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, c
     assert out.index("  red: 5.0 s, exit code 4") < out.index("::error::")
 
 
-def test_a_sharded_suite_over_its_target_warns_as_an_annotation(worktree, monkeypatch, capsys, fake_processes):
+def test_a_sharded_suite_over_its_target_is_a_notice(worktree, monkeypatch, capsys, fake_processes):
     budget_suite(worktree, monkeypatch, fake_processes, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 70.0)
     capsys.readouterr()
@@ -3062,8 +3002,9 @@ def test_a_sharded_suite_over_its_target_warns_as_an_annotation(worktree, monkey
                               str(records)]) == 0
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert ("::warning::the sharded suite took 70.0 s, over its target of 60 s ([tests] "
-            "target_seconds in se.toml)") in captured.out.splitlines()
+    assert ("::notice::Slow, recorded: the sharded suite took 70.0 s, over its target of 60 s "
+            "([tests] target_seconds in se.toml); not refused, the overhaul's facts collect it"
+            ) in captured.out.splitlines()
 
 
 def test_a_workflow_annotation_keeps_line_breaks_and_percent_signs_as_text():

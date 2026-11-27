@@ -9,7 +9,6 @@ target_seconds = 60
 limit_seconds = 120
 setup = ["uv", "sync"] # optional
 tier = "tests.tiers:tier" # optional
-over_limit = "fail" # optional, or "warn"
 shards = 1 # optional: how many shards CI runs the suite in
 
 [tests.beside.go-components] # optional, one table per suite in another toolchain
@@ -25,17 +24,16 @@ paths = ["components/", "se.lock"] # optional: run only where the change touches
 |---|---|---|
 | `command` | — | the project's complete suite, an argument array run without a shell from the project root. `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it the same way for a worker's before-and-after times. |
 | `setup` | optional | of the same form as `command`; it installs the test dependencies (packages, browsers) and runs first. The gate prints its time and its last lines apart, and that time does not count against the budget. A failing setup stops the run before the suite, naming the command and its output. |
-| `target_seconds` | 60 | above it the gate warns. |
-| `limit_seconds` | 120 | the budget, judged on one reference run, CI's (below). |
-| `over_limit` | `"fail"` | what a run over the limit does. One rule holds for every project: an overrun fails, as below. A project that declares `"warn"` takes the other side of the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but nothing stops the suite from creeping past its budget; each overrun only warns, naming the setting. |
+| `target_seconds` | 60 | above it the run is recorded as slow. |
+| `limit_seconds` | 120 | the budget; above it too the run is recorded as slow, never refused. |
 | `shards` | 1 | how many shards CI's `check` runs the suite in, side by side (below). SE's own suite, unsharded, keeps the default: its limit is the whole suite's. |
 | `beside.<name>` | optional | a suite in another toolchain, such as SE's Go components' tests on kern at its pin (`setup` places it); kern's own tests run in kern's repository. Its `command` runs in `directory` (relative to the root, default `.`) after the complete suite, wherever the suite runs: `integrate`, `work_tickets.py suite` and CI's `check`. |
 
 - `shards`:
   - Over 1, `target_seconds` and `limit_seconds` are each shard's, which CI's slowest shard is
-    held to.
-  - A run of the whole suite (`integrate`, a worker's `suite`) is judged against `shards` times
-    each, and CI's time it reads is held to the limit per shard.
+    measured against.
+  - A run of the whole suite (`integrate`, a worker's `suite`) is measured against `shards` times
+    each.
   - It must be the `shards:` a workflow passes the `suite-time` action: `se_workflows.py check`
     fails on another literal number, naming both files and both numbers ([Workflows](running.md#workflows)).
 - `beside.<name>`:
@@ -74,14 +72,26 @@ The two budgets are apart, and neither spends the other's time:
   `work_tickets.py metrics` flags a suite beside over its limit as it does the suite
   ([Metrics](running.md#metrics)).
 - A failing suite beside refuses the run as a failing suite does, with its output. A suite beside
-  over its target warns. Over its limit, only the reference run refuses it; elsewhere it warns, as
-  it has no CI reading of its own; `over_limit = "warn"` holds for it too.
+  over its target or its limit is recorded as the suite is, below.
 - `suite --compare` and the sharded suite's actions time the complete suite alone.
 
+No time budget refuses work, and none warns, since zero warnings is a gate: a slow runner or a
+throttled machine never fails work that is correct. Failed tests and warnings still refuse.
+
+A run over its target or its limit passes and prints one recorded line, and the metrics line notes
+the time:
+
+```text
+Slow, recorded: the complete suite took 130.0 s, over its limit of 120 s ([tests] limit_seconds in se.toml); not refused, the overhaul's facts collect it
+```
+
+The overhaul's facts (`overhaul.py facts`) list each recorded overrun and the slowest test files,
+and the overhaul turns the slowest into work; a retro does not optimize performance.
+
 The budget's reference is the suite of the CI `check` job, on the same runner type every time, as
-cloud hosts differ by about 25 s for the same tree. Over the limit there, `check` fails, naming the
-test result (passed, with its counts), the time, the limit and the slowest tests. Every CI run
-reports its time as a `se suite time` notice on its check run.
+cloud hosts differ by about 25 s for the same tree. Every CI run reports its time as a `se suite
+time` notice on its check run, and a time over the target or the limit as a `::notice`
+annotation.
 
 CI's suite time is the wall time of the run the budget judges. For an unsharded suite it is the
 whole run's, the `suite` step of `check`. For a sharded suite, whose shards run side by side as
@@ -122,37 +132,42 @@ jobs:
   suite-time` collects the records, lists each shard and prints the slowest shard's time as the
   `se suite time` notice, `Suite time: 66.1 s (limit 120 s; slowest of 2 shards: 66.1 s (shard
   1))`.
-  - It fails `check` where a shard's record is missing, and over the limit as above.
+  - It fails `check` where a shard's record is missing; a time over the target or the limit is
+    recorded as above.
   - Where a shard failed, it prints no time: the run failed, and a failed run's shorter time
     never stands as CI's.
-  - Its refusals and warnings are `::error` and `::warning` annotations on the check run, printed
-    after the shards' list.
+  - Its refusals are `::error` annotations on the check run, printed after the shards' list, and
+    a slow time a `::notice`.
 - Both actions run SE's scripts with the runner's `python3`, which must be Python 3.11 or later
   (they read `se.toml` with `tomllib`); `ubuntu-26.04` has it, another runner sets it up first,
   for example with `actions/setup-python`. The actions they use run on Node 24.
 - `check` runs with `if: always()`, so a failed shard fails the check the ruleset requires instead
   of skipping it.
 
-Every other run (`integrate`, a worker's `suite`) runs the complete suite too. Over the limit it
-reads CI's suite time on the integration branch through github.com's API without an account (so
-`suite` needs no `gh`; a private repository's time reads as unknown).
+Every other run (`integrate`, a worker's `suite`) runs the complete suite too. `integrate` also
+reads CI's suite time on the integration branch through github.com's API without an account (a
+private repository's time reads as unknown), prints it and notes it in the metrics line beside its
+own, so the overhaul can tell a slow host from a slow suite.
 
 The time it reads is the median of the last five successful `check` runs that report one, the
 newest on each of the last eight first-parent commits, so one slow runner does not count and a
 shorter failed run is never read; the run names the times it took the median of.
 
-- Under 90% of the limit: it warns with the time, the host's load and CI's time, and passes; the
-  landing pull request's `check` judges the budget.
-- Within 10% of the limit, or unknown: it refuses, naming both, so a creeping suite is caught
-  before it breaks.
-
 The gate measures the suite's wall time and prints it with the last lines of the suite's own output
-and the ten slowest tests (`suite --slowest N` lists N). Failed tests exit with code 1, a passing
-suite the budget refuses with code 3. How tests are written is owned by the
+and the ten slowest tests (`suite --slowest N` lists N). Failed tests exit with code 1. How tests are written is owned by the
 [work model](../src/skills/work-model/SKILL.md#tests).
 
-SE's own suite also bounds each test's time (`tests/time_bound.py`) and refuses its own process the
-network beyond this machine (`tests/network_guard.py`), each failure naming the test and the remedy.
+SE's own suite also guards each test against a hang (`tests/time_bound.py`, a bound far above any
+real test) and refuses its own process the network beyond this machine (`tests/network_guard.py`),
+each failure naming the test and the remedy.
+
+A test that measures its own time, such as the discovery budget's or the status command's,
+records it and asserts nothing about it: `measure(seconds, budget)` (`tests/conftest.py`) writes
+the test case's `measured_seconds` and `budget_seconds` properties into se.xml.
+
+The gate prints each measurement over its budget as a recorded line and notes it, `measured_over`,
+in the metrics line. `tests/test_no_clock_assertions.py` refuses an assert on a duration the real
+clock measured.
 
 A runner of any kind may write JUnit XML reports into the directory named by the environment
 variable `SE_TEST_REPORTS`, one file per part. The gate then lists the slowest tests across all

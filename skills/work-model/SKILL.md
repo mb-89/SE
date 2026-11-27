@@ -112,9 +112,10 @@ delivery path below. The same rules apply to local sessions and cloud agents.
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
   any new issue: `work_tickets.py file` files a due one first.
 
-  An unblessed running retro refuses filing; the older report-state path allows only its findings.
-  A blessed retro never holds filing back, even while its closing write is pending. An open
-  overhaul refuses all filing; running work goes on.
+  An unblessed running retro or overhaul refuses filing; the older report-state path allows only
+  its findings. A blessed run never holds filing back, an overhaul's report being its blessing
+  and its last outcome closing it, and its findings stay fileable ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due));
+  running work goes on.
 
   Each runs in a session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
@@ -358,8 +359,8 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 
 - `work_tickets.py suite` (which `integrate` runs) records its verdict on the tree of the commit
   it ran on, where the checkout holds exactly that commit; `public_check.py --rev <commit>` records
-  its verdict on that commit's tree. A failure, or a suite its
-  [budget](../../docs/tests.md#test-budget) refuses, records a failure.
+  its verdict on that commit's tree. A failure records a failure; a suite over its
+  [budget](../../docs/tests.md#test-budget) passes, its time recorded.
 - `integrate` refuses to push a landing branch without both passing verdicts on its tree, and
   reads the squash commit back only with that tree; `work_tickets.py push` and se's pre-push hook
   (`work_tickets.py verified`) refuse a push of the integration branch itself the same way, naming
@@ -464,8 +465,17 @@ boundary.
 - Workers run focused tests and what their issue's acceptance names, the complete suite only
   where it names the suite; the integrator runs the complete suite, one integration at a time,
   while SE talks with the human.
-- No hard time boxes: workers deliver whole items. A worker never ends its turn without
-  delivering; when it stops, its field report names the blocker.
+- **A session ends with its work complete; a leftover is a failure.** Where a question is
+  trivial, take the good solution, do it, and name it in the field report's Decisions, for the
+  next retro: ask forgiveness, not permission. Every such ask for forgiveness is named there, and
+  the retro collects them.
+
+  No hard time boxes: workers deliver whole items, and a worker never
+  ends its turn without delivering.
+- **Every turn ends with what the person is needed for.** An agent that talks to the person ends
+  each turn with a last line saying what it needs from them: each decision or action with its
+  link, or `Nothing from you right now.` An agent that reports to another agent (a worker, a retro
+  agent, the integrator) ends its final report the same way, and SE passes the needs on.
 - **Disagree and commit**: ambiguity is a decision. Investigate the repository, contracts and
   tests, make the best defensible, reversible decision within scope, record it with its
   confidence for the field report, and continue. This never grants authority to bypass policy,

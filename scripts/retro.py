@@ -165,7 +165,12 @@ JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->
 # A work issue names each retro finding it takes as `retro #<n> finding <k>`, the message
 # FINDING_TEMPLATE (templates/finding-ref.md) the reports write (`finding_reference`); finding one
 # stays a search in free text.
-FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
+def finding_pattern(kind: str) -> re.Pattern:
+    """How a work issue names a finding of a run of `kind`: `<kind> #<n> finding <k>`."""
+    return re.compile(rf"\b{kind} #(\d+) finding (\d+)\b", re.IGNORECASE)
+
+
+FINDING_REFERENCE = finding_pattern("retro")
 FINDING_REF_ARGUMENT = re.compile(r"([1-9]\d*):([1-9]\d*)\Z")
 RETRO_STATE = re.compile(r"<!-- se:retro-state (report|done|blessed) findings=(\d+) -->")
 BLESSED_DRAFT = re.compile(r"<!-- se:retro-blessed sha256=([a-f0-9]{64}) -->")
@@ -302,20 +307,48 @@ class Issue:
     created_at: str = ""
 
 
+@dataclass(frozen=True)
+class RunKind:
+    """A kind of run that holds filing while it is open (docs/fleet.md "Retro due"): its name, as
+    the countdowns and a work issue's finding reference (`<name> #<n> finding <k>`) name it, and
+    which issues are its runs. Every kind files its own findings the same way, once its report is
+    in: `work_tickets.py file --finding <run>:<k>` files one, `retro.py outcome` records one
+    declined or merged, and the last outcome closes the run, so no run can deadlock the filing it
+    holds."""
+
+    name: str
+    reference: re.Pattern
+
+    def of(self, issue: Issue) -> bool:
+        return is_retro(issue) if self.name == "retro" else sibling("overhaul").is_overhaul(issue)
+
+
+# Every run kind that holds filing, read by the filing check and the outcome records; one entry
+# per kind, nothing about filing decided by a kind's name elsewhere.
+RUN_KINDS = {name: RunKind(name, finding_pattern(name)) for name in ("retro", "overhaul")}
+
+
+def run_kind_of(issue: Issue) -> RunKind | None:
+    """The run kind `issue` is a run of (RUN_KINDS); None for any other issue."""
+    return next((kind for kind in RUN_KINDS.values() if kind.of(issue)), None)
+
+
 @dataclass(frozen=True, init=False)
 class FindingRef:
-    retro: int
+    """Finding `finding` of run `run`, a retro or an overhaul (RUN_KINDS), as `<run>:<finding>`."""
+
+    run: int
     finding: int
 
     def __init__(self, value: str) -> None:
         match = FINDING_REF_ARGUMENT.fullmatch(value)
         if match is None:
-            raise ValueError(f"{value!r} must be <retro>:<finding>, both positive issue numbers")
-        object.__setattr__(self, "retro", int(match[1]))
+            raise ValueError(f"{value!r} must be <run>:<finding>, both positive issue numbers")
+        object.__setattr__(self, "run", int(match[1]))
         object.__setattr__(self, "finding", int(match[2]))
 
     def __str__(self) -> str:
-        return f"{self.retro}:{self.finding}"
+        return f"{self.run}:{self.finding}"
 
 
 @dataclass(frozen=True)
@@ -1077,12 +1110,16 @@ def due_reason(kind: str, count: int, what: str, due_after: int, days: int, elap
 def retro_countdown(closed: list[Issue], opened: list[Issue], pulls: list[Pull], tracker: str,
                     branch: str, settings: dict[str, int], now: datetime) -> Countdown:
     """The retro countdown, a pure function of the issues and pull requests it is given: what
-    came back since the newest retro started (its creation: a retro's counters reset when it
-    starts, so a late retro never makes the next one due at once). A work issue that landed adds
-    1; a work issue labelled ESCALATED_LABEL (an escalation or a refused landing) updated since
-    then adds `failure_weight`. Opening an issue counts nothing. components/retro-due counts the
-    same."""
-    runs = [issue for issue in [*closed, *opened] if is_retro(issue) and counted_run(issue)
+    came back since the newest run, a retro or an overhaul, started (its creation: the counters
+    reset when one starts, so a late retro never makes the next one due at once, and an overhaul,
+    which reads the retros, leaves none due behind it). A work issue that landed adds 1, a partial
+    landing among them (one labelled ESCALATED_LABEL whose pull request merged into the branch);
+    any other work issue labelled ESCALATED_LABEL (an escalation or a refused landing) updated
+    since then adds `failure_weight`. Opening an issue counts nothing. components/retro-due counts
+    the same."""
+    overhaul = sibling("overhaul")
+    runs = [issue for issue in [*closed, *opened]
+            if (is_retro(issue) or overhaul.is_overhaul(issue)) and counted_run(issue)
             and run_start(issue)]
     newest = max(runs, key=run_start, default=None)
     since = run_start(newest) if newest else None
@@ -1098,15 +1135,26 @@ def retro_countdown(closed: list[Issue], opened: list[Issue], pulls: list[Pull],
             naming.setdefault(number, []).append(pull)
     moments: list[datetime] = []
     landed = failed = 0
+    counted: set[int] = set()
     for issue in closed:
         moment = after(issue.closed_at)
         if (WORK_LABEL in issue.labels and not is_retro(issue) and moment
                 and landed_issue(issue, naming.get(issue.number, []), branch)):
             landed += 1
+            counted.add(issue.number)
             moments.append(moment)
     for issue in [*closed, *opened]:
+        if WORK_LABEL not in issue.labels or ESCALATED_LABEL not in issue.labels or is_retro(issue):
+            continue
+        partial = landing_of(issue, naming.get(issue.number, []), branch)
+        if partial is not None:  # a partial landing is a landing, never a failure
+            moment = after(partial.merged_at)
+            if moment and issue.number not in counted:
+                landed += 1
+                moments.append(moment)
+            continue
         moment = after(issue.updated_at)
-        if WORK_LABEL in issue.labels and ESCALATED_LABEL in issue.labels and not is_retro(issue) and moment:
+        if moment:
             failed += 1
             moments.append(moment)
     count = landed + failed * settings["failure_weight"]
@@ -1320,6 +1368,9 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             report_pull = next((pull for pull in sorted(naming, key=lambda p: -p.number)
                                 if report_of(pull.body)), None)
         report = report_of(report_pull.body) if report_pull else None
+        result = work_tickets.FIELD_REPORT_RESULT_PATTERN.search(report or "")
+        if result is not None and result[1] == "partial":
+            escalations = max(escalations, 1)  # a partial landing is a failure the retro counts
         issue_texts[issue.number] = [issue.title, issue.body, *comments, report or ""]
         duplicate = is_duplicate(issue)
         closed.append(Closed(
@@ -2535,33 +2586,39 @@ def posted_block(texts: list[str], number: int, show) -> dict | None:
 
 def file_steps(tracker: str, number: int, comments: list[str], findings: int,
                what: str = "retro") -> Plan:
-    """The writes for a retro report or an overhaul's closing report."""
+    """The writes for the report of run `number` of kind `what` (RUN_KINDS): its parts, then its
+    state, which opens `file --finding` for its findings. A retro's report is in report state until
+    its blessing (`bless`) or its last outcome; an overhaul's report is its blessing, so it holds
+    no filing from then on, and it stays open for its findings until the last outcome closes it
+    (`record_outcome`); a report with no finding is done at once and closes the run."""
+    if what not in RUN_KINDS:
+        raise ValueError(f"{what!r} is no run kind ({', '.join(RUN_KINDS)})")
     issues = work_tickets.owner_repo(tracker)
     posts = tuple(Step("comment_issue", "add_issue_comment", {
         **issues, "issue_number": number, "body": comment},
         note=f"Part {index} of {len(comments)}: post the parts in order" if len(comments) > 1
         else "") for index, comment in enumerate(comments, 1))
-    if what == "overhaul":
-        if findings != 0:
-            raise ValueError("an overhaul report has no retro findings")
-        posts += (
-            Step("close_issue", "issue_write", {
-                **issues, "method": "update", "issue_number": number,
-                "state": "closed", "state_reason": "completed"}),
-        )
-    else:
+    close = Step("close_issue", "issue_write", {
+        **issues, "method": "update", "issue_number": number,
+        "state": "closed", "state_reason": "completed"})
+    if what == "overhaul" and findings:
         posts += (Step("comment_issue", "add_issue_comment", {
             **issues, "issue_number": number,
-            "body": (report_state_comment("report", findings) + "\n"
-                     f"The report is in; record an outcome for each of its {findings} findings.")}),)
-        if findings == 0:
-            posts += (
-                Step("comment_issue", "add_issue_comment", {
-                    **issues, "issue_number": number,
-                    "body": report_state_comment("done", findings)}),
-                Step("close_issue", "issue_write", {
-                    **issues, "method": "update", "issue_number": number,
-                    "state": "closed", "state_reason": "completed"}))
+            "body": (report_state_comment("blessed", findings) + "\n"
+                     f"The report is in and blesses the overhaul; the filing gate is open. File "
+                     f"each of its {findings} findings with `work_tickets.py file --finding "
+                     f"{number}:<k>`, or record it with `retro.py outcome`; the last outcome "
+                     "closes it.")}),)
+        return Plan(f"the report of {what} #{number}", posts)
+    posts += (Step("comment_issue", "add_issue_comment", {
+        **issues, "issue_number": number,
+        "body": (report_state_comment("report", findings) + "\n"
+                 f"The report is in; record an outcome for each of its {findings} findings.")}),)
+    if findings == 0:
+        posts += (
+            Step("comment_issue", "add_issue_comment", {
+                **issues, "issue_number": number,
+                "body": report_state_comment("done", findings)}), close)
     return Plan(f"the report of {what} #{number}", posts)
 
 
@@ -2576,48 +2633,54 @@ def issue_actions(root: Path, tracker: str, door) -> dict:
     return work_tickets.tracker_actions(root, tracker)
 
 
-def record_outcome(root: Path, tracker: str, reference: FindingRef, kind: str, value: str,
+def record_outcome(root: Path, tracker: str, reference: FindingRef, outcome: str, value: str,
                    door=None) -> None:
-    """Record one finding outcome on its report-in retro, closing it after the last outcome."""
+    """Record one finding outcome on its report-in run, a retro or an overhaul (RUN_KINDS),
+    closing it after the last outcome."""
     door = door if door is not None else work_tickets.filing_door(root, tracker)
     if door is None:
-        print(f"Record the outcome on retro #{reference.retro}: post "
-              f"`{outcome_comment(reference.finding, kind, value)}`; when every finding has an "
+        print(f"Record the outcome on run #{reference.run}: post "
+              f"`{outcome_comment(reference.finding, outcome, value)}`; when every finding has an "
               "outcome, post its done state marker and close it. Run `retro.py due` afterwards.")
         return
-    comments = door.comments(reference.retro)
+    comments = door.comments(reference.run)
     if getattr(door, "missing", []):
-        raise QueueError(f"retro.py outcome: GitHub comments for retro #{reference.retro} are "
+        raise QueueError(f"retro.py outcome: GitHub comments for run #{reference.run} are "
                          "missing; read them before recording an outcome")
     state = filing_state(comments)
-    retro_issue = door.issue(reference.retro)
-    if not retro_issue:
-        raise QueueError(f"retro.py outcome: retro issue #{reference.retro} does not exist")
-    issue_open = str(retro_issue.get("state") or "").lower() == "open"
+    run_issue = door.issue(reference.run)
+    if not run_issue:
+        raise QueueError(f"retro.py outcome: run issue #{reference.run} does not exist")
+    kind = run_kind_of(issue_of(run_issue))
+    if kind is None:
+        raise QueueError(f"retro.py outcome: #{reference.run} is no run of "
+                         f"{' or '.join(RUN_KINDS)}")
+    run = f"{kind.name} #{reference.run}"
+    issue_open = str(run_issue.get("state") or "").lower() == "open"
     if state.findings is None:
-        raise QueueError(f"retro.py outcome: retro #{reference.retro} is still running; its report "
+        raise QueueError(f"retro.py outcome: {run} is still running; its report "
                          "must be in before recording outcomes")
     if reference.finding > state.findings:
-        raise QueueError(f"retro.py outcome: finding {reference.finding} is not in retro "
-                         f"#{reference.retro}'s report (1..{state.findings})")
-    if kind == "issue":
+        raise QueueError(f"retro.py outcome: finding {reference.finding} is not in "
+                         f"{run}'s report (1..{state.findings})")
+    if outcome == "issue":
         issue_number = int(value)
         work_issue = door.issue(issue_number)
         if not work_issue:
             raise QueueError(f"retro.py outcome: work issue #{issue_number} does not exist")
         labels = {label.lower() for label in label_names(work_issue)}
         if (str(work_issue.get("state") or "").lower() != "open" or "work" not in labels
-                or not any(int(match[1]) == reference.retro
+                or not any(int(match[1]) == reference.run
                            and int(match[2]) == reference.finding
-                           for match in FINDING_REFERENCE.finditer(str(work_issue.get("body") or "")))):
+                           for match in kind.reference.finditer(str(work_issue.get("body") or "")))):
             raise QueueError(f"retro.py outcome: #{issue_number} must be an open work issue that "
-                             f"names `retro #{reference.retro} finding {reference.finding}`")
-    if kind == "merged":
+                             f"names `{run} finding {reference.finding}`")
+    if outcome == "merged":
         target = int(value)
         if target == reference.finding or target > state.findings:
             raise QueueError(f"retro.py outcome: finding {reference.finding} must merge into a "
                              f"different finding in 1..{state.findings}")
-    desired = (kind, value)
+    desired = (outcome, value)
     previous = state.outcomes.get(reference.finding)
     if previous is not None and previous != desired:
         raise QueueError(f"retro.py outcome: finding {reference.finding} already has outcome "
@@ -2627,27 +2690,28 @@ def record_outcome(root: Path, tracker: str, reference: FindingRef, kind: str, v
     outcomes = dict(state.outcomes)
     if previous is None:
         steps.append(Step("comment_issue", "add_issue_comment", {
-            **issues, "issue_number": reference.retro,
-            "body": outcome_comment(reference.finding, kind, value)}))
+            **issues, "issue_number": reference.run,
+            "body": outcome_comment(reference.finding, outcome, value)}))
         outcomes[reference.finding] = desired
     complete = len(outcomes) == state.findings
-    if complete and state.marker_phase != "blessed":
-        if state.marker_phase != "done":
+    if complete:  # a blessed run still open (an overhaul) closes on its last outcome too
+        if state.marker_phase not in ("done", "blessed"):
             steps.append(Step("comment_issue", "add_issue_comment", {
-                **issues, "issue_number": reference.retro,
+                **issues, "issue_number": reference.run,
                 "body": report_state_comment("done", state.findings)}))
         if issue_open:
             steps.append(Step("close_issue", "issue_write", {
-                **issues, "method": "update", "issue_number": reference.retro,
+                **issues, "method": "update", "issue_number": reference.run,
                 "state": "closed", "state_reason": "completed"}))
     if not steps:
-        print(f"Retro #{reference.retro} finding {reference.finding} already has this outcome")
+        print(f"{run[0].upper()}{run[1:]} finding {reference.finding} already has this outcome")
         return
-    plan = Plan(f"record retro #{reference.retro} finding {reference.finding}'s outcome",
-                tuple(steps), (f"retro #{reference.retro} stays blessed; filing gate open"
+    plan = Plan(f"record {run} finding {reference.finding}'s outcome",
+                tuple(steps), (f"{run} is done and closed" if complete and issue_open
+                               else f"{run} stays blessed; filing gate open"
                                if state.marker_phase == "blessed" else
-                               f"retro #{reference.retro} is done and closed" if complete
-                               else f"retro #{reference.retro} remains open for its other findings"))
+                               f"{run} is done and closed" if complete
+                               else f"{run} remains open for its other findings"))
     if not isinstance(door, (ToolDoor, GhDoor)):
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(plan.text())
@@ -3153,17 +3217,17 @@ def make_parser() -> argparse.ArgumentParser:
     bless_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the retro issue")
     bless_command.set_defaults(run=run_bless)
     outcome_command = commands.add_parser(
-        "outcome", help="record a finding's issue, declined or merged outcome on its retro",
-        description="Record one outcome after the retro report is in. The last outcome marks the "
-                    "retro done and closes its issue.")
-    outcome_command.add_argument("finding", type=FindingRef, metavar="RETRO:FINDING",
-                                 help="the retro issue and finding numbers")
+        "outcome", help="record a finding's issue, declined or merged outcome on its retro or overhaul",
+        description="Record one outcome after the report of a run, a retro or an overhaul, is "
+                    "in. The last outcome marks the run done and closes its issue.")
+    outcome_command.add_argument("finding", type=FindingRef, metavar="RUN:FINDING",
+                                 help="the run's issue and finding numbers")
     disposition = outcome_command.add_mutually_exclusive_group(required=True)
     disposition.add_argument("--issue", type=int, help="the work issue filed for this finding")
     disposition.add_argument("--declined", metavar="REASON",
                              help="decline the finding with a reason")
     disposition.add_argument("--merged-into", type=int, metavar="FINDING",
-                             help="merge it into another finding of the same retro")
+                             help="merge it into another finding of the same run")
     outcome_command.add_argument("--worktree", default=".",
                                  help="the checkout of the repository (default: .)")
     outcome_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "

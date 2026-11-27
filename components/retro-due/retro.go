@@ -43,8 +43,8 @@ var Now = time.Now
 
 // Due is the component's output (scripts/retro.py retro_countdown and
 // scripts/overhaul.py overhaul_countdown): what came back since the newest
-// retro started (its creation), weighted into Count (a landing 1, an
-// escalated work issue FailureWeight), whether that or Days days since that
+// run, a retro or an overhaul, started (its creation), weighted into Count (a landing 1, a partial one among them, an
+// escalated work issue without a landing FailureWeight), whether that or Days days since that
 // start make a retro due and why, and the retros still open; the same for the
 // overhaul, counting the retros closed since the newest overhaul started; and
 // how much the names held.
@@ -178,7 +178,8 @@ func Count(in In, now time.Time) Due {
 	pulls := snap.Pulls(in.Pulls)
 	d := Due{DueAfter: in.DueAfter, FailureWeight: in.FailureWeight, Days: in.Days,
 		OverhaulAfter: in.OverhaulAfter, OverhaulDays: in.OverhaulDays, Issues: len(all), Pulls: len(pulls)}
-	since, hasSince, at, number := newestStart(all, isRetro)
+	// The counters reset at the newest run's start, a retro's or an overhaul's.
+	since, hasSince, at, number := newestStart(all, func(i snap.Issue) bool { return isRetro(i) || isOverhaul(i) })
 	d.Since, d.Retro = at, number
 	after := func(value string) (time.Time, bool) {
 		t, ok := snap.When(value)
@@ -190,28 +191,43 @@ func Count(in In, now time.Time) Due {
 			naming[n] = append(naming[n], p)
 		}
 	}
+	// landing is the newest pull request naming i merged into the base, as retro.py landing_of.
+	landing := func(i snap.Issue) (snap.Pull, bool) {
+		candidates := naming[i.Number]
+		sort.Slice(candidates, func(a, b int) bool { return candidates[a].Number > candidates[b].Number })
+		for _, p := range candidates {
+			if p.MergedAt != "" && p.Base == in.Base {
+				return p, true
+			}
+		}
+		return snap.Pull{}, false
+	}
 	var moments []time.Time
+	counted := map[int]bool{}
 	for _, i := range all {
 		closedAt, ok := after(i.ClosedAt)
 		if i.State != "closed" || !i.Has(Work) || isRetro(i) || !ok {
 			continue
 		}
-		candidates := naming[i.Number]
-		sort.Slice(candidates, func(a, b int) bool { return candidates[a].Number > candidates[b].Number })
-		landed := false
-		for _, p := range candidates {
-			if p.MergedAt != "" && p.Base == in.Base {
-				landed = true
-				break
-			}
-		}
-		if landed && !isDuplicate(i) && i.Reason != "not_planned" {
+		if _, landed := landing(i); landed && !isDuplicate(i) && i.Reason != "not_planned" {
 			d.Landed++
+			counted[i.Number] = true
 			moments = append(moments, closedAt)
 		}
 	}
 	for _, i := range all {
-		if updated, ok := after(i.UpdatedAt); ok && i.Has(Work) && i.Has(Escalated) && !isRetro(i) {
+		if !i.Has(Work) || !i.Has(Escalated) || isRetro(i) {
+			continue
+		}
+		// A partial landing is a landing, never a failure.
+		if p, landed := landing(i); landed {
+			if merged, ok := after(p.MergedAt); ok && !counted[i.Number] {
+				d.Landed++
+				moments = append(moments, merged)
+			}
+			continue
+		}
+		if updated, ok := after(i.UpdatedAt); ok {
 			d.Failed++
 			moments = append(moments, updated)
 		}

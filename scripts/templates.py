@@ -1033,11 +1033,11 @@ def _integration_branch(root: Path) -> str:
     return branch.strip() if isinstance(branch, str) and branch.strip() else "main"
 
 
-def _git_files(root: Path) -> dict[str, str]:
-    """`templates/<file>` -> its text at origin's integration branch; none where that ref holds no
-    template note (no `templates/`, or a term list alone)."""
+def _git_files(root: Path, ref: str | None = None) -> dict[str, str]:
+    """`templates/<file>` -> its text at `ref`, by default origin's integration branch; none where
+    that ref holds no template note (no `templates/`, or a term list alone) or is unknown."""
     door = _sibling("git_door")
-    ref = f"origin/{_integration_branch(root)}"
+    ref = ref or f"origin/{_integration_branch(root)}"
     listed = door.run("ls-tree", "-r", "--name-only", ref, "--", TEMPLATES, root=root)
     if listed.returncode != 0:
         return {}
@@ -2896,6 +2896,7 @@ def sections(template: Template, level: int = 2) -> str:
 
 
 _OWN: dict[str, Template] = {}
+_OWN_AT: dict[str, dict[str, Template]] = {}
 
 
 def own(name: str) -> Template:
@@ -2908,6 +2909,17 @@ def own(name: str) -> Template:
     if found is None:
         raise TemplateError(f"templates: the se checkout {ROOT} has no template {name}")
     return found
+
+
+def own_at(name: str, commit: str) -> Template | None:
+    """SE's own template `name` as it stood at `commit` of the se checkout this script runs from, so
+    a document is judged by the template it was started from (SE#2006); None where that checkout
+    holds no such commit or no such template there. Read once per commit."""
+    if commit not in _OWN_AT:
+        files = _git_files(ROOT, commit)
+        _OWN_AT[commit] = (_located(_loaded([(SE_REPOSITORY, files, lambda file: f"{TEMPLATES}/{file}")]),
+                                    {SE_REPOSITORY: ROOT}) if files else {})
+    return _OWN_AT[commit].get(name)
 
 
 def answers(template: Template, text: str) -> dict[str, str]:

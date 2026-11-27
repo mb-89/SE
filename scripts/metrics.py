@@ -206,7 +206,9 @@ def _number(line: dict, key: str) -> float:
 def overruns(line: dict) -> list[str]:
     """What `line` spent over a budget it declares: its wall time over `budget_seconds`, its
     suite over `suite_limit_seconds` (se.toml `[tests]`), and each suite beside over its limit,
-    `beside_seconds` over `beside_limit_seconds` (`[tests.beside.<name>]`)."""
+    `beside_seconds` over `beside_limit_seconds` (`[tests.beside.<name>]`), and each test's own
+    measurement over its budget, `measured_over` (`<test>: [seconds, budget]`, tests/conftest.py
+    `measure`). Each is a record for the overhaul's facts; none refuses."""
     found = []
     for spent, budget, what in (("wall_seconds", "budget_seconds", "wall time"),
                                 ("suite_seconds", "suite_limit_seconds", "suite")):
@@ -219,6 +221,13 @@ def overruns(line: dict) -> list[str]:
             if limits.get(name) is not None and _number(spent, name) > _number(limits, name):
                 found.append(f"suite {name} {_number(spent, name):.1f} s over its budget "
                              f"{_number(limits, name):g} s")
+    measured = line.get("measured_over")
+    if isinstance(measured, dict):
+        for test in sorted(measured):
+            pair = measured[test]
+            if (isinstance(pair, list) and len(pair) == 2
+                    and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in pair)):
+                found.append(f"test {test} measured {pair[0]:.2f} s over its budget {pair[1]:g} s")
     return found
 
 

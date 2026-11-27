@@ -318,12 +318,13 @@ def test_the_suite_on_a_changed_checkout_records_nothing(checkout, capsys):
     assert "Suite verdict not recorded" in capsys.readouterr().out
 
 
-def test_a_suite_over_its_limit_records_a_failure(checkout, monkeypatch):
+def test_a_suite_over_its_limit_records_a_pass(checkout, monkeypatch):
+    """No time budget refuses (rule tst-003): a passing suite over its limit passes the push gate."""
     commit(checkout)
     ticks = iter([0.0, 500.0])
     monkeypatch.setattr(work_tickets, "clock", lambda: next(ticks))
     run_suite(checkout)
-    assert verdicts.verdict(checkout, "suite", git(checkout, "rev-parse", "HEAD^{tree}"))["passed"] is False
+    assert verdicts.verdict(checkout, "suite", git(checkout, "rev-parse", "HEAD^{tree}"))["passed"] is True
 
 
 def test_a_worktree_shares_the_verdicts_of_its_repository(checkout, tmp_path):

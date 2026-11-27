@@ -42,6 +42,13 @@ each named with its check.
   nothing reaches, not even a test, each class at its level (`scripts/overhaul.py check`, which
   owns what each is; se.toml `[overhaul]`); a class at `warn` prints its lines and passes; the
   commit hook runs the same check (se.toml `[commit_checks]`).
+- template-engine: SE's template engine is the Go one (`components/template`), which a script asks
+  through `scripts/template_door.py`; an import of the Python engine (`templates`, `se_templates`)
+  in scripts, tests and the components, outside the engine's own files, is a finding, with no
+  baseline. It warns at TEMPLATE_ENGINE_LEVEL "warn" while the callers move, and the landing that
+  moves the last one and deletes the Python engine sets "error".
+
+A check at the level "warn" (LEVELS) prints its findings as warnings and passes.
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -117,6 +124,15 @@ SECTIONS_SKIPPED: dict[str, str] = {
     "tests/test_references.py": "plants dangling section references, the cases the check must find",
     "tests/test_repository.py": "plants dangling section references in fixture checkouts",
 }
+
+# The Python template engine's own files, which the check template-engine reads no import in.
+TEMPLATE_ENGINE = ("scripts/templates.py", "scripts/se_templates.py")
+TEMPLATE_MODULES = {"templates", "se_templates"}
+TEMPLATE_SCANNED = ("scripts", "tests", "components")
+# "warn" while the callers move to the Go engine; the landing that moves the last sets "error".
+TEMPLATE_ENGINE_LEVEL = "warn"
+# Each check's level where it is not "error" (refuse): its findings print as warnings and pass.
+LEVELS = {"template-engine": TEMPLATE_ENGINE_LEVEL}
 
 # The file whose presence in a commit's tree marks SE's own line (`se_line`).
 SE_LINE_MARKER = "scripts/public_check.py"
@@ -398,6 +414,30 @@ def code_findings(root: Path) -> list[str]:
         if line not in refused:
             print(f"hygiene: code: {line}")
     return refused
+def template_engine_lines(path: Path) -> list[int]:
+    """The lines of the Python file `path` that import the Python template engine (TEMPLATE_MODULES)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(alias.name in TEMPLATE_MODULES for alias in node.names):
+            lines.append(node.lineno)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module in TEMPLATE_MODULES:
+            lines.append(node.lineno)
+    return sorted(lines)
+
+
+def template_engine_findings(root: Path) -> list[str]:
+    """Each import of the Python template engine under `root`, outside the engine's own files."""
+    found = []
+    for folder in TEMPLATE_SCANNED:
+        for path in sorted((root / folder).rglob("*.py")):
+            name = path.relative_to(root).as_posix()
+            if name in TEMPLATE_ENGINE or {".venv", "testdata", "__pycache__"} & set(path.parts):
+                continue
+            for line in template_engine_lines(path):
+                found.append(f"{name}:{line}: imports the Python template engine; ask the Go engine through "
+                             "scripts/template_door.py (fill, check)")
+    return found
 
 
 def checks(root: Path) -> dict[str, list[str]]:
@@ -417,6 +457,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "ported": ported_findings(root),
         "doors": door_findings(root),
         "code": code_findings(root),
+        "template-engine": template_engine_findings(root),
     }
 
 
@@ -438,12 +479,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"hygiene: doors: skipped: {skipped}")
     for name, findings in found.items():
         for finding in findings:
-            print(f"hygiene: {name}: {finding}")
-    failed = [name for name, findings in found.items() if findings]
+            print(f"hygiene: {name}: {'warning: ' if LEVELS.get(name) == 'warn' else ''}{finding}")
+    failed = [name for name, findings in found.items() if findings and LEVELS.get(name, "error") == "error"]
     if failed:
-        print(f"hygiene: refused by {', '.join(failed)} ({sum(map(len, found.values()))} finding(s)) in {root}")
+        refused = sum(len(found[name]) for name in failed)
+        print(f"hygiene: refused by {', '.join(failed)} ({refused} finding(s)) in {root}")
         return 1
-    print(f"hygiene: passed ({len(found)} checks) in {root}")
+    warned = sum(len(findings) for name, findings in found.items() if name not in failed)
+    print(f"hygiene: passed ({len(found)} checks{f', {warned} warning(s)' if warned else ''}) in {root}")
     return 0
 
 

@@ -32,10 +32,10 @@ help = "check a judged retro draft and move the retro issue to report state"
 class = "batch"
 
 [commands."retro.py outcome"]
-usage = "retro.py outcome (--issue ISSUE | --declined REASON | --merged-into FINDING)\n                 [--worktree WORKTREE] [--repo REPO]\n                 RETRO:FINDING"
-summary = "record a finding's issue, declined or merged outcome on its retro"
+usage = "retro.py outcome (--issue ISSUE | --declined REASON | --merged-into FINDING)\n                 [--worktree WORKTREE] [--repo REPO]\n                 RUN:FINDING"
+summary = "record a finding's issue, declined or merged outcome on its retro or ..."
 group = "Retro"
-help = "record a finding's issue, declined or merged outcome on its retro"
+help = "record a finding's issue, declined or merged outcome on its retro or overhaul"
 class = "batch"
 
 [commands."retro.py due"]

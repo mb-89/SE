@@ -20,10 +20,13 @@ QUESTION_FIELDS). It ends in a JSON block under BLOCK_MARKER whose judgment the 
 `overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, a question left open among
 it (`question_problems`), writing nothing; it files no issue (wrk-007). It posts the report, a
 document of the overhaul template (`report`): the verdicts, what was looked at, the answers to both
-question blocks, each finding with its kind (`work`, which SE bundles, or `decision`, for the
+question blocks, each finding with its kind (`work`, which SE files, or `decision`, for the
 owner's decision list; a rule change is always a decision), then the facts and the block, which
 `judgment_problems` checks through the adapter template `templates/overhaul-judgment.md`
-(JUDGMENT_TEMPLATE), as the overhaul issue's closing comment, and closes the issue.
+(JUDGMENT_TEMPLATE), as a comment on the overhaul issue, then its blessed state: the report is its
+blessing (retro.py RUN_KINDS, file_steps), so it holds no filing, and SE files each finding with
+`work_tickets.py file --finding <overhaul>:<k>` or records it with `retro.py outcome`; the last
+outcome closes the issue, and a report with no finding closes it at once.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -32,7 +35,10 @@ prints its comment and close as a plan, as the work model's "Without gh" says fo
 `overhaul.py facts [--json] [--repo PATH]` lists what an overhaul's pruning judgment starts from:
 the functions and classes in `scripts/` that nothing but tests reaches, duplicate and
 near-duplicate blocks, the lines of code and of tests per script, the longest functions, files and
-parameter lists, the files untouched longest, and each script command that no authored text names.
+parameter lists, the files untouched longest, each script command that no authored text names,
+and what is slow: each recorded run over a time budget (the metrics lines, docs/running.md
+"Metrics") and the slowest test files (tests/file-seconds.json). No time budget refuses work; the
+overhaul collects the slow and turns the slowest into work (rule tst-003).
 Where `overhaul.py coverage [--repo PATH] [--source DIR]` kept a run of the suite under coverage,
 per test, in COVERAGE_DIR, it also lists the tests that add no line of their own, slowest first
 (`repeats`): those that run the same lines as another, and those whose lines another test runs.
@@ -125,6 +131,10 @@ class Checkout:
     # The tracked files, and each one's last change as a Unix time where git has one.
     tracked: list[str]
     changed: dict[str, int]
+    # Each recorded overrun of a time budget, newest first (metrics.overruns of this machine's
+    # metrics lines), and each test file's seconds as CI ran it (tests/file-seconds.json).
+    overruns: list[str] = field(default_factory=list)
+    file_seconds: dict[str, float] = field(default_factory=dict)
     # The coverage measurement where one is kept (`measurement`), and the rule's levels.
     coverage: Measurement | None = None
     # SE's templates by path, whose `<script>:<name>` a script beside templates.py resolves.
@@ -157,6 +167,7 @@ class Facts:
     long_parameters: list[dict] = field(default_factory=list)
     untouched: list[dict] = field(default_factory=list)
     unnamed: list[str] = field(default_factory=list)
+    slow: list[str] = field(default_factory=list)
     # Tests that repeat another's lines (`repeats`); None where no measurement is kept.
     repeats: dict | None = None
 
@@ -214,6 +225,7 @@ def read(root: Path, history: bool = True) -> Checkout:
         return (root / path).read_text(encoding="utf-8", errors="replace")
 
     present = [path for path in tracked if (root / path).is_file()]
+    seconds = json.loads(text(FILE_SECONDS)) if FILE_SECONDS in present else {}
     return Checkout(
         scripts={path: text(path) for path in present
                  if path.startswith("scripts/") and path.count("/") == 1 and path.endswith(".py")},
@@ -223,10 +235,35 @@ def read(root: Path, history: bool = True) -> Checkout:
                   if any(pattern.match(path) for pattern in patterns)},
         tracked=present,
         changed=last_changes(root) if history else {},
+        overruns=recorded_overruns() if history else [],
+        file_seconds={path: float(value) for path, value in seconds.items()
+                      if isinstance(value, (int, float)) and not isinstance(value, bool)},
         coverage=measurement(root / COVERAGE_DIR) if history else None,
         levels=repeat_levels(root) if history else dict(REPEAT_LEVELS),
         templates={path: text(path) for path in present if path.startswith(TEMPLATES)},
     )
+
+
+FILE_SECONDS = "tests/file-seconds.json"
+
+
+def recorded_overruns() -> list[str]:
+    """Each distinct overrun the metrics lines record, newest first: `<command> <start>: <what>`."""
+    metrics = sibling("metrics")
+    lines, _ = metrics.read(metrics.path())
+    found: dict[str, None] = {}
+    for line in sorted(lines, key=lambda line: str(line["start"]), reverse=True):
+        for what in metrics.overruns(line):
+            found.setdefault(f"{line['command']} {str(line['start'])[:10]}: {what}")
+    return list(found)
+
+
+def slow_facts(checkout: Checkout) -> list[str]:
+    """What is slow: the TOP newest recorded overruns, then the TOP slowest test files."""
+    files = sorted(checkout.file_seconds.items(), key=lambda item: (-item[1], item[0]))
+    return [*checkout.overruns[:TOP],
+            *(f"{path}: {seconds:g} s on CI ({FILE_SECONDS})" for path, seconds in files[:TOP]
+              if seconds > 0)]
 
 
 # The facts
@@ -781,6 +818,7 @@ def find(checkout: Checkout) -> Facts:
         untouched=[{"at": path, "last": time.strftime("%Y-%m-%d", time.gmtime(checkout.changed[path]))}
                    for path in untouched[:TOP]],
         unnamed=unnamed_commands(checkout.scripts, trees, checkout.authored),
+        slow=slow_facts(checkout),
         repeats=(None if checkout.coverage is None else
                  {**repeats(checkout.coverage, marked_distinct(checkout.tests)), "levels": checkout.levels}),
     )
@@ -845,6 +883,7 @@ def render(facts: Facts) -> str:
                                         for item in facts.long_parameters])
     section("Untouched longest", [f"{item['at']}: {item['last']}" for item in facts.untouched])
     section("Commands no authored text names", facts.unnamed)
+    section("Slow: recorded overruns and the slowest test files", facts.slow)
     out.extend(repeat_sections(facts.repeats))
     return "\n".join(out).rstrip() + "\n"
 
@@ -1081,7 +1120,7 @@ def fact_counts(facts: Facts) -> dict:
     return {"unreached": len(facts.unreached), "duplicates": len(facts.duplicates),
             "near": len(facts.near), "lines": sum(row["lines"] for row in facts.sizes),
             "test_lines": sum(row["test_lines"] for row in facts.sizes),
-            "unnamed": len(facts.unnamed),
+            "unnamed": len(facts.unnamed), "slow": len(facts.slow),
             **({} if facts.repeats is None else repeat_counts(facts.repeats))}
 
 
@@ -1401,7 +1440,7 @@ def judged(text: str, number: int) -> dict:
 
 
 def report(text: str, block: dict, number: int) -> str:
-    """The overhaul's report, its closing comment, a document of the overhaul template: the
+    """The overhaul's report, a comment on its issue, a document of the overhaul template: the
     verdicts, what was looked at, the draft's answers to the standing questions and to the
     overhaul's own, each finding with its kind and what follows, what went well, the facts, then
     the block the next overhaul reads."""
@@ -1418,7 +1457,7 @@ def report(text: str, block: dict, number: int) -> str:
     findings = [] if block["findings"] else ["None."]  # then what follows
     for item in block["findings"]:
         kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
-                if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
+                if item["kind"] == DECISION else f"{WORK}, for SE to file")
         change = "; a rule change" if item["rule_change"] else ""
         findings += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}{change}; rule "
                      f"{item['rule'].strip()}; place `{item['place'].strip()}`)",
@@ -1433,12 +1472,13 @@ def report(text: str, block: dict, number: int) -> str:
         + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
         flags=re.MULTILINE | re.DOTALL)
     reference = sibling("retro").finding_reference("overhaul", number)
-    follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
-               f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-               f"needs, each naming `{reference}` for every finding it takes, "
-               f"so the next overhaul scores it; the {DECISION} findings "
-               f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
-               "on the owner's decision list.")
+    follows = (f"This overhaul filed no issue. SE files the {WORK} findings "
+               f"({', '.join(map(str, work)) or 'none'}) with `work_tickets.py file --finding "
+               f"{number}:<k>`, each work issue naming `{reference}`, so the next overhaul scores "
+               f"it, and records a finding another one takes as merged into it; the {DECISION} "
+               f"findings ({', '.join(map(str, decisions)) or 'none'}), every rule change among "
+               "them, go on the owner's decision list, then are filed or declined the same way. "
+               "This report blesses the overhaul, so it holds no filing; its last outcome closes it.")
     fields = {
         "verdicts": "\n".join(verdicts),
         "looked_at": "\n".join(f"- **{part}**: {one_line(block['looked_at'][part])}"
@@ -1517,20 +1557,24 @@ def run_file(args: argparse.Namespace) -> int:
     tracker = work_tickets.resolve_repo(root, args.repo)
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
+    findings = block["findings"]
     steps = retro.file_steps(tracker, args.overhaul, [report(text, block, args.overhaul)],
-                             findings=0, what="overhaul")
+                             findings=len(findings), what="overhaul")
+    status = (" and closed it, as it has no finding" if not findings
+              else f"; blessed, the filing gate open, it stays open until each of its "
+                   f"{len(findings)} findings has an outcome")
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
     else:
         work_tickets.run_plan(steps, work_tickets.tracker_actions(root, tracker))
-        print(f"Posted the report of overhaul #{args.overhaul} as its closing comment and closed it")
-    findings = block["findings"]
+        print(f"Posted the report of overhaul #{args.overhaul}{status}")
     kinds = [item["kind"] for item in findings]
     print(f"Overhaul #{args.overhaul}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
           f"{DECISION} finding(s), {sum(item['rule_change'] for item in findings)} of them rule "
-          f"changes; no issue filed: SE bundles the {WORK} findings into work issues and puts the "
-          f"{DECISION} findings on the owner's decision list")
+          f"changes; no issue filed: SE files each with `work_tickets.py file --finding "
+          f"{args.overhaul}:<k>` or records it declined or merged with `retro.py outcome`, and the "
+          "last outcome closes the overhaul")
     return 0
 
 
@@ -1632,9 +1676,9 @@ def run_coverage(args: argparse.Namespace) -> int:
 COMPONENTS = (sibling("se_components").Group(
     "overhaul", "Overhaul",
     "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, "
-    "from the judged draft, file checks the judged draft and closes the issue with its report, "
-    "facts lists a checkout's pruning facts, check refuses a duplicate block or dead code among them, "
-    "and coverage measures the suite per test for them.",
+    "from the judged draft, file checks the judged draft and posts its report, which blesses the "
+    "overhaul until its last finding outcome closes it, facts lists a checkout's pruning facts, "
+    "check refuses copies and dead code, and coverage measures the suite per test.",
     ("new", "read", "deck", "file", "facts", "check", "coverage")),)
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
 #: the checkout while a person waits; new, read and file write or read GitHub at length.
@@ -1693,13 +1737,15 @@ def make_parser() -> argparse.ArgumentParser:
     sibling("deck").report_arguments(deck_command)
     deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
-        "file", help="check a judged overhaul draft and close the overhaul issue with its report",
+        "file", help="check a judged overhaul draft and post its report on the overhaul issue",
         description="Check the judgment in the draft's block, refusing an incomplete one and "
                     "writing nothing; post the report (the verdicts, what was looked at, each "
                     f"finding with its kind, {WORK} or {DECISION}, a rule change always a "
-                    f"{DECISION}, then the facts and the block) as the overhaul issue's closing "
-                    "comment and close it. It files no issue: SE reads the report and files the "
-                    "work.")
+                    f"{DECISION}, then the facts and the block) on the overhaul issue, then its "
+                    "blessed state: the report is its blessing, the filing gate open. It files no "
+                    "issue: SE files each finding with work_tickets.py file --finding "
+                    "<overhaul>:<k> or records it with retro.py outcome; the last outcome closes "
+                    "the overhaul, and a report with no finding closes it at once.")
     file_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
     file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
                               help="the draft overhaul.py read wrote, its block judged")

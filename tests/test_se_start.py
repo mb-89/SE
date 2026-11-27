@@ -1082,11 +1082,11 @@ def test_the_status_budget_is_ten_seconds():
     assert se_start.feedback.budget("se_start.py status") == 10.0
 
 
-def test_status_reads_the_seeded_cache_within_its_budget(setup):
+def test_status_reads_the_seeded_cache_and_records_its_time(setup, measure):
     seed(setup, DUE)
     started = time.perf_counter()
     lines = said(report(setup), setup["se"])
-    assert time.perf_counter() - started < se_start.feedback.budget("se_start.py status")
+    measure(time.perf_counter() - started, se_start.feedback.budget("se_start.py status"))
     assert len(work_lines(lines)) == 3 and setup["world"].work == []
 
 

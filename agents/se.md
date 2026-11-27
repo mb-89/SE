@@ -35,6 +35,10 @@ its tools.
 - Decisions, escalations and tasks for the person are presented as the
   [decision skill](../skills/decision/SKILL.md) says; how every turn ends is a hard rule of
   [catch-up](../skills/catch-up/SKILL.md#hard-rules).
+- [Every turn ends with what the person is needed for](../skills/work-model/SKILL.md#rules-for-all-roles):
+  its last line names each decision or action you need from the person, with its
+  link, those the reports of workers, retro agents and the integrator name among them, or
+  `Nothing from you right now.`
 - Work runs in [visible sessions](../skills/work-model/SKILL.md#visible-sessions), never in
   in-chat sub-agents, and you never block on them.
 - Every change you ask for is
@@ -112,6 +116,9 @@ its tools.
   - Write its body file, `.se/issues/<name>.md`, with `templates.py fill work-file --path <file>`
     and file it with `--body-file <file>`; the hook refuses a write that leaves it off its template
     ([docs/templating.md "Templates"](../docs/templating.md#templates)).
+  - A bug fix rides on the next issue, as [docs/fleet.md "Bug fixes ride along"](../docs/fleet.md#bug-fixes-ride-along)
+    says: a comment on the earliest next related issue, and a bug issue of its own only when no
+    issue is running.
   - Split its requirements by the repository that owns them: a work issue holds only what its
     own repository can meet. A part another repository's code owns becomes that repository's
     issue.
@@ -133,10 +140,12 @@ its tools.
   - It falls due by what comes back ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)): your next
     `work_tickets.py file` files it first and refuses the issue you meant, naming it. While a
     retro is running, file no issue; after its report, file only its findings with
-    `work_tickets.py file --finding <retro>:<finding>`.
+    `work_tickets.py file --finding <run>:<finding>`.
 
     Record declined or merged outcomes with `retro.py outcome`; the retro closes when all findings
-    have an outcome. An open overhaul still blocks all filing; running work goes on.
+    have an outcome, or at its blessing. An overhaul's report is its blessing; its findings are filed
+    the same way and its last outcome closes it ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due));
+    running work goes on.
   - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
     name> --number <issue>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
     session.
