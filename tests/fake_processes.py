@@ -333,6 +333,13 @@ class FakeProcesses:
                         f"(fake_processes.on({program_name(invocation)!r}, <handler>)), as {OWNER} says", pytrace=False)
         return completed(invocation, answer_of(handler(invocation)))
 
+    def start(self, argv: list[str], options: dict[str, Any]) -> subprocess.Popen:
+        invocation = Invocation(argv, dict(options))
+        self.calls.append(invocation)
+        pytest.fail(f"{OWNER}: the fake starts no program that runs beside the test (`{invocation.text()}`, "
+                    "process_door.start); fake the caller's own seam, or mark the test as the door's contract "
+                    "or the script's entry-point test", pytrace=False)
+
 
 def answer_of(value) -> Answer:
     if isinstance(value, Answer):

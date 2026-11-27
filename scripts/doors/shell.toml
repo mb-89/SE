@@ -1,0 +1,13 @@
+# The shell door (rule book des-004): every shell SE starts runs through scripts/shell_door.py, which
+# the process door hands a shell command; its fake is tests/fake_processes.py's shell. Read by
+# scripts/door_report.py, whose docstring owns the keys.
+#
+# A test's shell is also the spawn guard's (scripts/spawn_guard.py), which refuses one outside the
+# shell door's contract and a shell script's one entry-point test at runtime; this declaration
+# refuses a shell program named in code. At warn while the tests that start a real shell are
+# converted (#1750).
+door = "shell"
+level = "warn"
+files = ["scripts/shell_door.py"]
+contract_tests = ["tests/test_shell_door.py"]
+commands = ["sh", "bash", "pwsh", "powershell", "powershell.exe", "pwsh.exe", "cmd", "cmd.exe"]

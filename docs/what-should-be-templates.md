@@ -63,7 +63,7 @@ It sorted the 74 Python scripts, the 9 shell scripts and the deck's two page scr
   (gh's own output shape), `rewrite_history.py` (a commit map).
 - **Searched, nothing written but lines to a terminal or exit codes:** `copilot_guards.py`,
   `host_validate.py`, `hosts.py`, `host_registrations.py`, `feedback.py`, `door_report.py`,
-  `ratchet.py`, `kern_names.py`, `fleet_settings.py`, `cold_run.py`, `commit_checks.py`,
+  `kern_names.py`, `fleet_settings.py`, `cold_run.py`, `commit_checks.py`,
   `hygiene.py`, `public_check.py`, `se.py`, `se_home.py`, `git_door.py`, `process_door.py`,
   `shell_door.py`, `spawn_guard.py`, and the shell scripts (`bootstrap.sh`, `setup.sh`,
   `setup.ps1`, `se_hook.sh`, `se_mcp.sh`, `se_mcp.ps1`, `hosts.sh`, `bash.ps1`,
