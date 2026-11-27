@@ -61,6 +61,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import process_door
 import se_script
 
 
@@ -466,8 +467,8 @@ def gather_gh() -> dict:
     if shutil.which("gh") is None:
         return {"installed": False, "signed_in": None}
     try:
-        result = subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=GH_TIMEOUT,
-                                stdin=subprocess.DEVNULL)
+        result = process_door.run(["gh", "auth", "status"], capture_output=True, timeout=GH_TIMEOUT,
+                                  stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return {"installed": True, "signed_in": None}
     return {"installed": True, "signed_in": result.returncode == 0}
@@ -505,8 +506,8 @@ def initialize(words: list[str], cwd: Path, timeout: float = MCP_TIMEOUT) -> dic
     """One `initialize` to an MCP command over stdio, as a host spawns it; then its standard input
     closes, so a door returns its lease, and the process ends."""
     try:
-        proc = subprocess.Popen(words, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL)
+        proc = process_door.start(words, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL)
     except OSError as error:
         return {"answer": "exited", "detail": f"could not start: {type(error).__name__}"}
     got: dict = {}

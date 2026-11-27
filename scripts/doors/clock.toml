@@ -1,0 +1,12 @@
+# The clock: reads of the current time. It has no door's code yet, so `files` is empty and every read
+# counts. Read by scripts/door_report.py, whose docstring owns the keys. At warn while the scripts and
+# tests that read the clock themselves move behind one door.
+door = "clock"
+level = "warn"
+files = []
+contract_tests = []
+calls = [
+    "time.time", "time.time_ns", "time.monotonic", "time.monotonic_ns", "time.perf_counter",
+    "time.perf_counter_ns", "time.localtime", "time.gmtime",
+    "datetime.now", "datetime.utcnow", "datetime.today", "date.today",
+]
