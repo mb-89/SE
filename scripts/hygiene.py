@@ -30,6 +30,10 @@ each named with its check.
   of that page (`scripts/references.py` `dangling_sections`), outside SECTIONS_SKIPPED;
 - readme: README.md is one page with its one command first (`scripts/readme.py`, the guidance note
   readme-is-one-page); the commit hook runs the same check (se.toml `[commit_checks]`).
+- doors: every reach outside a door the checkout declares (its `scripts/doors/*.toml`) is refused at
+  its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
+  `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
+  commit hook runs the same check (se.toml `[commit_checks]`).
 - template-engine: SE's template engine is the Go one (`components/template`), which a script asks
   through `scripts/template_door.py`; an import of the Python engine (`templates`, `se_templates`)
   in scripts, tests and the components, outside the engine's own files, is a finding, with no
@@ -50,6 +54,7 @@ import re
 import sys
 from pathlib import Path
 
+import door_report
 import generated
 import git_door
 import process_door
@@ -359,6 +364,28 @@ def readme_findings(root: Path) -> list[str]:
     return [f"README.md: {finding}" for finding in readme.findings(path.read_text(encoding="utf-8"))]
 
 
+def doors_skip(root: Path) -> str:
+    """Why the door check cannot run on `root`, or "" where it can."""
+    folder = root / "scripts" / "doors"
+    return "" if any(folder.glob("*.toml")) else "the checkout declares no door in scripts/doors"
+
+
+def door_findings(root: Path) -> list[str]:
+    """What the door check refuses in `root`, by its own declarations; its warnings are printed."""
+    if doors_skip(root):
+        return []
+    try:
+        declarations = door_report.load_all(root / "scripts" / "doors")
+    except door_report.DeclarationError as error:
+        raise HygieneError(f"doors: {error}") from error
+    texts, unread = door_report.read(root)
+    lines, refused = door_report.check(texts, unread, declarations)
+    for line in lines:
+        if line.startswith("door_report: warning: "):
+            print(f"hygiene: doors: {line.removeprefix('door_report: ')}")
+    return refused
+
+
 def template_engine_lines(path: Path) -> list[int]:
     """The lines of the Python file `path` that import the Python template engine (TEMPLATE_MODULES)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
@@ -399,6 +426,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "generated": generated_findings(root),
         "sections": section_findings(root, SECTIONS_SKIPPED),
         "readme": readme_findings(root),
+        "doors": door_findings(root),
         "template-engine": template_engine_findings(root),
     }
 
@@ -417,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if skipped := home_skip(root):
         print(f"hygiene: neutral-home: skipped: {skipped}")
+    if skipped := doors_skip(root):
+        print(f"hygiene: doors: skipped: {skipped}")
     for name, findings in found.items():
         for finding in findings:
             print(f"hygiene: {name}: {'warning: ' if LEVELS.get(name) == 'warn' else ''}{finding}")

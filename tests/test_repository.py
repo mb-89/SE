@@ -118,8 +118,9 @@ def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsy
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].startswith("hygiene: passed (11 checks) in ")
+    assert out[-1].startswith("hygiene: passed (12 checks) in ")
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
+    assert out[1] == "hygiene: doors: skipped: the checkout declares no door in scripts/doors"
 
 
 @pytest.mark.usefixtures("fake_git_door")
@@ -131,7 +132,8 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
                   "scripts/tool.py": f"import subprocess\n# {marker}: retry\nsubprocess.run(['git', 'status'])\n",
                   "README.md": "# Leaky\n\nSee [gone](gone.md), copied from /" + "home/alice/notes.\n",
                   "docs/install.md": "Install from bob/project.\n",
-                  "AGENTS.md": "# Agents\n\nSee README \"Gone\" and docs/install.md \"Gone\".\n"})
+                  "AGENTS.md": "# Agents\n\nSee README \"Gone\" and docs/install.md \"Gone\".\n",
+                  "scripts/doors/process.toml": (ROOT / "scripts" / "doors" / "process.toml").read_text(encoding="utf-8")})
     git_door.run("remote", "add", "origin", "https://example.com/bob/project.git", root=repo)
     assert hygiene.main(["--repo", str(repo)]) == 1
     out = capsys.readouterr().out
@@ -139,6 +141,7 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "hygiene: large: dump.json: 101 bytes, over 100" in out
     assert "hygiene: marker: scripts/tool.py:2: names no issue" in out
     assert "hygiene: git-door: scripts/tool.py:3: 1 git subprocess(es) outside the door" in out
+    assert "hygiene: doors: scripts/tool.py:3: call subprocess.run outside the process door" in out
     assert "hygiene: references: README.md line 3: `gone.md`" in out
     assert "hygiene: public: " in out and "README.md:3:" in out and "user-profile-path" in out
     assert "alice" not in out, "the public check names locations and labels, never the matched text"
@@ -149,7 +152,7 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "hygiene: readme: README.md: no code block of one command within its first 10 lines" in out
     assert out.splitlines()[-1].startswith(
         "hygiene: refused by binary, large, marker, git-door, references, public, neutral-home, "
-        "sections, readme (")
+        "sections, readme, doors (")
 
 
 class Item:
