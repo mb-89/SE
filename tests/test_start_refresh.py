@@ -139,27 +139,27 @@ def calls(home: Path) -> list[str]:
 
 @REFRESH
 def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins(behind):
-    """A fresh clone has no core.hooksPath (git never copies it): the plugin's start sets it to its
-    SE's hooks, as setup.sh would, so the first commit runs the public check. That a set one stays
-    is se_start.py start-hooks' (tests/test_se_start.py)."""
+    """A fresh clone has no core.hooksPath (git never copies it): the plugin's start has the binary
+    of its moved pins set it to the moved SE's hooks, as setup.sh would, so the first commit runs
+    the public check. What start-hooks sets, and that a set one stays, is the Go port's
+    (components/start/hooks_test.go)."""
     home, plugin, project, base = behind
     fake_git.init(project, "-b", "main")
-    assert git_door.run("config", "--get", "core.hooksPath", root=project).returncode == 1
     data = start(home, plugin, project, base)
     greeting = report(data)
-    assert git(project, "config", "--get", "core.hooksPath") == (plugin.resolve() / ".githooks").as_posix()
     assert tag_at_head(plugin) == "v5.0.1"
     assert greeting[0] == "SE 5.0.1 started"
     assert (f"\nSE: 5.0.0 -> 5.0.1, refreshed at this start ({plugin.resolve().as_posix()})\n"
             in data["hookSpecificOutput"]["additionalContext"])
-    assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
+    hooks = f"start-hooks --se {plugin.resolve().as_posix()}"
+    assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart", f"se-0.2.0 {hooks}"]
     named = (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8").strip()
     assert Path(named).name.startswith("se-0.2.0")
     # The next start has nothing to move and says nothing of it.
     (home / "calls").unlink()
     again = report(start(home, plugin, project, base))
     assert again[0] == "SE 5.0.1 started"
-    assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
+    assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart", f"se-0.2.0 {hooks}"]
 
 
 @REFRESH
@@ -171,4 +171,5 @@ def test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line(
     assert report(data)[0] == "SE 5.0.0 started"
     assert "\nSE: no refresh at start, this session starts with SE 5.0.0: cannot reach " in (
         data["hookSpecificOutput"]["additionalContext"])
-    assert calls(home) == ["se-0.1.0 start", "se-0.1.0 hook SessionStart"]
+    assert calls(home) == ["se-0.1.0 start", "se-0.1.0 hook SessionStart",
+                           f"se-0.1.0 start-hooks --se {plugin.resolve().as_posix()}"]

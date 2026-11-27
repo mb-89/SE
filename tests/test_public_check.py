@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -527,6 +528,7 @@ def test_the_machine_list_is_refused_with_its_remedy(repo: Path, tmp_path: Path,
     assert "secret" not in result.stdout.lower() and str(tmp_path) not in result.stdout
 
 
+@pytest.mark.distinct("asserts the retired variable changes nothing")
 def test_the_variable_of_the_retired_cloud_list_is_no_source(
         repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A made-up term, written apart so this file never holds it whole.
@@ -936,6 +938,7 @@ def test_a_digest_entry_without_a_public_label_is_refused(repo: Path, entry: str
     assert f".public-check-allow:1: {error}" in result.stdout
 
 
+@pytest.mark.distinct("asserts an entry path with spaces")
 def test_a_digest_entry_path_may_hold_spaces(repo: Path) -> None:
     commit(repo, {"a dir/t t.txt": f"{LEAK}\n",
                   public_check.ALLOW_FILE: digest_entry("a dir/t t.txt")})
@@ -1065,6 +1068,7 @@ def test_a_committed_entry_covering_only_local_term_hits_is_warned(repo: Path,
     assert term not in result.stdout
 
 
+@pytest.mark.distinct("asserts a file entry without reason is refused")
 def test_allow_entry_needs_a_reason(repo: Path) -> None:
     allow_repo(repo, "docs/*\n")
     result = run_check("--repo", str(repo))
@@ -1233,6 +1237,25 @@ def git_sh() -> str | None:
 SETUPS = ["sh"] + (["powershell"] if os.name == "nt" else [])
 
 
+@pytest.fixture
+def se_bin(se_binary: Path, repo: Path) -> Iterator[Path]:
+    """The se binary built from components/ (tests/conftest.py `se_binary`) in place where setup
+    finds it, the test's own ~/.se/bin, under the name and version se_modules.py app-binary
+    answers for SE's checkout; setup.sh and setup.ps1 name the checkout's own hooks through its
+    `stopped-hooks` (components/start)."""
+    release = tomllib.loads((SE_ROOT / "components" / "release.toml").read_text(encoding="utf-8"))
+    placed = (Path(os.environ["HOME"]) / ".se" / "bin"
+              / f"{release['binary']}-{release['version']}{'.exe' if os.name == 'nt' else ''}")
+    placed.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(se_binary, placed)
+    runme = SE_ROOT / ".se" / ".runtime" / "runme-se"
+    before = runme.read_bytes() if runme.exists() else None
+    yield placed
+    # Setup found the binary in place: it never ran bootstrap.sh --binary, which would write RUNME's
+    # record into SE's checkout (tests/test_docs.py holds that file unchanged).
+    assert (runme.read_bytes() if runme.exists() else None) == before, "setup placed the se binary itself"
+
+
 def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.CompletedProcess[str]:
     if kind == "powershell":
         command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -1248,7 +1271,7 @@ def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.Co
 @pytest.mark.spawns("shell: scripts/setup.sh (setup.ps1 on Windows) names the checkout's own hooks before it "
                     "moves core.hooksPath and appends the local list to a .gitignore without its last "
                     "newline in its own shell, run only as a process")
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@pytest.mark.usefixtures("shared_fake_git", "se_bin")  # its child processes run git and the se binary
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_identity(
         kind: str, repo: Path) -> None:
@@ -1300,7 +1323,7 @@ def se_as_a_local_module(repo: Path) -> None:
 
 @pytest.mark.spawns("shell: scripts/setup.sh --copilot (setup.ps1 -Copilot on Windows) hands copilot.py "
                     "install the repository after its own steps, a wiring of the shell run only as a process")
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@pytest.mark.usefixtures("shared_fake_git", "se_bin")  # its child processes run git and the se binary
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(kind: str, repo: Path) -> None:
     se_as_a_local_module(repo)
@@ -1369,6 +1392,7 @@ def first_setup(kind: str, repo: Path,
 
 
 @pytest.mark.spawns("entry: scripts/setup.sh (scripts/setup.ps1 on Windows)")
+@pytest.mark.usefixtures("se_bin")  # setup runs the se binary
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_points_core_hooks_path_at_se_hooks_and_writes_nothing_for_copilot_without_it(
         kind: str, repo: Path, shared_fake_git: fake_git.StateFile) -> None:
@@ -1531,6 +1555,7 @@ def test_tracker_references(text: str, found: list[str]) -> None:
     assert [match for _, match in public_check.tracker_references(text)] == found
 
 
+@pytest.mark.distinct("asserts a bare reference's refusal and its rule line")
 def test_commit_msg_hook_refuses_a_tracker_reference(hooked: Path) -> None:
     (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
     result = try_commit(hooked, "Worker role (" + "#593)")
@@ -1920,7 +1945,6 @@ def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, mess
     assert result.returncode == (1 if refused else 0), result.stdout
 
 
-
 def test_ci_pull_request_gate_scans_the_merge_it_lands(repo: Path, tmp_path: Path) -> None:
     """Three heads cut before main moved one entry and narrowed a glob: the gate judges the merge
     each would land, by the merge's own allow list."""
@@ -2057,6 +2081,7 @@ def test_ci_gates_only_the_commits_a_work_branch_brings_past_main(
     assert result.returncode == 0, result.stdout
 
 
+@pytest.mark.distinct("asserts only the work branch's own commit is named")
 def test_ci_refuses_a_work_branchs_own_foreign_commit_naming_only_it(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     after = merged_work(repo)
@@ -2143,6 +2168,7 @@ def test_push_range_without_the_integration_ref(
     assert public_check.push_range(clone, "", after, "work", "main") == f"{after} --not"
 
 
+@pytest.mark.distinct("asserts the range where another branch integrates")
 def test_push_range_gates_whole_where_se_toml_names_another_branch(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     git(repo, "switch", "-q", "work")

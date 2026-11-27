@@ -118,6 +118,7 @@ def test_the_engine_refuses_a_snippet_that_names_a_field_twice_or_a_rows_field_i
         templates.load(tmp_path, tree=True)
 
 
+@pytest.mark.distinct("asserts the notice and escalation lines")
 def test_the_delivery_notice_and_the_escalation_keep_the_lines_the_agents_send(catalog):
     assert interfaces.write("delivery-notice", {"pr": "7", "branch": "feat-x"}) == (
         "field report in PR #7 for feat-x")
@@ -279,7 +280,6 @@ def test_the_release_trailer_is_the_line_written_by_hand_its_pattern_reads_and_r
     assert "kind" in str(refused.value)
 
 
-
 @pytest.mark.parametrize("name, stated, placeholders", [
     ("review-done", "review of PR #<n>: <verdict>, <comment URL>",
      {"pr": "<n>", "verdict": "<verdict>", "url": "<comment URL>"}),
@@ -299,6 +299,7 @@ def test_an_agent_s_end_message_is_the_line_its_agent_text_stated_and_its_exampl
     assert interfaces.read(name, rendered) == example
 
 
+@pytest.mark.distinct("asserts the review's verdicts")
 def test_the_review_s_end_message_takes_only_the_review_s_verdicts():
     import review
 

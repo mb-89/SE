@@ -20,16 +20,19 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
 
 ## The box
 
-- While an unblessed retro is running, SE files no issue. Blessing opens the gate immediately and
-  closes the retro in the same command; finding outcomes are tracked independently with
-  `work_tickets.py file --finding <retro>:<finding>` and `retro.py outcome`. An open overhaul
-  continues to hold all filing back. Running work goes on, and what comes back meanwhile counts
-  towards the next run.
+- While an unblessed run, a retro or an overhaul, is running, SE files no issue. Blessing opens the
+  gate immediately (an overhaul's report is its blessing, and its last outcome closes it);
+  its findings stay fileable with `work_tickets.py file --finding <run>:<finding>` and `retro.py
+  outcome` ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)). Running work goes on, and
+  what comes back meanwhile counts towards the next run.
 - You file no issue
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
   blessing closes the retro; SE records each finding's outcome and files accepted
   `work` findings as work issues.
 - The run covers everything up to its start: what came back after it fell due is in it too.
+- [Every turn ends with what the person is needed for](../skills/work-model/SKILL.md#rules-for-all-roles):
+  your hand-back to SE ends with what the person is needed for, or `Nothing from
+  you right now.`, and so does each turn in which you hand the person the deck.
 - Paths, shell and the host's GitHub tools follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell) and
   [Without gh](../skills/work-model/SKILL.md#without-gh).
@@ -47,6 +50,7 @@ retro doc (`docs/retro-*.md`) lands without a work issue, a field report or runn
 1. **Collect.** A retro: `retro.py collect <issue>`, which writes the draft at its known path,
    `~/.se/retros/<owner>/<repo>/retro-<issue>.md`, where `deck`, `file` and `bless` read it.
    The draft records the template version and effective rules it starts with. An overhaul:
+   `overhaul.py coverage --repo <main checkout>`, which records each test's coverage, then
    `overhaul.py read <issue> --out <draft>`. Without gh, run each plan they print as the work
    model says.
    **Ask SE for its input** in the same step: send the SE session your prompt names one message
@@ -97,7 +101,8 @@ retro doc (`docs/retro-*.md`) lands without a work issue, a field report or runn
    the retro, with one shared minute for network calls. It needs no landing, update or other
    session; repeating it resumes partial writes. Older drafts migrate automatically; a draft
    carrying frozen inputs keeps its recorded form and rules. Finding outcomes do not hold the
-   gate. An overhaul still closes with its report.
+   gate. An overhaul's `overhaul.py file` is its blessing: it posts the report, the gate open,
+   and the overhaul's last finding outcome closes it.
 8. **Hand back.** Send SE's session one message, the one
    [templates/run-closed.md](../templates/run-closed.md) writes.
    SE files the work findings as work issues, each naming every finding it takes as the message

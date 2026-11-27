@@ -35,23 +35,26 @@ None.
 
 ## Requirements
 
-1. `uv run python <se>/scripts/overhaul.py read <this issue> --out <draft>` writes the draft:
+1. `uv run python <se>/scripts/overhaul.py coverage` measures the suite once per test, then
+   `uv run python <se>/scripts/overhaul.py read <this issue> --out <draft>` writes the draft:
    every rule with what checks it, the retros since the last overhaul, the previous overhaul's
-   findings with the state of the issues that took them, and the pruning facts.
+   findings with the state of the issues that took them, and the pruning facts, the tests that
+   repeat another's lines among them.
 2. The judge reads the draft, then se itself, answers every standing question
    (`templates/standing-questions.md`, the retro's and the field report's too) and every question
    of the overhaul's own (`templates/overhaul-questions.md`), what the outside world does and what
    we can learn from it among them, and fills its block: a verdict per rule, every `looked_at`
    part, the `findings` (each naming its rule, its place and its body) and `went_well`.
 3. `uv run python <se>/scripts/overhaul.py file <this issue> --draft <draft>` checks the
-   judgment and the answers, posts the report as this issue's closing comment and closes it, filing no issue:
-   SE reads the report, bundles the `work` findings into work issues (each naming
-   `overhaul #<n> finding <k>`) and puts the `decision` findings, every rule change among them,
-   on the owner's decision list.
+   judgment and the answers and posts the report here, filing no issue; the report is its
+   blessing, so this issue holds no filing from then on.
+4. SE gives each finding an outcome, a `decision` finding after the owner decides: a work issue
+   with `work_tickets.py file --finding <this issue>:<k>`, naming `overhaul #<n> finding <k>`, or
+   declined or merged with `retro.py outcome`; the last outcome closes this issue.
 
 ## Acceptance
 
-- [ ] The report is posted here and this issue is closed.
+- [ ] The report is posted here, and every finding has an outcome, which closes this issue.
 
 ## Verification
 

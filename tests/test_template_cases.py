@@ -8,7 +8,13 @@ from __future__ import annotations
 import functools
 import json
 
+import pytest
+
 import template_cases
+
+# The field-report check reads its template at the report's Tested against commit through git's
+# door (SE#2006); the fake answers it, as no test here reaches real git.
+pytestmark = pytest.mark.usefixtures("fake_git_door")
 
 
 @functools.cache

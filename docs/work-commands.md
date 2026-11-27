@@ -46,7 +46,7 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 | `work_tickets.py body-read` | `work_tickets.py body-read --worktree WORKTREE [--body-file FILE]` | record the work issue's body as read (intake records it; field-report --check and deliver refuse a body changed after it) |
 | `work_tickets.py comments-read` | `work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST` | record the work issue's comments as read: their count and the newest one's id (intake records them; field-report --check and deliver refuse comments after it) |
 | `work_tickets.py escalate` | `work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]` | comment a question on an issue, label it escalated and print the escalation message to send SE, its first line the question (templates/escalation.md) |
-| `work_tickets.py file` | `work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--blocked-by N] [--finding RETRO:FINDING] [--label LABEL] [--repo REPO]` | for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked |
+| `work_tickets.py file` | `work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--blocked-by N] [--finding RUN:FINDING] [--label LABEL] [--repo REPO]` | for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked |
 | `work_tickets.py intake` | `work_tickets.py intake --worktree WORKTREE (--issue ISSUE \| --issue-body FILE \| --outside) [--comments-file FILE] [--repo REPO] [--discovery] [--probe-root PROBE_ROOT]` | read the work issue with gh, or from the files your GitHub tools' answers were saved to, and write its tickets into todo; it lists the comments, each with its author, a line ending [not the repository owner] where the repository's owner account did not write it (scripts/comment_authors.py) |
 | `work_tickets.py paused` | `work_tickets.py paused [--worktree WORKTREE] [--repo REPO]` | whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2 |
 | `work_tickets.py refresh` | `work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]` | re-read the work issue and its comments and report changes; each new or edited comment with its author, marked as intake marks it (--json: byOwner) |
@@ -132,19 +132,21 @@ finding's disposition, and due says whether a retro or an overhaul is due or ope
 | `retro.py deck` | `retro.py deck [--draft FILE] --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
 | `retro.py file` | `retro.py file [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
-| `retro.py outcome` | `retro.py outcome (--issue ISSUE \| --declined REASON \| --merged-into FINDING) [--worktree WORKTREE] [--repo REPO] RETRO:FINDING` | record a finding's issue, declined or merged outcome on its retro |
+| `retro.py outcome` | `retro.py outcome (--issue ISSUE \| --declined REASON \| --merged-into FINDING) [--worktree WORKTREE] [--repo REPO] RUN:FINDING` | record a finding's issue, declined or merged outcome on its retro or overhaul |
 
 #### Overhaul
 
 `components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
-report, a deck, from the judged draft, file checks the judged draft and closes the issue with its
-report, and facts lists a checkout's pruning facts.
+report, a deck, from the judged draft, file checks the judged draft and posts its report, which
+blesses the overhaul until its last finding outcome closes it, facts lists a checkout's pruning
+facts, and coverage measures the suite per test for them.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `overhaul.py coverage` | `overhaul.py coverage [--repo REPO] [--source SOURCE]` | measure the suite's coverage per test for the facts |
 | `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
-| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
+| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and post its report on the overhaul issue |
 | `overhaul.py new` | `overhaul.py new [--worktree WORKTREE] [--repo REPO]` | file the overhaul issue through work_tickets.py file |
 | `overhaul.py read` | `overhaul.py read [--out FILE] [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO] overhaul` | write an overhaul's draft |
 
@@ -383,8 +385,8 @@ It carries the drafted timeline, standing-question matrix and answers, and the j
 strongest home first, each with its cause, fix, home and state against the tree, and its findings,
 numbered, each with its home and its kind:
 
-- `work`: SE bundles these into as few work issues as the work needs, each naming
-  `retro #<n> finding <k>` for every finding it takes;
+- `work`: SE files each with `work_tickets.py file`'s `--finding`, its work issue naming
+  `retro #<n> finding <k>`, and records a finding another takes as merged into it;
 - `decision`: for the owner's decision list.
 
 It then records what went well and leaves each finding open until its outcome is recorded. The
@@ -489,12 +491,18 @@ without a why, nothing that went well, a question of either block left unanswere
 
 It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report, opening with `<!-- se:overhaul-report -->`, as the overhaul issue's closing
-comment and closes the issue. The report is a document of the overhaul template
-([templates/overhaul.md](../templates/overhaul.md)); its judged block stays `overhaul.py`'s to check. Without gh it prints the comment and the close as a plan. Each
+it posts the report, opening with `<!-- se:overhaul-report -->`, on the overhaul issue, then its
+blessed state: the report is its blessing, the filing gate open.
+
+SE files each finding with `work_tickets.py file`'s `--finding` or records it with
+`retro.py outcome`, and the last outcome closes the issue; a report with no finding closes it at
+once ([docs/fleet.md "Retro due"](fleet.md#retro-due)).
+
+The report is a document of the overhaul template
+([templates/overhaul.md](../templates/overhaul.md)); its judged block stays `overhaul.py`'s to check. Without gh it prints the comments as a plan. Each
 finding is
 
-- `work`, for SE to bundle into work issues naming `overhaul #<n> finding <k>`, or
+- `work`, for SE to file as a work issue naming `overhaul #<n> finding <k>`, or
 - `decision`, for the owner's decision list; a rule change (its place is the rule book, or its
   rule is `new`) is always a decision.
 
@@ -513,6 +521,24 @@ and its neighbours. It lists:
 - the lines of code and of tests per script, a test file counting for the script it imports or runs;
 - the ten longest functions, files and parameter lists, and the ten files untouched longest (git);
 - each script command (argparse's and `work_tickets.py`'s registry) that no line of the authored
-  text (`se.toml` `authored_content`) names after its script.
+  text (`se.toml` `authored_content`) names after its script;
+- where `overhaul.py coverage` kept a run, the tests that add no line of their own, each with the
+  seconds pruning it saves, slowest first: the groups of tests that run exactly the same lines,
+  one kept and the others to prune, and the tests whose lines another single test runs, by file.
 
 `--json` prints the same facts as data.
+
+`overhaul.py coverage` runs the suite once under coverage with a context per test (pytest-cov,
+for that run only) and keeps the run in `.se/overhaul/coverage/`, which `facts` and `read` list;
+each overhaul measures and prunes from the list
+([tst-002](../src/skills/work-model/references/rules.md#tst-002-fast-tests)).
+
+- A test is a test function, its parametrized cases together, and its lines are those its call
+  runs in `scripts/` (`--source`).
+- A line half the tests run is the harness's, not the test's. A test that started a process is
+  left out, as coverage does not see its child's lines.
+- A test that runs another's lines yet asserts another answer stays, marked
+  `@pytest.mark.distinct("<the answer it adds>")`, and is left out too.
+- Each class has its level in `se.toml` `[overhaul]`, `repeated_tests` and `subset_tests`:
+  `error`, built in, fails the run, naming the class and the remedy; `warn` names it and passes,
+  while the existing cases are pruned. There is no baseline.

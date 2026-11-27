@@ -141,3 +141,32 @@ func TestWhatComesBackMakesARetroDueAndItsStartResetsIt(t *testing.T) {
 		t.Fatalf("a failure 14 days on: %+v, and wants it weighed 5 and a retro due by days", got)
 	}
 }
+
+// A partial landing, a work issue labelled escalated whose pull request merged
+// into the base, counts as a landing, never a failure; an escalated issue with
+// no landing is a failure; and an overhaul's start resets the retro count, as
+// retro.py retro_countdown (SE#2006).
+func TestAPartialLandingIsALandingAndAnOverhaulResetsTheCount(t *testing.T) {
+	snap := func(n int, d map[string]any) github.Snapshot {
+		d["number"] = float64(n)
+		return github.Snapshot{Repo: "alice/demo", Number: n, Data: d}
+	}
+	escalated := []any{"work", "escalated"}
+	issues := map[string]github.Snapshot{
+		"alice.demo.1": snap(1, map[string]any{"title": "docs/retro-1", "state": "closed", "created_at": "2026-11-01T00:00:00Z", "closed_at": "2026-11-01T01:00:00Z"}),
+		"alice.demo.2": snap(2, map[string]any{"title": "feat/a", "state": "open", "updated_at": "2026-11-03T00:00:00Z", "labels": escalated}),
+		"alice.demo.3": snap(3, map[string]any{"title": "feat/b", "state": "open", "updated_at": "2026-11-03T00:00:00Z", "labels": escalated}),
+	}
+	pulls := map[string]github.Snapshot{
+		"alice.demo.12": snap(12, map[string]any{"body": "Refs #2", "state": "closed", "merged_at": "2026-11-02T00:00:00Z", "base": map[string]any{"ref": "main"}}),
+	}
+	in := retrodue.In{Issues: issues, Pulls: pulls, DueAfter: 20, FailureWeight: 5, Base: "main", Tracker: "alice/demo"}
+	now := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	if got := retrodue.Count(in, now); got.Landed != 1 || got.Failed != 1 || got.Count != 6 || got.Retro != 1 {
+		t.Fatalf("the partial landing and the escalation: %+v, and wants 1 landed, 1 failed, 6 since retro #1", got)
+	}
+	issues["alice.demo.4"] = snap(4, map[string]any{"title": "overhaul-20261102", "state": "open", "created_at": "2026-11-03T12:00:00Z"})
+	if got := retrodue.Count(in, now); got.Count != 0 || got.Retro != 4 {
+		t.Fatalf("after the overhaul started: %+v, and wants the count reset at overhaul #4", got)
+	}
+}

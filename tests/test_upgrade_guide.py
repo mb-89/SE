@@ -53,6 +53,7 @@ def titles(found):
     return [s.title for s in found]
 
 
+@pytest.mark.distinct("asserts the sections between versions")
 def test_the_sections_between_two_versions_are_the_named_ones_oldest_first():
     found = upgrade_guide.sections(GUIDE, "se", (5, 134, 2), (12, 0, 1))
     assert titles(found) == ["SE 6", "SE 7", "SE 12"]
@@ -97,7 +98,6 @@ def test_a_breaking_release_without_its_section_is_refused(tmp_path):
 @pytest.mark.parametrize("text", ["6", "6.1", "v6.1.2"])
 def test_versions_parse_with_or_without_minor_and_patch(text):
     assert upgrade_guide.parse(text)[0] == 6
-
 
 
 def test_ses_own_guide_has_a_section_for_every_major_from_6_to_the_current_one():

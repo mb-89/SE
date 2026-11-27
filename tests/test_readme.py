@@ -34,6 +34,8 @@ Tool makes a hard job one command. It is for people who do the job by hand today
 
 def test_a_one_page_readme_with_its_command_first_passes() -> None:
     assert readme.findings(GOOD) == []
+    # A comment in the block is no second command.
+    assert readme.findings(GOOD.replace(f"{COMMAND}\n", f"# get, install, run\n{COMMAND}\n")) == []
 
 
 def test_a_readme_over_sixty_lines_fails() -> None:
@@ -57,10 +59,6 @@ def test_a_readme_over_3500_characters_fails_headings_included() -> None:
 def test_the_one_command_must_open_the_readme(text: str) -> None:
     assert "no code block of one command within its first 10 lines: open with the one command that " \
            "gets, installs and runs the showcase" in readme.findings(text)
-
-
-def test_a_comment_in_the_block_is_no_second_command() -> None:
-    assert readme.findings(GOOD.replace(f"{COMMAND}\n", f"# get, install, run\n{COMMAND}\n")) == []
 
 
 def test_the_documentation_link_must_open_the_readme_too() -> None:

@@ -54,8 +54,7 @@ KERN_PLACE = pytest.mark.spawns("shell: scripts/bootstrap.sh's kern_place reads 
 # A fake uv: `python find` fails until `python install` ran; the core switch's read
 # (se_modules.py hooks-core) runs the real script with this interpreter; SE's start prints a greeting unless
 # `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
-# `refresh-moves` exists, else has nothing to move, and is logged apart; its hooks at start say
-# nothing, as where they are in place; its components at start print `components-say` where it
+# `refresh-moves` exists, else has nothing to move, and is logged apart; its components at start print `components-say` where it
 # exists and stop the start where `components-stop` does; every other call is logged.
 FAKE_UV = """#!/bin/sh
 case "$*" in *"se_start.py "*" start-refresh"*)
@@ -65,7 +64,6 @@ case "$*" in *"se_start.py "*" start-refresh"*)
 esac
 echo "uv $*" >> "$HOME/calls"
 case "$*" in *"se_modules.py --local "*" hooks-core"*) shift 5; exec "@PYTHON@" "$@" ;; esac
-case "$*" in *"se_start.py "*" start-hooks"*) exit 0 ;; esac
 case "$*" in *"se_start.py "*" start-components"*)
   [ -f "$HOME/components-say" ] && cat "$HOME/components-say"
   [ -f "$HOME/components-stop" ] && exit 1; exit 0 ;;
@@ -324,9 +322,13 @@ def test_the_hook_sets_the_projects_commit_identity_at_start(machine):
 def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payload(machine, host):
     """A fresh clone has no core.hooksPath until setup.sh runs: the session's start sets it, under
     Claude's payload (its project variable) and Copilot's two shapes (the payload's cwd), through
-    se_start.py start-hooks, which leaves a set one alone (tests/test_se_start.py)."""
+    the se binary's start-hooks once the kern step put it in place, which leaves a set one alone
+    (components/start)."""
     home, project, base = machine
     path = fake_bin(base)
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
     if host == "claude":
         result = run(home, path, project, "--hook", stdin=START)
     elif host == "copilot camelCase":
@@ -337,13 +339,28 @@ def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payl
         result = copilot_start(home, path, base, PASCAL_START % sh(project))
     assert result.returncode == 0, result.stdout + result.stderr
     hooks = [line for line in calls(home) if " start-hooks" in line]
-    assert hooks == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py "
-                     f"--root {sh(project)} start-hooks"]
-    assert calls(home).index(hooks[0]) < next(
-        index for index, line in enumerate(calls(home)) if "se_start.py" in line and " status " in line)
+    assert hooks == [f"hooks start-hooks --se {sh(SCRIPT.parent.parent)} --root {sh(project)}"]
+    log = calls(home)
+    assert log.index(f"kern start --root {sh(project)} --home {SE_ROOT}") < log.index(hooks[0]) < next(
+        index for index, line in enumerate(log) if "se_start.py" in line and " status " in line)
     (home / "calls").unlink()
     assert run(home, path, project).returncode == 0  # outside a session's start: setup.sh's
     assert not any("start-hooks" in line for line in calls(home))
+
+
+@HOOK_STEPS
+def test_the_hook_names_the_hooks_it_could_not_set_where_the_binary_is_not_in_place(machine):
+    """Where the kern step could not put the se binary in place, the hooks step sets nothing and
+    says so in one line, naming the next start and setup.sh; the start goes on."""
+    home, project, base = machine
+    path = fake_bin(base)
+    uv_in_place(home)
+    result = run(home, path, project, "--hook", stdin=START, SE_HOOK_CORE="off")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not any(" start-hooks" in line for line in calls(home))
+    note = (f"se bootstrap: core.hooksPath of {sh(project)} not set at this start: the se binary {sh(kern_bin(home))} "
+            f"is not in place yet; the next start sets it, or run: sh {sh(SCRIPT.parent)}/setup.sh {sh(project)}")
+    assert f"--note {note}" in greeting_call(home)
 
 
 @HOOK_STEPS
@@ -378,8 +395,11 @@ PLATFORM = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}.get(plat
     "x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "")
 # The release's archive for this platform: Windows' is a zip of se.exe (kern/tools/release).
 ASSET = f"{NAME}-{APP_VERSION}-{PLATFORM}.{'zip' if WINDOWS else 'tar.gz'}"
-# A fake kern: logs each call with its stdin; `start` fails while $HOME/kern-fails exists.
+# A fake kern: logs each call with its stdin; `start` fails while $HOME/kern-fails exists. Its
+# `start-hooks`, the start's hooks step (components/start), is logged as `hooks <its arguments>`
+# and says nothing, as where the hooks are in place.
 FAKE_KERN = """#!/bin/sh
+case "$1" in start-hooks) echo "hooks $*" >> "$HOME/calls"; exit 0 ;; esac
 input=""
 [ "$1" = hook ] && input=" <<$(cat)"
 echo "kern $*$input" >> "$HOME/calls"
@@ -526,7 +546,7 @@ def start_steps(home: Path) -> dict[str, bool]:
     return {"refresh": (home / "refreshes").exists(),
             "modules": any(" start-components" in line for line in log),
             "identity": any("work_tickets.py" in line and " identity " in line for line in log),
-            "hooks": any(" start-hooks" in line for line in log),
+            "hooks": any(" start-hooks" in line or "core.hooksPath of " in line for line in log),
             "file gate": any("se_templates.py gate --runtime " in line for line in log)}
 
 
@@ -954,7 +974,10 @@ def test_hook_core_off_starts_no_core_and_says_so(machine, variables, text, note
     result = run(home, path, project, "--hook", stdin=START, CLAUDE_ENV_FILE=sh(env_file), **variables)
     assert (result.returncode, result.stdout) == (0, '{"greeting": 1}\n'), result.stderr
     assert not core_started(home)
-    assert not any("app-binary" in line or line.startswith("curl") for line in calls(home))
+    # The hooks step alone reads which binary is SE's and runs its start-hooks; no core starts.
+    assert sum("app-binary" in line for line in calls(home)) == 1
+    assert not any(line.startswith("curl") for line in calls(home))
+    assert any(line.startswith("hooks start-hooks ") for line in calls(home))
     assert not (runtime / "kern.path").exists() and not (runtime / "kern-session-start.json").exists()
     assert f"{sh(home)}/.se/bin" not in env_file.read_text(encoding="utf-8")
     greeting = greeting_call(home)
