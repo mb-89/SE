@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1234,7 +1235,7 @@ SETUPS = ["sh"] + (["powershell"] if os.name == "nt" else [])
 
 
 @pytest.fixture
-def se_bin(se_binary: Path) -> Path:
+def se_bin(se_binary: Path, repo: Path) -> Iterator[Path]:
     """The se binary built from components/ (tests/conftest.py `se_binary`) in place where setup
     finds it, the test's own ~/.se/bin, under the name and version se_modules.py app-binary
     answers for SE's checkout; setup.sh and setup.ps1 name the checkout's own hooks through its
@@ -1244,7 +1245,12 @@ def se_bin(se_binary: Path) -> Path:
               / f"{release['binary']}-{release['version']}{'.exe' if os.name == 'nt' else ''}")
     placed.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(se_binary, placed)
-    return placed
+    runme = SE_ROOT / ".se" / ".runtime" / "runme-se"
+    before = runme.read_bytes() if runme.exists() else None
+    yield placed
+    # Setup found the binary in place: it never ran bootstrap.sh --binary, which would write RUNME's
+    # record into SE's checkout (tests/test_docs.py holds that file unchanged).
+    assert (runme.read_bytes() if runme.exists() else None) == before, "setup placed the se binary itself"
 
 
 def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.CompletedProcess[str]:
