@@ -101,6 +101,8 @@ def clock_assertions(source: str) -> list[int]:
     """The lines of `source` whose `assert` holds a duration measured on the real clock."""
     tree = ast.parse(source)
     calls = clock_calls(tree)
+    if not calls:  # no reading of the clock, so no duration
+        return []
     clocks: set[str] = set()
     while True:  # a function that returns a single reading, or a reading of such a function
         fresh = set()
