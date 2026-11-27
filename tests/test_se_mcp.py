@@ -71,9 +71,11 @@ LAUNCHERS = [pytest.param("bash", marks=needs_bash),
              pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="no PowerShell here"))]
 
 
-@pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 answer MCP themselves where the binary is missing; that "
-                    "door is shell, run only as a process")
+@pytest.mark.parametrize("kind", [
+    pytest.param("bash", marks=(needs_bash, pytest.mark.spawns("entry: scripts/se_mcp.sh"))),
+    pytest.param("powershell", marks=(pytest.mark.skipif(POWERSHELL is None, reason="no PowerShell here"),
+                                     pytest.mark.spawns("entry: scripts/se_mcp.ps1"))),
+])
 def test_without_the_binary_the_launcher_answers_at_once_naming_the_setup(tmp_path, kind):
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()
