@@ -90,7 +90,7 @@ def test_facts_refuse_a_question_that_names_no_fact(checkout, capsys, monkeypatc
         ["doors", "voice", "empty"], {"doors"},
         {"doors": ("doors", "gone"), "voice": " ", "empty": (), "stale": ("doors",)}) == [
         "QUESTION_FACTS['stale']: no question of overhaul-questions; remove the entry",
-        "QUESTION_FACTS['doors']: gone is no fact overhaul.py computes",
+        "QUESTION_FACTS['doors']: gone is no field of the overhaul's Facts",
         "QUESTION_FACTS['voice']: a judgment names its reason",
         "QUESTION_FACTS['empty']: names no fact",
     ]

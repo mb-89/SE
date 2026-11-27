@@ -68,7 +68,7 @@ def question_fact_problems(fields: list[str], known: set[str],
         elif not named:
             problems.append(f"QUESTION_FACTS[{name!r}]: names no fact")
         else:
-            problems += [f"QUESTION_FACTS[{name!r}]: {fact} is no fact overhaul.py computes"
+            problems += [f"QUESTION_FACTS[{name!r}]: {fact} is no field of the overhaul's Facts"
                          for fact in named if fact not in known]
     return problems
 
