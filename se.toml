@@ -201,3 +201,37 @@ skills = []
 # lines another test runs warn while each overhaul prunes them, file by file, the slowest first.
 [overhaul]
 subset_tests = "warn"
+
+# Why each tracked file over 1,000 lines needs more (hygiene.py's check long-files, rule book
+# des-007): its jobs and why they stay together, or where they go. A file does one job on one
+# abstraction level; past the bound the reason is asked for, not a cut enforced. Each overhaul
+# examines every one of them (templates/overhaul-questions.md).
+[long_files]
+"scripts/work_tickets.py" = "the work model's one command, nine jobs (tickets, issues, delivery, integration, the suite, upkeep, the GitHub core); its system jobs move to Go component by component (overhaul #1993 finding 9)"
+"scripts/templates.py" = "the Python template engine: parse, check, render, schema and its command line; the Go engine, components/template, takes its jobs over (overhaul #1993 finding 20)"
+"scripts/retro.py" = "the retro's collect, check, deck, file and due; collect and file move out (overhaul #1993 finding 17)"
+"scripts/se_start.py" = "the start's status, refresh, core start and hooks; its steps move to the se binary one by one (overhaul #1993 finding 16)"
+"scripts/se_templates.py" = "SE's filing checks on the Python template engine; it goes with that engine (overhaul #1993 finding 20)"
+"scripts/se_modules.py" = "module sync, pins and locks, one job; it moves to Go with the start (overhaul #1993 finding 16)"
+"scripts/overhaul.py" = "the overhaul's read, facts, deck and file; facts stay Python, as they read the syntax tree, and the test and file scrutiny's facts are scripts/overhaul_scrutiny.py's; the rest moves with the retro's (overhaul #1993 finding 17)"
+"scripts/public_check.py" = "the public check's term lists, scan, range gates and allow list; the next overhaul examines it first, to move its term loading, git range reading and allow-list parsing where they belong (overhaul #1993 finding 15)"
+"scripts/se_components.py" = "places SE's commands as kern components, one job; it shrinks as the commands move to Go"
+"components/template/load.go" = "one job, loading a template document, in the Go engine; split if it grows"
+"components/template/check.go" = "one job, checking a template document, in the Go engine; split if it grows"
+"src/skills/work-model/SKILL.md" = "the shared rules of every role, loaded whole; its split is overhaul #1993 finding 17"
+"src/skills/work-model/references/rules.md" = "the rule book, one reference read on demand by its anchors, one rule per section"
+"docs/retro-*.md" = "a dated record of one retro's findings, kept whole (the owner's decision, 2026-11-24)"
+"tests/test_work_ticket_issues.py" = "the issue tests of scripts/work_tickets.py; they split with it"
+"tests/test_work_tickets.py" = "the tests of scripts/work_tickets.py's other jobs; they split with it"
+"tests/test_templates.py" = "the tests of scripts/templates.py; they go with the Python engine"
+"tests/test_se_templates.py" = "the tests of scripts/se_templates.py; they go with the Python engine"
+"tests/template_cases.py" = "the cases both template engines answer, one set so Python and Go cannot drift; it goes with the Python engine"
+"tests/test_retro.py" = "the tests of scripts/retro.py; they split with it"
+"tests/test_public_check.py" = "the tests of scripts/public_check.py and of the check workflow's jobs; they split with it"
+"tests/test_se_start.py" = "the tests of scripts/se_start.py; they move with its steps"
+"tests/test_se_modules.py" = "the tests of scripts/se_modules.py; they move with it"
+"tests/fake_git.py" = "git's one fake, every git command SE runs answered in memory, held to real git by tests/test_git_door.py"
+"tests/test_git_door.py" = "the git door's contract suite: each command the fake answers, held to real git"
+"tests/test_agent_definitions.py" = "the checks of every role's agent definition and its links; split by role if it grows"
+"tests/test_bootstrap.py" = "the tests of scripts/bootstrap.sh's start in an empty home, one job; split by step if it grows"
+"tests/test_releases.py" = "the tests of the landing's release kind and of work_tickets.py release; they split with work_tickets.py"

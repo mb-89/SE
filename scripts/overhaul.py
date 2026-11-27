@@ -35,10 +35,16 @@ prints its comment and close as a plan, as the work model's "Without gh" says fo
 `overhaul.py facts [--json] [--repo PATH]` lists what an overhaul's pruning judgment starts from:
 the functions and classes in `scripts/` that nothing but tests reaches, duplicate and
 near-duplicate blocks, the lines of code and of tests per script, the longest functions, files and
-parameter lists, the files untouched longest, and each script command that no authored text names.
+parameter lists, the files untouched longest, each script command that no authored text names,
+every file over hygiene.py's LONG_LINES with its stated reason and its lines per job (`file_jobs`),
+then the scrutiny facts of `scripts/overhaul_scrutiny.py`: the doors with their reaches outside,
+the tests' spawn marks by kind and the slowest test files; each question of
+`templates/overhaul-questions.md` names the facts it is answered from, or why judgment alone
+answers it (its QUESTION_FACTS), and `facts` fails where one names neither.
 Where `overhaul.py coverage [--repo PATH] [--source DIR]` kept a run of the suite under coverage,
 per test, in COVERAGE_DIR, it also lists the tests that add no line of their own, slowest first
-(`repeats`): those that run the same lines as another, and those whose lines another test runs.
+(`repeats`): those that run the same lines as another, and those whose lines another test runs;
+and the lines that 200 tests or more run, by file (overhaul_scrutiny's BROAD).
 `coverage` fails where a class with cases is at level `error` ([overhaul] repeated_tests,
 subset_tests in se.toml; REPEAT_LEVELS), naming the remedy: prune the test, or mark one that
 asserts another answer `@pytest.mark.distinct("<the answer>")`.
@@ -63,10 +69,12 @@ import tokenize
 import tomllib
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 
 import git_door
+import overhaul_scrutiny as scrutiny
 import se_script
 # A duplicate block is at least WINDOW lines alike, MEANINGFUL of them with MIN_CHARS characters
 # or more; a block written more than COMMON times is an idiom, not a copy. Near-duplicate
@@ -98,6 +106,7 @@ DISTINCT = "distinct"
 # The two classes of the rule, each with its built-in level; `[overhaul]` in se.toml sets them.
 LEVELS = ("error", "warn")
 REPEAT_LEVELS = {"repeated_tests": "error", "subset_tests": "warn"}
+NOT_MEASURED = f"not measured: run `overhaul.py coverage`, which keeps its run in {COVERAGE_DIR.as_posix()}"
 
 
 @dataclass
@@ -113,6 +122,14 @@ class Checkout:
     # The coverage measurement where one is kept (`measurement`), and the rule's levels.
     coverage: Measurement | None = None
     levels: dict[str, str] = field(default_factory=lambda: dict(REPEAT_LEVELS))
+    # The files over hygiene.py's LONG_LINES by path, with their text and se.toml's reasons; each
+    # script's commands by component (components/*/component.toml); the doors with their reaches
+    # outside; CI's seconds per test file.
+    long: dict[str, str] = field(default_factory=dict)
+    reasons: dict[str, str] = field(default_factory=dict)
+    components: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    doors: list[dict] = field(default_factory=list)
+    file_seconds: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -125,6 +142,8 @@ class Measurement:
     seconds: dict[str, float]
     spawning: set[str]
     skipped: set[str] = field(default_factory=set)
+    # Coverage's file ids by path, where its data file names them.
+    files: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -140,6 +159,14 @@ class Facts:
     unnamed: list[str] = field(default_factory=list)
     # Tests that repeat another's lines (`repeats`); None where no measurement is kept.
     repeats: dict | None = None
+    # Every file over hygiene.py's LONG_LINES (`file_jobs`), the doors (`door_rows`), the spawn
+    # marks by kind, the slowest test files, and the lines BROAD tests or more run
+    # by file (`broad_lines`; None where no measurement is kept).
+    long_file_jobs: list[dict] = field(default_factory=list)
+    doors: list[dict] = field(default_factory=list)
+    spawn_marks: list[dict] = field(default_factory=list)
+    slowest_files: list[dict] = field(default_factory=list)
+    broad_lines: list[dict] | None = None
 
 
 # Reading the checkout
@@ -188,6 +215,12 @@ def read(root: Path) -> Checkout:
         return (root / path).read_text(encoding="utf-8", errors="replace")
 
     present = [path for path in tracked if (root / path).is_file()]
+    hygiene = sibling("hygiene")
+    try:
+        long = hygiene.long_files(root)
+        reasons = hygiene.long_reasons(root)
+    except hygiene.HygieneError as error:
+        raise ValueError(str(error)) from error
     return Checkout(
         scripts={path: text(path) for path in present
                  if path.startswith("scripts/") and path.count("/") == 1 and path.endswith(".py")},
@@ -199,6 +232,11 @@ def read(root: Path) -> Checkout:
         changed=last_changes(root),
         coverage=measurement(root / COVERAGE_DIR),
         levels=repeat_levels(root),
+        long={path: text(path) for path in long},
+        reasons=reasons,
+        components=scrutiny.components_of(root),
+        doors=scrutiny.door_rows(root),
+        file_seconds=scrutiny.file_seconds(root),
     )
 
 
@@ -580,12 +618,34 @@ def junit_cases(report: Path) -> tuple[dict[str, float], set[str], set[str]]:
     return dict(seconds), spawning, set(seconds) - ran
 
 
+def coverage_files(data: Path) -> dict[int, str]:
+    """Coverage's file ids by the path each names, relative where it is under the data file's
+    checkout; none where the data file has no such table."""
+    import sqlite3
+    database = sqlite3.connect(f"file:{data}?mode=ro", uri=True)
+    try:
+        rows = database.execute("select id, path from file").fetchall()
+    except sqlite3.Error:
+        return {}
+    finally:
+        database.close()
+    root = data.resolve().parents[len(COVERAGE_DIR.parts)]
+    found = {}
+    for file_id, path in rows:
+        try:
+            found[file_id] = Path(path).resolve().relative_to(root).as_posix()
+        except ValueError:
+            found[file_id] = Path(path).as_posix()
+    return found
+
+
 def measurement(folder: Path) -> Measurement | None:
     """The coverage run `overhaul.py coverage` kept in `folder`, or None where none is kept."""
     if not (folder / COVERAGE_DATA).is_file() or not (folder / JUNIT).is_file():
         return None
     seconds, spawning, skipped = junit_cases(folder / JUNIT)
-    return Measurement(call_lines(folder / COVERAGE_DATA), seconds, spawning, skipped)
+    return Measurement(call_lines(folder / COVERAGE_DATA), seconds, spawning, skipped,
+                       coverage_files(folder / COVERAGE_DATA))
 
 
 def repeat_levels(root: Path) -> dict[str, str]:
@@ -674,6 +734,53 @@ def repeat_counts(found: dict) -> dict[str, int]:
             "subset_tests": len(found["subsets"])}
 
 
+# The files over the bound, the doors, the spawn marks and the slowest files
+
+
+def script_jobs(path: str, tree: ast.Module, components: dict[str, list[str]]) -> list[dict]:
+    """A script's top-level lines per job: per component where its commands attach as more than
+    one, else per command, each the lines of the functions and classes only that job's handlers
+    reach; then those more than one job reaches (`shared`) and those none reaches (`no command`)."""
+    every, _ = definitions(path, tree)
+    tops = [definition for definition in every if definition.kind != "method"]
+    roots = scrutiny.command_roots(tree)
+    jobs = (components if len(components) > 1
+            else {command: [command] for commands in components.values() for command in commands})
+    if not jobs:
+        jobs = {command: [command] for command in roots}
+    owners: dict[int, set[str]] = defaultdict(set)
+    for job, commands in jobs.items():
+        for reached in reached_from(every, set().union(*(roots.get(command, set()) for command in commands))):
+            owners[reached].add(job)
+    lines: Counter = Counter()
+    for definition in tops:
+        held = owners.get(id(definition), set())
+        key = next(iter(held)) if len(held) == 1 else "shared" if held else "no command"
+        lines[key] += definition.node.end_lineno - definition.node.lineno + 1
+    rows = [{"job": job, "commands": len(jobs[job]), "lines": lines[job]} for job in jobs]
+    rows += [{"job": key, "commands": 0, "lines": lines[key]} for key in ("shared", "no command") if lines[key]]
+    return rows
+
+
+def file_jobs(checkout: Checkout, trees: dict[str, ast.Module]) -> list[dict]:
+    """Every file over hygiene.py's LONG_LINES, the longest first, with its line count, the reason
+    se.toml `[long_files]` states, its commands by component and its lines per job: a script's by
+    what its commands reach, a Markdown file's by section."""
+    long_reason = sibling("hygiene").long_reason
+    rows = []
+    for path, text in checkout.long.items():
+        components = checkout.components.get(path, {})
+        if path in trees:
+            jobs = script_jobs(path, trees[path], components)
+        elif path.endswith(".md"):
+            jobs = scrutiny.markdown_jobs(text, TOP)
+        else:
+            jobs = []
+        rows.append({"at": path, "lines": len(text.splitlines()), "reason": long_reason(path, checkout.reasons),
+                     "components": components, "jobs": jobs})
+    return sorted(rows, key=lambda row: (-row["lines"], row["at"]))
+
+
 def find(checkout: Checkout) -> Facts:
     trees = {}
     for path, source in checkout.scripts.items():
@@ -703,13 +810,24 @@ def find(checkout: Checkout) -> Facts:
         unnamed=unnamed_commands(checkout.scripts, trees, checkout.authored),
         repeats=(None if checkout.coverage is None else
                  {**repeats(checkout.coverage, marked_distinct(checkout.tests)), "levels": checkout.levels}),
+        long_file_jobs=file_jobs(checkout, trees),
+        doors=checkout.doors,
+        spawn_marks=scrutiny.spawn_marks(checkout.tests),
+        slowest_files=scrutiny.slowest_files(checkout.file_seconds, TOP),
+        broad_lines=(None if checkout.coverage is None else
+                     scrutiny.broad_lines(checkout.coverage.lines, checkout.coverage.files, TOP)),
     )
 
 
 # The report
 
 
-def render(facts: Facts) -> str:
+def question_fields() -> list[tuple[str, str]]:
+    """The overhaul's own questions as SE's checkout holds them: each field with its heading."""
+    return [(item.name, item.heading) for item in sibling("templates").own(scrutiny.QUESTIONS_TEMPLATE).fields]
+
+
+def render(facts: Facts, questions: list[tuple[str, str]] | None = None) -> str:
     out = ["# Overhaul facts", ""]
 
     def section(title: str, rows: list[str], empty: str = "none") -> None:
@@ -735,14 +853,19 @@ def render(facts: Facts) -> str:
     section("Untouched longest", [f"{item['at']}: {item['last']}" for item in facts.untouched])
     section("Commands no authored text names", facts.unnamed)
     out.extend(repeat_sections(facts.repeats))
+    out.extend(scrutiny.sections(
+        facts.long_file_jobs, facts.doors, facts.spawn_marks, facts.slowest_files, facts.broad_lines,
+        sibling("hygiene").LONG_LINES, NOT_MEASURED))
+    if questions:
+        section("The questions and the facts behind them",
+                [f"{heading} {scrutiny.facts_behind(name)}" for name, heading in questions])
     return "\n".join(out).rstrip() + "\n"
 
 
 def repeat_sections(found: dict | None) -> list[str]:
     """The sections of the tests that repeat another's lines, or how to measure them."""
     if found is None:
-        return ["## Tests that repeat another's lines", "",
-                f"not measured: run `overhaul.py coverage`, which keeps its run in {COVERAGE_DIR.as_posix()}", ""]
+        return ["## Tests that repeat another's lines", "", NOT_MEASURED, ""]
     counts = repeat_counts(found)
     out = [f"## Tests that run the same lines as another ({counts['repeated_tests']} in {len(found['groups'])} groups, "
            f"{sum(group['seconds'] for group in found['groups']):.1f} s; "
@@ -1138,7 +1261,7 @@ def draft(found: Gathered) -> str:
                              f"{item['kind'] or ''} | {issues} | {item['state']} |")
         else:
             lines.append("None.")
-    facts = render(found.facts).split("\n", 1)[1]
+    facts = render(found.facts, question_fields()).split("\n", 1)[1]
     lines += ["", "## Pruning facts", ""]
     counted = (found.previous or {}).get("facts")
     if counted:
@@ -1469,10 +1592,16 @@ def run_read(args: argparse.Namespace) -> int:
 def run_facts(args: argparse.Namespace) -> int:
     try:
         facts = find(read(args.repo.resolve()))
+        questions = question_fields()
     except (OSError, ValueError) as error:
         print(f"error: overhaul.py facts: {error}", file=sys.stderr)
         return 2
-    print(json.dumps(asdict(facts), indent=2) if args.json else render(facts),
+    if problems := scrutiny.question_fact_problems([name for name, _ in questions],
+                                                    {item.name for item in dataclass_fields(Facts)}):
+        for problem in problems:
+            print(f"error: overhaul.py facts: {problem}", file=sys.stderr)
+        return 2
+    print(json.dumps(asdict(facts), indent=2) if args.json else render(facts, questions),
           end="" if not args.json else "\n")
     return 0
 

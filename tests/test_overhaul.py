@@ -13,6 +13,7 @@ import pytest
 
 import git_door
 import overhaul
+import overhaul_scrutiny
 import retro
 import retro_deck
 import templates
@@ -238,7 +239,9 @@ def measured(root: Path, run: dict) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(folder / overhaul.COVERAGE_DATA)
     database.executescript("create table context (id integer primary key, context text);"
-                           "create table line_bits (file_id integer, context_id integer, numbits blob);")
+                           "create table line_bits (file_id integer, context_id integer, numbits blob);"
+                           "create table file (id integer primary key, path text);")
+    database.execute("insert into file values (1, ?)", (str(root / "scripts" / "app.py"),))
     cases = []
     for number, (node, (lines, seconds, spawns)) in enumerate(run.items(), start=1):
         for phase, phase_lines in (("setup", {7}), ("run", lines)):
@@ -255,7 +258,7 @@ def measured(root: Path, run: dict) -> None:
                                          encoding="utf-8")
 
 
-def test_facts_name_the_tests_that_repeat_anothers_lines_with_their_seconds(checkout, capsys):
+def test_facts_name_the_tests_that_repeat_anothers_lines_with_their_seconds(checkout, capsys, monkeypatch):
     assert overhaul.main(["facts", "--repo", str(checkout)]) == 0
     assert "not measured: run `overhaul.py coverage`" in capsys.readouterr().out
     marked = MARKED.split("\n", 2)[2]
@@ -272,6 +275,9 @@ def test_facts_name_the_tests_that_repeat_anothers_lines_with_their_seconds(chec
         {"test": "tests/test_app.py::test_again", "within": "tests/test_app.py::test_wider", "seconds": 0.25},
         {"test": "tests/test_app.py::test_only_five", "within": "tests/test_app.py::test_case", "seconds": 0.125}]
     assert found["levels"] == {"repeated_tests": "error", "subset_tests": "warn"}
+    tests = len({overhaul.test_of(node) for node in RUN})
+    monkeypatch.setattr(overhaul_scrutiny, "BROAD", tests)
+    assert facts(checkout, capsys)["broad_lines"] == [{"file": "scripts/app.py", "lines": 1, "most": tests}]
     assert overhaul.main(["facts", "--repo", str(checkout)]) == 0
     report = capsys.readouterr().out
     assert ("## Tests that run the same lines as another (1 in 1 groups, 0.5 s; repeated_tests: error)\n\n"
