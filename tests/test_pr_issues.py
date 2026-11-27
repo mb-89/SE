@@ -108,6 +108,45 @@ def test_a_pull_request_naming_no_issue_is_refused_with_the_remedy(
     assert github.requests == [f"/repos/{REPO}/issues/900"]  # read once as it is now, not found
 
 
+def authorized_fix_body() -> str:
+    report = (
+        "<!-- se:field-report -->\n"
+        "**Work issue:** none, authorized fix  **Branch:** `fix/example`  "
+        "**Result:** complete\n"
+        "<!-- se:field-report:end -->"
+    )
+    return f"Work issue: none, authorized fix\n\n{report}"
+
+
+def test_an_explicit_authorized_fix_passes_without_reading_an_issue(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code, out = run(github, tmp_path, authorized_fix_body(), capsys=capsys)
+    assert code == 0, out
+    assert "Work issue: none, authorized fix" in out
+    assert github.requests == []
+
+
+def test_an_authorized_fix_declaration_does_not_hide_an_issue_reference(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    body = authorized_fix_body() + "\nRefs #8\n"
+    assert not pr_issues.authorized_fix(body, REPO)
+    report = tmp_path / "report.md"
+    report.write_text(body, encoding="utf-8")
+
+    code = pr_issues.main(["--work-issue", str(report), "--repository", REPO], {})
+
+    assert code == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_a_landing_passes_when_its_work_pull_request_declares_an_authorized_fix(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    github.pull(20, authorized_fix_body())
+    code, out = run(github, tmp_path, f"Lands {PULL_URL}/20", capsys=capsys)
+    assert code == 0, out
+    assert "Work issue: none, authorized fix" in out
+
+
 def test_a_retro_report_pull_request_needs_its_open_retro_issue(
         github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     github.issue(50, "retro")
@@ -236,6 +275,18 @@ def test_the_check_job_runs_the_rule_on_pull_requests_with_the_actions_token() -
     assert "issues: read" in text
 
 
+def test_the_field_report_job_skips_issue_body_fetch_for_the_authorized_fix_sentinel() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    start = text.index("- name: The pull request's field report follows the template")
+    end = text.index("\n      - name:", start + 1)
+    step = text[start:end]
+    authorized = step.index('if [ "$issue" = none ]; then')
+    issue_fetch = step.index('gh api "repos/$REPOSITORY/issues/$issue"')
+    issue_argument = step.index('issue_args=(--issue-body "$RUNNER_TEMP/issue-body.md")')
+
+    assert authorized < issue_fetch < issue_argument
+
+
 @pytest.mark.parametrize("first_line, number", [
     ("Refs #627", 627),
     (f"Refs {ISSUE_URL}/627", 627),
@@ -253,6 +304,14 @@ def test_one_parser_names_the_work_issue_for_both_checks(first_line: str, number
     body.write_text(f"{first_line}\n\n<!-- se:field-report -->\n", encoding="utf-8")
     code = pr_issues.main(["--work-issue", str(body), "--repository", REPO], {})
     assert (code, capsys.readouterr().out.strip()) == ((0, str(number)) if number else (1, ""))
+
+
+def test_field_report_step_returns_the_authorized_fix_sentinel(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    body = tmp_path / "body.md"
+    body.write_text(authorized_fix_body(), encoding="utf-8")
+    code = pr_issues.main(["--work-issue", str(body), "--repository", REPO], {})
+    assert (code, capsys.readouterr().out.strip()) == (0, "none")
 
 
 @pytest.mark.parametrize("body, passed", [

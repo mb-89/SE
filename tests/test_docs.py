@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import base64
 import gzip
+import importlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -22,7 +24,7 @@ NOTES = "src/skills/work-model/references/"
 BOOK = ROOT / NOTES / "rules.md"
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
-from fake_processes import Answer  # noqa: E402
+from fake_processes import Answer, Invocation, completed, run_main  # noqa: E402
 # Every build syncs the obs module into the checkout; the fixture `obs` (conftest.py) prepares it first,
 # once at a time.
 
@@ -38,9 +40,67 @@ def built_in_process(capsys: pytest.CaptureFixture, *arguments: str) -> subproce
     return subprocess.CompletedProcess(["build_docs.py", *arguments], code, captured.out, captured.err)
 
 
-# The obs build of a vault: obs's lints are obs's, so only the real obs proves a build fails on one.
-REAL_OBS = ("tool: obs-document, in obs's own Python environment, builds the vault and owns the lint, so "
-            "only the real obs proves the build fails on it; it runs only as a process")
+@pytest.fixture
+def obs_in_process(obs, monkeypatch, fake_processes, fake_git_door, request):
+    """Run obs and its adapter in-process, with their installed packages and the git door's fake."""
+    def is_obs(name):
+        return name in ("obs", "obs_html") or name.startswith(("obs.", "obs_html."))
+
+    previous = {name: sys.modules.pop(name) for name in list(sys.modules) if is_obs(name)}
+
+    def restore_modules():
+        for name in list(sys.modules):
+            if is_obs(name):
+                del sys.modules[name]
+        sys.modules.update(previous)
+
+    request.addfinalizer(restore_modules)
+    adapter = ROOT / ".se" / "obs-local" / "components" / "obs-html"
+    for folder in (adapter, obs):
+        venv = folder / ".venv"
+        site = sysconfig.get_path("purelib", vars={"base": str(venv), "platbase": str(venv)})
+        monkeypatch.syspath_prepend(site)
+        monkeypatch.syspath_prepend(str(folder / "src"))
+    import git_door
+    adapter_module = importlib.import_module("obs.adapter")
+    document_module = importlib.import_module("obs.document")
+    html_module = importlib.import_module("obs_html.cli")
+    render_module = importlib.import_module("obs_html.render")
+
+    def git_output(directory, *arguments):
+        result = git_door.run(*arguments, cwd=directory)
+        return result.stdout.strip() or None if result.returncode == 0 else None
+
+    def html(command, cwd, capture):
+        assert command[:3] == ["uv", "run", "obs-html"]
+        call = Invocation(["obs-html", *command[3:]], {
+            "cwd": cwd, "env": dict(os.environ), "capture_output": capture, "text": capture})
+        return completed(call, run_main(html_module.main, call))
+
+    def uv(call):
+        assert call.words[:7] == ["uv", "run", "--quiet", "--project", str(obs), "python", "-c"]
+        assert len(call.words) == 8
+        if call.words[-1] == "import sys; print(sys.executable)":
+            return Answer(0, "obs-python\n")
+        def execute(_arguments):
+            try:
+                exec(call.words[-1], {"__name__": "__main__"})
+            except adapter_module.AdapterError as error:
+                print(f"obs.adapter.AdapterError: {error}", file=sys.stderr)
+                return 1
+            return 0
+        return run_main(execute, call)
+
+    def document(call):
+        return run_main(lambda arguments: document_module.main(arguments[2:]), call)
+
+    monkeypatch.setattr(render_module, "_git_output", git_output)
+    monkeypatch.setattr(document_module, "run_adapter", html)
+    monkeypatch.setattr(build_docs, "_PYTHON", {})
+    monkeypatch.setattr(build_docs, "_READY", {})
+    fake_processes.on("uv", uv)
+    fake_processes.on("obs-python", document)
+    return obs
 
 
 # The fake se's help, as the build's command-line chapter must show it; no tracked file outside
@@ -219,8 +279,7 @@ def test_no_note_of_the_copy_asks_for_a_verdict():
     assert build_docs.without_verdict(unchanged) == unchanged
 
 
-@pytest.mark.spawns(REAL_OBS)
-def test_a_missing_note_fails_the_build(tmp_path, obs, capsys):
+def test_a_missing_note_fails_the_build(tmp_path, obs_in_process, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "chapter.md").write_text("# Chapter\n\nSee [[no-such-note]].\n", encoding="utf-8")
@@ -231,8 +290,7 @@ def test_a_missing_note_fails_the_build(tmp_path, obs, capsys):
     assert "no-such-note" in result.stderr
 
 
-@pytest.mark.spawns(REAL_OBS)
-def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs, capsys):
+def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs_in_process, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     long_paragraph = " ".join(["word"] * 100)  # six lines at 80 characters, over obs's default of five
@@ -389,22 +447,18 @@ def test_no_script_passes_adapter_config():
     assert passing == []
 
 
-@pytest.mark.spawns("tool: obs's own finder, asked through uv in obs's environment, finds the installed "
-                    "obs-html; it runs only as a process")
-def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs):
-    adapter, refusal = build_docs.installed_adapter(obs)
+def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs_in_process):
+    adapter, refusal = build_docs.installed_adapter(obs_in_process)
     assert refusal == ""
     assert adapter["name"] == build_docs.ADAPTER == "obs-html" and adapter["serve"]
-    assert Path(adapter["folder"]) != obs  # obs 10 holds no adapter in its own tree
+    assert Path(adapter["folder"]) != obs_in_process  # obs 10 holds no adapter in its own tree
 
 
-@pytest.mark.spawns("tool: obs's own finder, asked through uv in obs's environment, refuses a component "
-                    "of another kind; the refusal is obs's, and it runs only as a process")
-def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, monkeypatch):
+def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs_in_process, tmp_path, monkeypatch):
     monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
     (tmp_path / "components.json").write_text(json.dumps({"components": [
         {"name": "obs-html", "kind": "style", "version": "1.0.0", "commit": "0" * 40}]}), encoding="utf-8")
-    adapter, refusal = build_docs.installed_adapter(obs)
+    adapter, refusal = build_docs.installed_adapter(obs_in_process)
     assert adapter is None
     assert "--adapter: obs-html" in refusal and "not an adapter" in refusal
 
@@ -483,11 +537,68 @@ def test_a_missing_default_style_fails_naming_its_install_before_any_build(obs, 
     assert calls == ["read", "install", "read", "read", "install", "read"]  # no build ran
 
 
+REFUSAL = ("obs-components: warning: remote origin: host github.com cannot list owner alice: HTTP 403: "
+           "API rate limit exceeded; reading its own repository only")
+
+
+def test_an_install_github_com_refused_is_tried_again_then_names_the_http_answer(obs, monkeypatch,
+                                                                                 fake_processes, capsys):
+    # #2000: a 403 while obs reads the components' release marks, then success, installs obs-html; a
+    # lasting 403 fails naming the HTTP answer, not only "no repository offers this component".
+    answers = [Answer(1, "", f"{REFUSAL}\nobs-components: install: obs-html: no repository offers this component\n"),
+               Answer(0, "installed obs-html 0.6.1 (adapter)\n")]
+    asked: list[list[str]] = []
+
+    def uv(call):
+        asked.append(call.words)
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    waits: list[float] = []
+    monkeypatch.setattr(build_docs, "sleep", waits.append)
+    fake_processes.on("uv", uv)
+    assert build_docs.install_adapter(obs) == (0, "installed obs-html 0.6.1 (adapter)")
+    assert len(asked) == 2 and waits == [build_docs.INSTALL_WAITS[0]]
+    assert "github.com refused it (" in capsys.readouterr().err
+    answers[:] = [Answer(1, "", f"{REFUSAL}\nobs-components: install: obs-html: no repository offers this component\n")]
+    waits.clear()
+    code, said = build_docs.install_adapter(obs)
+    assert code == 1 and "no repository offers this component; github.com refused it: " in said
+    assert "HTTP 403: API rate limit exceeded" in said
+    assert waits == list(build_docs.INSTALL_WAITS)
+
+
+def test_an_install_that_fails_for_another_reason_is_not_tried_again(obs, monkeypatch, fake_processes):
+    asked: list[list[str]] = []
+    fake_processes.on("uv", lambda call: asked.append(call.words) or Answer(1, "", "no repository offers it\n"))
+    monkeypatch.setattr(build_docs, "sleep", lambda seconds: pytest.fail("no wait"))
+    assert build_docs.install_adapter(obs) == (1, "no repository offers it")
+    assert len(asked) == 1
+
+
 def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():
     output = ("obs-html: Warning: obs-html (src/obs_html/render.py): generation provenance: cannot resolve the "
               "generator commit, target version, or target commit. Build from a Git checkout\n"
               "obs-document: warning: one.md:3: long paragraph\nbuilt one.html\n")
     assert build_docs.obs_warnings(output) == ["obs-document: warning: one.md:3: long paragraph"]
+
+
+def test_obs_child_environment_ignores_callers_project_environment(monkeypatch):
+    caller_settings = ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
+                       "UV_PROJECT", "UV_WORKING_DIR", "UV_ISOLATED", "UV_ENV_FILE")
+    for name in caller_settings:
+        monkeypatch.setenv(name, "caller")
+    monkeypatch.setenv("UV_NATIVE_TLS", "1")
+    monkeypatch.setenv("UV_SYSTEM_CERTS", "1")
+    monkeypatch.setenv("UV_LOCKED", "1")
+
+    environment = build_docs.child_environment()
+
+    for name in caller_settings:
+        assert name not in environment
+        assert os.environ[name] == "caller"
+    assert environment["UV_SYSTEM_CERTS"] == "1"
+    assert "UV_NATIVE_TLS" not in environment
+    assert environment["UV_LOCKED"] == "1"
 
 
 def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(tmp_path, monkeypatch, fake_processes):
@@ -511,11 +622,12 @@ def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(tmp_pat
 
 def test_every_obs_build_runs_through_the_one_adapter():
     """deck.py and timeline.py build through build_docs's ADAPTER, installed where missing, and no
-    script names an adapter of its own."""
+    script names an adapter of its own: each asks ready_adapter, or builds through obs_document,
+    which asks it."""
     for script in ("deck.py", "timeline.py", "build_docs.py"):
         text = (ROOT / "scripts" / script).read_text(encoding="utf-8")
         assert '"--adapter", "' not in text, script
-        assert "ready_adapter(" in text, script
+        assert "ready_adapter(" in text or "obs_document(" in text, script
 
 
 def test_setup_and_ci_install_html_before_they_build():
@@ -526,3 +638,18 @@ def test_setup_and_ci_install_html_before_they_build():
         assert text.index("build_docs.py --install-html") < text.index(build_step), workflow
     for setup in ("setup.sh", "setup.ps1"):
         assert "build_docs.py --install-html" in (ROOT / "scripts" / setup).read_text(encoding="utf-8")
+
+
+def test_ci_installs_obs_html_with_the_runners_token_into_the_suites_obs_folder():
+    """#2000: an install with the runner's token is listed within its own rate limit, and check's install
+    lands in the obs folder the suite reads (tests/conftest.py OBS_LOCAL_FOLDER), so the suite's obs
+    fixture finds it installed and reads no github.com to install it again."""
+    workflows = ROOT / ".github" / "workflows"
+    for workflow in ("docs.yml", "check.yml"):
+        text = (workflows / workflow).read_text(encoding="utf-8")
+        step = re.search(r"(?ms)- name: Install obs's adapter component obs-html\n(.*?)\n(?=      - )", text)[1]
+        assert "GH_TOKEN: ${{ github.token }}" in step, workflow
+    check = (workflows / "check.yml").read_text(encoding="utf-8")
+    step = re.search(r"(?ms)- name: Install obs's adapter component obs-html\n(.*?)\n(?=      - )", check)[1]
+    assert "OBS_LOCAL_FOLDER: ${{ github.workspace }}/.se/obs-local" in step
+    assert os.environ["OBS_LOCAL_FOLDER"] == str(ROOT / ".se" / "obs-local")

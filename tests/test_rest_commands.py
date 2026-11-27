@@ -76,8 +76,9 @@ def test_file_route_and_ready_with_its_claims_run_over_rest(worktree, rest_gh, m
     assert capsys.readouterr().out == f"Filed work issue https://{HOST}/{SLUG}/issues/6\n"
     assert rest_gh.label_names(SLUG, 6) == ["work", "ready", "repo:repo"]
     work = work_tickets.template_of("work")  # a body filed as given carries its template's marker
+    inputs = work_tickets.sibling("templates").input_line(work)
     assert rest_gh.issues[SLUG][6]["body"] == (f"{work_tickets.FLEET_MARKER}\n{work.marker_line}\n"
-                                               "## Goal\n\nA filed package.\n")
+                                               f"{inputs}\n## Goal\n\nA filed package.\n")
 
     assert run(worktree, "route", "1", "--title", "fix/routed-20261106", "--routing-file", str(routing)) == 0
     routed = rest_gh.issues[SLUG][1]
@@ -179,7 +180,7 @@ def test_integrate_lands_and_closes_the_work_issue_over_rest(
     branch = "feature/worker"
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", branch, str(worker))
-    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8", newline="\n")
     git_ok("-C", str(worker), "add", "worker.txt")
     git_ok("-C", str(worker), "commit", "-q", "-m", "Add the worker file")
     git_ok("-C", str(worker), "push", "-q", "origin", branch)

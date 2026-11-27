@@ -63,11 +63,11 @@ gated push and the pull request, the Stop hook's check and the claim's beat.
 |---|---|---|
 | `work_tickets.py beat` | `work_tickets.py beat --worktree WORKTREE` | the worker's claim heartbeat, which the plugin's hook (scripts/se_hook.sh) starts on a tool call once the beat record intake wrote is due: it sets the work issue's beat line to now while the issue is open and in progress, and the next is due half the claim timeout later ([workers] claim_timeout_hours); before that it reads and writes nothing |
 | `work_tickets.py deliver` | `work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]` | sync, check the field report, push, and create or update the pull request whose description carries it; files no issue. It first refuses an se outside the project's se pin ([components.se]), naming both versions, and never exits non-zero without a message |
-| `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, laid out as .github/pull_request_template.md lays it out |
+| `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--authorized-fix] [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, laid out as .github/pull_request_template.md lays it out |
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
-| `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers |
-| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (docs/fleet.md "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] [--issue-body ISSUE_BODY] [--issue-url ISSUE_URL] --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers; without a work issue, the report states `Work issue: none, authorized fix` |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for, or its checked field report declares an authorized fix without one (docs/fleet.md "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
 | `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. It also refuses, in any checkout, while a changed file a template claims breaks it (se_templates.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
 | `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin, then move the se clone (.se/modules/se) of a repository that pins se to the pin the merged se.lock names |
 | `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (docs/fleet.md "Late push") |
@@ -88,7 +88,7 @@ settings checks and the generated docs.
 | `work_tickets.py file-seconds` | `work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifact FILE]` | write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more |
 | `work_tickets.py fleet-check` | `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]` | list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files |
 | `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layout (se_plugin.py build), the interface templates' generated schemas (templates.py interfaces) and the command reference with its declarations (docs); a second run writes nothing |
-| `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
+| `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue when one is named. An authorized fix without one still gets the same checks and closes only its pull request. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (docs/running.md "Metrics"): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
 | `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
 | `work_tickets.py queue` | `work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues. Without gh it syncs the checkout and prints its reads as a plan for the session's GitHub tools |
@@ -121,16 +121,17 @@ and the report it files as one comment.
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, deck builds
-its one report, a deck, from the judged draft, file checks the judged draft and moves the retro
-issue to report state, outcome records each finding's disposition, and due says whether a retro or
-an overhaul is due or open.
+its one report, a deck, from the judged draft, bless opens filing and closes the retro in one call,
+file checks the judged draft and moves the retro issue to report state, outcome records each
+finding's disposition, and due says whether a retro or an overhaul is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `retro.py bless` | `retro.py bless [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | bless an answered draft, open the filing gate and close the retro in one call |
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
-| `retro.py deck` | `retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
+| `retro.py deck` | `retro.py deck [--draft FILE] --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
-| `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
+| `retro.py file` | `retro.py file [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
 | `retro.py outcome` | `retro.py outcome (--issue ISSUE \| --declined REASON \| --merged-into FINDING) [--worktree WORKTREE] [--repo REPO] RETRO:FINDING` | record a finding's issue, declined or merged outcome on its retro |
 
 #### Overhaul
@@ -150,13 +151,12 @@ report, and facts lists a checkout's pruning facts.
 #### Render
 
 `components/render`: The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py
-builds a deck of decisions, serves it and reads its answers.
+builds a deck of decisions and reads its answers.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `deck.py answers` | `deck.py answers [--record FOLDER] [--destination DESTINATION] answers` | print what the answers ask the agent to act on |
 | `deck.py build` | `deck.py build --destination DESTINATION [--host {claude-app,claude-code,copilot,local}] folder` | build a folder of decision notes into one deck |
-| `deck.py serve` | `deck.py serve [--wait] [--timeout S] artifact` | serve a deck locally and print the answers it is sent |
 | `timeline.py` | `timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT] [--config CONFIG]` | Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first. |
 
 #### Scaffold
@@ -316,7 +316,13 @@ Steps 3 to 5 it builds from the same record:
   `open`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
-commands read from the committed draft. `--json` prints the block's data alone.
+commands read from the filed retro. `--json` prints the block's data alone.
+
+The draft has one known path on the machine, `~/.se/retros/<owner>/<repo>/retro-<n>.md`.
+`collect` writes it there unless `--out` names another file (`--out -` prints it).
+
+`deck`, `bless` and `file` read it from there unless `--draft` names another, so no session searches
+another's folders. Where none is there, they name that path and `retro.py collect` for the retro.
 
 `--sessions <file>` adds the cloud sessions' costs: the file holds each session `list_sessions`
 lists, with its `list_events` result events (kinds `["result"]`) as `"events"`. Each session is
@@ -328,10 +334,16 @@ Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](../src/skills/work-model/SKILL.md#without-gh)).
 
-`retro.py file` files a judged retro, the draft committed as the retro doc on the integration
-branch. The judge completes the collected facts, timeline, matrix, answers to the standing
-questions, and classes and homes; the decisions step leaves findings open for the deck. The judge
-also fills the draft's block:
+`retro.py bless` is the one call after the person checks and blesses the prefilled report:
+it records approval, immediately opens this retro's filing gate, posts the report and closes the
+issue, then reads both back. It needs no landed document, update, build or second session.
+
+Network calls share one minute; repeating the same command resumes partial writes.
+Finding outcomes stay independently tracked and never hold this gate.
+
+`retro.py file` retains the report-state path for a judged retro. The judge completes the collected facts,
+timeline, matrix, answers to the standing questions, and classes and homes; the decisions step
+leaves findings open for the deck. The judge also fills the draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
@@ -346,27 +358,39 @@ a finding on the rule book, or on a check that recurred, that is not controversi
 went well.
 
 It refuses, too, a draft whose steps break the retro template, a step or a standing question left
-open among them, and a draft the integration branch does not hold as it stands: land it there
-first.
+open among them. Collected drafts record their template version and effective rules; checks use
+those inputs even after the template changes. `templates.py renew retro --body-file <draft>`
+explicitly adopts the newest inputs; reopening starts a new input phase.
+
+A draft predating that record whose steps differ only in their headings (the
+six-step template's field feedback first) is read in the current form: its field feedback moves
+under Collect as a `### Field feedback` section, and `file` and `deck` say so.
 
 It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report proper as the retro issue's closing comment and closes the issue.
+it posts the report proper on the retro issue and leaves it open for the findings' outcomes.
 
-The report opens with `<!-- se:retro-report -->` and is a document of the retro template. It links
-the committed retro doc for the collected facts and block, and carries the drafted timeline,
-standing-question matrix and answers, and the judged classes, strongest home first, each with its
-cause, fix, home and state against the tree, and its findings, numbered, each with its home and its
-kind:
+The report opens with `<!-- se:retro-report -->` and is a document of the retro template. Where
+the integration branch holds the draft as it stands, it links that retro doc for the collected
+facts and block. A retro doc (`docs/retro-*.md`) lands without a work issue, a field report or
+runners.
+
+Otherwise it carries the drafted facts itself, and the block follows in its own comments, each a
+`<!-- se:retro-block <k>/<n> -->` line over a fenced piece of the block's JSON, so filing needs no
+landing.
+
+It carries the drafted timeline, standing-question matrix and answers, and the judged classes,
+strongest home first, each with its cause, fix, home and state against the tree, and its findings,
+numbered, each with its home and its kind:
 
 - `work`: SE bundles these into as few work issues as the work needs, each naming
   `retro #<n> finding <k>` for every finding it takes;
 - `decision`: for the owner's decision list.
 
 It then records what went well and leaves each finding open until its outcome is recorded. The
-standalone deck carries the person's decisions. The facts and the block stay in the retro doc,
-which the report links at the integration branch's commit (the message `templates/retro-doc.md`),
-where the next collect and overhaul read them.
+standalone deck carries the person's decisions. The next collect and overhaul read the facts and
+the block from the retro doc the report links (the message `templates/retro-doc.md`), or from the
+block comments where it links none.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
 without its markers, so no part is checked as a whole report: `file` checked the whole first.
@@ -381,14 +405,23 @@ The deck is a document of the retro-deck template
 ([templates/retro-deck.md](../templates/retro-deck.md)), built with obs
 (`scripts/retro_deck.py`):
 
-- a title page with exactly two lines: `<repository name>: Retro #<n>` and `Retro report`;
+- a title page with exactly two lines: `<repository name>: Retro #<n>` and its document type,
+  `Retro report`, rendered once (a retro has no subtitle);
 - every step the retro ran, one chapter each, each thing once: what was collected, the table of
   what happened (its one table, the chapters of the window), the standing questions with their one
   matrix and the field reports' answers, and the classes with their causes, fixes and
   homes, each naming its findings;
-- then, on the last pages, one decision chapter per finding, each opening with its current
-  situation and asking the person for a bless: their go for a `work` finding, their decision for
-  a `decision` finding; finally, `Anything else?` with `Nothing else` as its only default answer.
+- then, on the last pages, one decision chapter per finding, each a note of the decision template
+  ([templates/decision.md](../templates/decision.md)): its current situation, the problem (its
+  class, cause and home), what others do (the finding's `others`), then the `pugh` fence with the
+  change against keeping what we have;
+- each asks the person for a bless: their go for a `work` finding, their decision for a
+  `decision` finding;
+- finally, `Anything else?`, a decision note too, with `Nothing else` as its only selectable
+  default and its comment for anything else.
+
+A decision chapter that is no decision note is refused, naming it: the deck's shape comes from
+the templates, never from the judge.
 
 A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
 
@@ -446,7 +479,8 @@ collect` does.
 - `looked_at`, every part answered (`outside`, `consistency`, `rules`, `retro`, `speed`,
   `mechanize`, `removal`; "nothing to change" is an answer);
 - `findings`, each with `title` (five words or more), `body`, `rule` (a rule's id, or `new`),
-  `place` (the file it changes), `controversial` with its `why`, and optionally `sources`;
+  `place` (the file it changes), `controversial` with its `why`, optionally `sources`, and for
+  the deck `others` (how two or more outside tools or conventions solve the same problem);
 - `went_well`.
 
 It refuses, writing nothing, an incomplete judgment: a rule without a verdict, an empty

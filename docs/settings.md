@@ -17,13 +17,16 @@ version = "1.4.2"
 ```
 
 `identity = "Name <email>"` is the project's commit identity. `work_tickets.py sync` writes it into
-the checkout's git config (`user.name`, `user.email`), so every later commit and merge there
-carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
+the checkout's git config (`user.name`, `user.email`, and `commit.gpgsign false`), so every later
+commit and merge there carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
 identity as it is.
 
 The plugin's session start (`scripts/bootstrap.sh --hook`) and the setup scripts write it the same
 way (`work_tickets.py identity`), so a fresh clone's first commit never carries the host's default
 identity.
+
+Signing is off in the checkout, as a host that turns `commit.gpgsign` on globally signs with its own
+key, which matches no project identity and so verifies nothing.
 
 `work_tickets.py push` refuses without one, and `work_tickets.py release` commits its release
 with that identity explicitly, whatever the checkout's configuration or environment says. The
@@ -204,6 +207,9 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
    `Integrate <branch>` merge with its `Release-kind` trailer, which records its kind and moves no
    version), runs the complete suite, the output regeneration, the project checks and the public
    check.
+   - Where `gh` is signed in and a run of `check` on the work pull request's head passed exactly
+     the merge's tree, the suite does not run again: that run is its verdict, recorded and named
+     ([One suite run per tree](tests.md#one-suite-run-per-tree)).
    - A fast-forward landing then writes the one landing commit: that tree on the base, as the
      project identity in both roles, with the merge's title and message less each line that
      holds an e-mail address (a `commit_trailer` co-author line, say).
@@ -231,8 +237,9 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
    conclusion other than success merges nothing and escalates. A repository whose host has no
    runners accepts the integrator's status instead ([Landing without CI](tests.md#landing-without-ci)).
-   - The run it waits for and names may be an edit's, which took its suite's result from an
-     earlier run of exactly that tree and names it ([Edits reuse the suite](tests.md#edits-reuse-the-suite)).
+   - The run it waits for and names may have taken its suite's result from an earlier run of
+     exactly that tree, the work pull request's among them, and names it
+     ([One suite run per tree](tests.md#one-suite-run-per-tree)).
 4. It lands that head, once origin's integration branch is still the tested base; where it
    moved while it waited, it merges nothing: integrate again.
    - A squash landing squash-merges at exactly that head with the merge's message as the commit
@@ -402,6 +409,9 @@ one landing: `integrate <pull request> --landing fast-forward` (or `--landing sq
 - A refused fast-forward push leaves the integration branch, the landing pull request and its
   branch as they were and falls back to nothing; integrating again without `--landing` lands as
   `se.toml` says. The integrate comment names the mode a flagged run used.
+- A fast-forward refused while a required check still runs on the landing commit (GH013 "is in
+  progress", such as a second `check` run) is no ruleset problem: `integrate` waits for that check
+  and pushes once more, or, with no check to wait on, retries as for a transient refusal.
 - The identity gate and a public mirror's guard keep reading `se.toml`: a flagged landing commit
   is `mb <mb>` either way, which both pass.
 

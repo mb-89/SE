@@ -11,7 +11,8 @@ from: every rule of the rule book with what checks it (a test, a check, or judgm
 closed since the last closed overhaul, from their reports' blocks; the previous overhaul's findings
 and the state of the issues that name them (`overhaul #<n> finding <k>`), too early to score where
 one is still open and the countdown (`[overhaul]` `due_after` or `days`) is on; the pruning facts;
-then the questions the judge answers, the standing questions (templates/standing-questions.md,
+then the questions the judge answers (its GitHub reads, as `retro.py collect`'s, scale with the
+window: the runs by their labels, then the closed issues updated since the last overhaul closed), the standing questions (templates/standing-questions.md,
 which the retro and every field report ask too) and the overhaul's own
 (templates/overhaul-questions.md), each a section of the overhaul template (TEMPLATE_NAME,
 QUESTION_FIELDS). It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
@@ -581,7 +582,7 @@ STRAYS = ("none", "slightly", "far")
 # answer): the outside world, the consistency of the whole, the rule book itself, the retros'
 # effect, speed, what to mechanize and what to remove.
 LOOKED_AT = ("outside", "consistency", "rules", "retro", "speed", "mechanize", "removal")
-FINDING_FIELDS = ("title", "body", "rule", "place", "controversial", "why", "sources")
+FINDING_FIELDS = ("title", "body", "rule", "place", "controversial", "why", "sources", "others")
 # A finding's `rule` for a rule the book lacks: a rule change.
 NEW_RULE = "new"
 WORK, DECISION = "work", "decision"
@@ -786,6 +787,14 @@ class Gathered:
                 "findings": [], "went_well": []}
 
 
+def last_overhaul(issues: list, number: int):
+    """The last closed overhaul among `issues` other than `number`; None where none closed."""
+    when = sibling("retro").when
+    overhauls = [issue for issue in issues if is_overhaul(issue) and issue.number != number
+                 and when(issue.closed_at)]
+    return max(overhauls, key=lambda issue: when(issue.closed_at), default=None)
+
+
 def gather(number: int, door, rules: list, facts: Facts, now: datetime,
            show, too_early: bool = False) -> Gathered | None:
     """Overhaul `number`'s draft data, read through `door`, each retro's block from the retro doc
@@ -793,7 +802,18 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
     to score set apart with `too_early` (the countdown on, `countdown_on`); None while the door is
     still missing answers (`door.missing`)."""
     retro = sibling("retro")
-    closed = [retro.issue_of(item) for item in door.closed_issues()]
+    if retro.windowed(door):
+        # Server-side: the overhauls and retros by their labels, then only the closed issues
+        # updated since the last overhaul closed, as retro.read_window reads a retro's window.
+        def start(runs: list) -> str | None:
+            last = last_overhaul(runs, number)
+            return last.closed_at if last else None
+
+        closed = retro.closed_since(door, (OVERHAUL_LABEL, retro.RETRO_LABEL), start)
+        if closed is None:
+            return None
+    else:
+        closed = [retro.issue_of(item) for item in door.closed_issues()]
     opened = [retro.issue_of(item) for item in door.open_issues()]
     if door.missing:
         return None
@@ -804,9 +824,7 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
             issue.body = issue.body or read.body
     if door.missing:
         return None
-    overhauls = [issue for issue in closed if is_overhaul(issue) and issue.number != number
-                 and retro.when(issue.closed_at)]
-    last = max(overhauls, key=lambda issue: retro.when(issue.closed_at), default=None)
+    last = last_overhaul(closed, number)
     since = retro.when(last.closed_at) if last else None
     window = sorted((issue for issue in closed if retro.is_retro(issue)
                      and retro.when(issue.closed_at)
@@ -923,7 +941,9 @@ def draft(found: Gathered) -> str:
               f"({', '.join(LOOKED_AT)}; \"nothing to change\" is an answer); `findings`, each "
               f"with `title` (five words or more, the fix), `body`, `rule` (a rule's id, or "
               f"`{NEW_RULE}` for one the book lacks), `place` (the file it changes), "
-              "`controversial` with its `why`, and optionally `sources`; `went_well`. A finding "
+              "`controversial` with its `why`, optionally `sources`, and for the deck `others` "
+              "(how two or more outside tools or conventions solve the same problem, its decision "
+              "note's What others do); `went_well`. A finding "
               "that changes a rule (its place is the rule book, or its rule is "
               f"`{NEW_RULE}`) is always a decision for the person. This part is not posted.",
               JUDGE_END, "", BLOCK_MARKER, review.fenced(block, "yaml")]
@@ -1116,16 +1136,19 @@ def report(text: str, block: dict, number: int) -> str:
 
 
 def finding_chapter(item: dict) -> tuple[str, str]:
-    """A judged finding as its decision chapter of the deck: it opens with the finding itself, then its
-    rule, its place and its sources, and last what the person decides (their go for `work`, their
-    decision for `decision`, every rule change among them)."""
+    """A judged finding as its decision chapter of the deck, a note of the decision template that
+    retro_deck.finding_note writes: the finding is its current situation, its rule, place and sources
+    the problem, the judge's `others` what others do, and the change against keeping what we have the
+    options; a decision's `why` (every rule change among them) is the change's cost."""
     change = " (a rule change)" if item["rule_change"] else ""
-    lines = [item["body"].strip(), "", f"Rule: {item['rule'].strip()}{change}.", "",
-             f"Place: `{item['place'].strip()}`."]
-    lines += [f"- Source: {source.strip()}" for source in item.get("sources") or []]
-    lines += ["", f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
-              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
-    return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
+    sources = "; ".join(source.strip() for source in item.get("sources") or [])
+    problem = (f"Rule: {item['rule'].strip()}{change}. Place: `{item['place'].strip()}`."
+               + (f" Sources: {sources}." if sources else ""))
+    what = ("It is the person's decision." if item["kind"] == DECISION
+            else "Bless sends it to SE, which bundles it into a work issue.")
+    losses = item["why"].strip() if item["kind"] == DECISION else "One work issue."
+    return f"{item['finding']}. {item['title'].strip()}", sibling("retro_deck").finding_note(
+        item, problem, what, losses)
 
 
 def deck_parts(text: str, block: dict, number: int
@@ -1150,10 +1173,10 @@ def run_deck(args: argparse.Namespace) -> int:
     work_tickets = sibling("work_tickets")
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
-    steps, decisions = deck_parts(text, block, args.overhaul)
     deck = sibling("retro_deck")
     count = len(block["findings"])
     try:
+        steps, decisions = deck_parts(text, block, args.overhaul)
         written = deck.text(f"Overhaul #{args.overhaul}",
                             f"{len(block['verdicts'])} rules judged: {count} finding{'' if count == 1 else 's'}",
                             steps, decisions)

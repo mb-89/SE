@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import locale
 import os
 import subprocess
 import sys
@@ -90,6 +91,9 @@ class Invocation:
     def arguments(self) -> list[str]:
         """The arguments after the script, or after the program where it runs none."""
         words = self.words
+        hook = se_hook(self)
+        if hook is not None:
+            return words[next(index for index, word in enumerate(words) if Path(word) == hook) + 1:]
         script = self.script
         if script is None:
             return words[1:]
@@ -123,9 +127,16 @@ def program_name(invocation: Invocation) -> str:
         return invocation.script.name
     words = invocation.words
     name = Path(words[0]).name if words else ""
+    return executable_name(name)
+
+
+def executable_name(name: str) -> str:
+    """Match executable suffixes without depending on their case or on the spelling used by a handler."""
     for suffix in (".exe", ".cmd", ".bat"):
-        name = name.removesuffix(suffix)
-    return name
+        if name.lower().endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    return os.path.normcase(name)
 
 
 _lock = threading.RLock()
@@ -136,8 +147,8 @@ def child_context(invocation: Invocation) -> Iterator[tuple[io.TextIOWrapper, io
     """This process set up as the child would be: its working directory, environment, standard
     input and output, restored after. One at a time, as they are the process's."""
     with _lock:
-        out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", write_through=True)
-        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", write_through=True)
+        out = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", newline="\n", write_through=True)
+        err = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="replace", newline="\n", write_through=True)
         given = io.TextIOWrapper(io.BytesIO(invocation.stdin), encoding="utf-8", errors="replace")
         saved = (os.getcwd(), dict(os.environ), sys.stdin, sys.stdout, sys.stderr, list(sys.argv))
         try:
@@ -304,7 +315,7 @@ class FakeProcesses:
     def handler(self, invocation: Invocation) -> Handler | None:
         name = program_name(invocation)
         for program, handler in self.handlers:
-            if (program == name) if isinstance(program, str) else program(invocation):
+            if (executable_name(program) == name) if isinstance(program, str) else program(invocation):
                 return handler
         hook = se_hook(invocation) if self.hooks else None
         if hook is not None:
@@ -321,6 +332,13 @@ class FakeProcesses:
             pytest.fail(f"{OWNER}: no fake answers `{invocation.text()}`; give the test's fake_processes a handler "
                         f"(fake_processes.on({program_name(invocation)!r}, <handler>)), as {OWNER} says", pytrace=False)
         return completed(invocation, answer_of(handler(invocation)))
+
+    def start(self, argv: list[str], options: dict[str, Any]) -> subprocess.Popen:
+        invocation = Invocation(argv, dict(options))
+        self.calls.append(invocation)
+        pytest.fail(f"{OWNER}: the fake starts no program that runs beside the test (`{invocation.text()}`, "
+                    "process_door.start); fake the caller's own seam, or mark the test as the door's contract "
+                    "or the script's entry-point test", pytrace=False)
 
 
 def answer_of(value) -> Answer:
@@ -341,11 +359,20 @@ def completed(invocation: Invocation, answer: Answer) -> subprocess.CompletedPro
     options = invocation.options
     text = bool(options.get("text") or options.get("universal_newlines") or options.get("encoding")
                 or options.get("errors"))
-    encoding = options.get("encoding") or "utf-8"
+    encoding = options.get("encoding") or locale.getpreferredencoding(False)
 
     def shaped(value: str | bytes) -> str | bytes:
-        data = value.encode("utf-8") if isinstance(value, str) else value
-        return data.decode(encoding, options.get("errors") or "strict").replace("\r\n", "\n") if text else data
+        if isinstance(value, bytes):
+            data = value
+        else:
+            output = value.replace("\r\n", "\n").replace("\r", "\n")
+            if os.linesep != "\n":
+                output = output.replace("\n", os.linesep)
+            data = output.encode(locale.getpreferredencoding(False))
+        if not text:
+            return data
+        decoded = data.decode(encoding, options.get("errors") or "strict")
+        return decoded.replace("\r\n", "\n").replace("\r", "\n")
 
     captured = options.get("capture_output")
     stdout = shaped(answer.stdout) if captured or options.get("stdout") == subprocess.PIPE else None

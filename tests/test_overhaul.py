@@ -14,6 +14,7 @@ import pytest
 import git_door
 import overhaul
 import retro
+import retro_deck
 import templates
 import fake_git
 import time_bound
@@ -356,6 +357,48 @@ def gathered(checkout: Path, given: dict[str, object] | None = None,
     return found
 
 
+class WindowDoor(FakeDoor):
+    """The same reads server-side (retro.WINDOW_READS), as GitHub answers them: the closed issues
+    by label, or updated (here: closed) since a time; records the issues it hands over."""
+
+    def __init__(self, given: dict[str, object]) -> None:
+        super().__init__(given)
+        self.handed: list[int] = []
+
+    def closed_issues_labelled(self, label):
+        return [item for item in self.given["issues.json"] if label in retro.label_names(item)]
+
+    def closed_issues_since(self, since):
+        found = [item for item in self.given["issues.json"]
+                 if since is None or retro.when(item["closed_at"]) >= retro.when(since)]
+        self.handed += [item["number"] for item in found]
+        return found
+
+    def pulls_until(self, stop):
+        raise AssertionError("an overhaul reads no pull requests")
+
+    def pull(self, number):
+        raise AssertionError("an overhaul reads no pull requests")
+
+
+def test_the_read_takes_only_the_closed_issues_since_the_last_overhaul(checkout):
+    """A door that reads server-side hands over the runs by their labels and then only the
+    closed issues since overhaul #40 closed, not #41 before it: the draft of the whole read. With
+    no labelled overhaul to start from, every closed issue is read, as nothing bounds the window."""
+    given = answers()
+    given["issues.json"][0]["labels"] = [{"name": "discovery"}]
+    rules, facts = overhaul.book_rules(ROOT), overhaul.find(overhaul.read(checkout))
+    door = WindowDoor(given)
+    found = overhaul.gather(THIS, door, rules, facts, NOW, show)
+    whole = overhaul.gather(THIS, FakeDoor(given), rules, facts, NOW, show)
+    assert found is not None and whole is not None and found.data() == whole.data()
+    assert sorted(door.handed) == [40, 42, 43, 44, 46, 47] and "issues.json" not in door.reads
+
+    door = WindowDoor(answers())
+    assert overhaul.gather(THIS, door, rules, facts, NOW, show).data() == gathered(checkout).data()
+    assert sorted(door.handed) == [40, 41, 42, 43, 44, 46, 47]
+
+
 def test_the_draft_names_every_rule_with_what_checks_it(checkout):
     found = gathered(checkout)
     text = overhaul.draft(found)
@@ -503,8 +546,12 @@ def test_without_gh_read_prints_its_reads_round_by_round_and_takes_the_answers(
 
 def answered(text: str) -> str:
     """The draft `text` with every standing question and every question of the overhaul's own
-    answered: the first "The suite stays fast.", the rest None."""
-    text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
+    answered: the first "The suite stays fast.", each "None" does not answer "The tests.", the rest
+    None."""
+    open_ended = {item.name for item in retro.questions().fields if not item.none_ok}
+    text = re.sub(r"^(### [^\n]+\n\n)<!-- (\w+): [^\n]*-->$",
+                  lambda match: match[1] + ("The tests." if match[2] in open_ended else "None."),
+                  text, flags=re.MULTILINE)
     return text.replace("None.", "The suite stays fast.", 1)
 
 
@@ -519,12 +566,12 @@ def judged_draft(checkout: Path, **changes: object) -> str:
         "looked_at": {part: "Nothing to change." for part in overhaul.LOOKED_AT},
         "findings": [
             {"title": "Prune the three functions only tests reach", "body": "See the facts.",
-             "rule": "des-015", "place": "scripts/overhaul.py", "controversial": False},
+             "rule": "des-015", "place": "scripts/overhaul.py", "controversial": False, "others": "Gerrit and GitHub both gate a merge on its checks."},
             {"title": "Name the speed of the suite as a rule", "body": "The suite grows.",
-             "rule": "tst-002", "place": overhaul.BOOK.as_posix(), "controversial": False},
+             "rule": "tst-002", "place": overhaul.BOOK.as_posix(), "controversial": False, "others": "Gerrit and GitHub both gate a merge on its checks."},
             {"title": "Add a rule that every overhaul compares itself", "body": "None compares.",
              "rule": "new", "place": "src/agents/se.md", "controversial": False,
-             "sources": ["https://example.com/practice"]}],
+             "sources": ["https://example.com/practice"], "others": "Gerrit and GitHub both gate a merge on its checks."}],
         "went_well": ["The retros kept their blocks."]})
     data.update(changes)
     return text[:text.rfind(overhaul.BLOCK_MARKER)] + overhaul.BLOCK_MARKER + "\n```yaml\n" + \
@@ -621,10 +668,13 @@ def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_p
     assert [heading for heading, _ in decisions] == [
         "1. Prune the three functions only tests reach", "2. Name the speed of the suite as a rule",
         "3. Add a rule that every overhaul compares itself"]
-    assert decisions[1][1].startswith("The suite grows.")
-    assert decisions[1][1].endswith("**Decision, for your decision**: it changes a rule")
+    for _, note in decisions:
+        assert re.findall(r"^## (.+)$", note, re.MULTILINE) == ["Current situation", "The problem", "What others do"]
+        assert "\n```pugh\ncriteria:\n" in note and retro_deck.decision_problems(note) == []
+    assert decisions[1][1].startswith("## Current situation\n\nThe suite grows.")
+    assert "It is the person's decision." in decisions[1][1]
     assert "Rule: tst-002 (a rule change)." in decisions[1][1]
-    assert "- Source: https://example.com/practice" in decisions[2][1]
+    assert "Sources: https://example.com/practice." in decisions[2][1]
     draft = tmp_path / "draft.md"
     draft.write_text(text, encoding="utf-8")
     assert overhaul.main(["deck", str(THIS), "--draft", str(draft), "--destination", str(tmp_path / "o.html"),

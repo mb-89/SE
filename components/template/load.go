@@ -171,7 +171,8 @@ func (t *Template) MarkerLine() string {
 
 // frontLines are what a file document's front matter records: derived_from and overlay.
 func (t *Template) frontLines() [][2]string {
-	return [][2]string{{"derived_from", fmt.Sprintf(`{template: %s, version: "%s"}`, t.Name, t.Version)}, {"overlay", t.Digest}}
+	return [][2]string{{"derived_from", fmt.Sprintf(`{template: %s, version: "%s"}`, t.Name, t.Version)}, {"overlay", t.Digest},
+		{"se_inputs_" + t.Name, inputPayload(t)}}
 }
 
 // writesFile reports whether its document is a file, its head the front matter: a file.write
@@ -343,6 +344,12 @@ func Load(layers ...Layer) (Catalog, error) {
 		t.Repository, t.Digest = repositories[name], digests[name]
 	}
 	return nest(built, digests)
+}
+
+// normalizeNewlines matches Python's text-mode universal newline translation.
+func normalizeNewlines(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
 }
 
 func digestOf(name string, raw map[string]Object, texts, overlays map[string]string) string {

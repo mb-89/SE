@@ -116,7 +116,9 @@ None
 `
 }
 
-// questions is the standing questions answered "None.", one "###" section each.
+// questions is the standing questions answered, one "###" section each: "None." where a question
+// takes it, else one plain answer (templates/standing-questions.md 2.0.0 refuses "None." for its
+// tooling questions).
 func questions(t *testing.T) string {
 	t.Helper()
 	block, err := standingQuestions()
@@ -125,7 +127,11 @@ func questions(t *testing.T) string {
 	}
 	var b strings.Builder
 	for _, item := range block.Fields {
-		b.WriteString("### " + item.Heading + "\n\nNone.\n\n")
+		answer := "None."
+		if !item.NoneOK && item.Required {
+			answer = "The focused tests, about a minute, as the suite built first."
+		}
+		b.WriteString("### " + item.Heading + "\n\n" + answer + "\n\n")
 	}
 	return b.String()
 }

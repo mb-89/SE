@@ -90,6 +90,13 @@ def test_a_reusable_workflow_keeps_only_workflow_call() -> None:
         se_workflows.generate("on:\n  push:\njobs: {}\n", ".github/workflows/release.yml", PIN, PLACE)
 
 
+def test_generate_normalizes_windows_line_endings() -> None:
+    text = "name: x\non:\n  workflow_call:\njobs:\n  x:\n    runs-on: x\n"
+    path = ".github/workflows/release.yml"
+    assert se_workflows.generate(text.replace("\n", "\r\n"), path, PIN, PLACE) == \
+        se_workflows.generate(text, path, PIN, PLACE)
+
+
 def test_generate_refuses_a_file_se_does_not_ship_and_a_pin_that_is_no_commit() -> None:
     with pytest.raises(se_workflows.WorkflowError, match="ships no such file"):
         se_workflows.generate("on:\n  workflow_call:\n", ".github/workflows/check.yml", PIN, PLACE)

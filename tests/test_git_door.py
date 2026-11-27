@@ -364,7 +364,7 @@ def test_checkout_detach_and_reset_hard_move_head_and_the_files_to_a_commit(door
 def test_commit_all_takes_the_tracked_files_and_leaves_new_ones(door, tmp_path: Path) -> None:
     root = project(tmp_path)
     commit(root, {"a.txt": "a\n", "b.txt": "b\n"})
-    (root / "a.txt").write_text("a2\n", encoding="utf-8")
+    (root / "a.txt").write_text("a2\n", encoding="utf-8", newline="\n")
     (root / "b.txt").unlink()
     (root / "new.txt").write_text("new\n", encoding="utf-8")
     git(root, "commit", "-qam", "all")
@@ -412,7 +412,7 @@ def test_a_worktree_shares_the_branches_and_is_listed_until_it_is_removed(door, 
     worker = tmp_path / "worker"
     git(root, "worktree", "add", "-q", "-b", "worker", str(worker))
     assert (worker / ".git").is_file() and (worker / "a.txt").read_text(encoding="utf-8") == "a\n"
-    assert Path(git(worker, "rev-parse", "--show-toplevel")).resolve() == worker.resolve()
+    assert git(worker, "rev-parse", "--show-toplevel") == worker.resolve().as_posix()
     common = Path(git(worker, "rev-parse", "--git-common-dir"))
     assert (common if common.is_absolute() else worker / common).resolve() == (root / ".git").resolve()
     head = commit(worker, {"b.txt": "b\n"})

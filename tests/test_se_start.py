@@ -458,8 +458,19 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
     claude = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se")))
     copilot = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se"), "copilot"))
     context = claude["hookSpecificOutput"]["additionalContext"]
-    assert copilot == {"additionalContext": context.replace(", already shown to the person", "", 1)}
-    assert "SE's start report. As SE, open your first message" in copilot["additionalContext"]
+    assert copilot == {"additionalContext": context}
+
+
+@pytest.mark.parametrize("host", ["claude", "copilot"])
+def test_the_hand_over_asks_the_first_message_to_open_with_the_live_report_and_never_says_it_was_shown(host):
+    """In a Claude Code cloud session hook output reaches only the model: the hand-over never claims
+    the person saw the report, and asks for it live after every start, restart and compaction."""
+    data = json.loads(se_start.hook_output(["SE 1.2.0 started"], [], Path("/opt/se"), host))
+    context = _context(data)
+    assert "already shown" not in context and "shown to the person" not in context
+    assert ("open your first message after every start, restart and compaction with the live report: "
+            "run `uv run python /opt/se/scripts/se_start.py status --greeting`") in context
+    assert "never this copy or a report of an earlier start" in context
 
 
 def _agent_root(tmp_path: Path) -> Path:
@@ -572,13 +583,15 @@ def test_the_greeting_names_a_running_kern_under_its_first_line(setup, capsys, m
 
 
 @pytest.mark.parametrize(("args", "answer", "line", "stop"), [
-    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting", "/k the core is starting; see "),
+    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting",
+     f"{Path('/k')} the core is starting; see "),
     (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"},
      "kern 0.2.0: failed: kern start: boom", "kern start: boom"),
-    (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see ",
-     "/k the core is not running; see "),
+    (["--kern-bin", "/k"], {"state": "not running"},
+     "kern 0.2.0: failed: not running after its start; see ",
+     f"{Path('/k')} the core is not running; see "),
     (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see ",
-     "/k its status does not answer; see "),
+     f"{Path('/k')} its status does not answer; see "),
 ])
 def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys, monkeypatch, args, answer, line,
                                                                    stop):
@@ -659,7 +672,8 @@ def required_start(setup, monkeypatch, capsys, *args, loaders=None, answer=None,
     placed = Placed() if placed is None else placed
     answer = {"state": "running", "health": {"pid": 7}} if answer is None else answer
     world = dataclasses.replace(setup["world"], run=loaders, place=placed,
-                                kern=lambda binary, root: asked.append((binary, root)) or answer)
+                                kern=lambda binary, root: asked.append((binary, root))
+                                or (answer(root) if callable(answer) else answer))
     assert se_start.main(["--root", str(folder), "--local", str(setup["config"]), "--cache", str(setup["cache"]),
                           "status", "--greeting", "--offline", *args], world=world) == 0
     out = capsys.readouterr().out
@@ -801,6 +815,31 @@ def test_with_kerns_binary_missing_the_start_stops_naming_kern_and_the_command_t
                     f"{setup['se']}; the start's hook places and starts it: bash "
                     f"{setup['se'].as_posix()}/scripts/bootstrap.sh --hook"]
     assert "| kern | none | unknown |" in table(report) and fakes["asked"] == []
+
+
+def test_a_stale_core_record_whose_process_is_gone_does_not_hide_the_live_core_of_ses_root(
+        setup, monkeypatch, capsys):
+    """The session's checkout keeps an old record (`kern.path` of a binary whose core is gone): the
+    live core of SE's root counts, and the report says kern loaded."""
+    checkout = setup["se"].parent / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    write(checkout / ".se" / ".runtime" / "kern.path", "/bin/se-1.1.0\n")
+    live = {"state": "running", "health": {"pid": 7}}
+    report, _, fakes = required_start(setup, monkeypatch, capsys, where=checkout,
+                                      answer=lambda root: live if root == setup["se"] else {"state": "stopped"})
+    assert not any(line.startswith(se_start.STOP) for line in report)
+    assert "| kern | 0.2.0 | unknown |" in table(report)
+    assert fakes["asked"] == [(Path("/bin/se-1.1.0"), checkout), (Path("/bin/se-kern-0.2.0"), setup["se"])]
+
+
+def test_where_no_core_runs_the_report_names_the_session_checkouts_cause(setup, monkeypatch, capsys):
+    checkout = setup["se"].parent / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    write(checkout / ".se" / ".runtime" / "kern.path", "/bin/se-1.1.0\n")
+    report, _, _ = required_start(setup, monkeypatch, capsys, where=checkout, answer={"state": "stopped"})
+    assert [line for line in report if line.startswith(se_start.STOP)] == [
+        f"{se_start.STOP}: the required component kern did not load: /bin/se-1.1.0 the core is stopped; "
+        f"see {checkout / '.se' / '.runtime' / 'core.log'}"]
 
 
 def test_a_kern_bootstrap_could_not_place_stops_the_start_with_its_cause(setup, monkeypatch, capsys):
@@ -2088,6 +2127,20 @@ def test_the_boot_lists_se_and_every_pin_with_pinned_locked_and_newest_version(b
                           "boot --upgrade", "Left: 1 release beyond a pin, 1 of them breaking"]
     assert se_modules.read_lock(booted["project"])["lib"][0] == "1.0.0", "the check moves nothing"
     assert se_modules.checkout_version(booted["se"]) == (1, 0, 0)
+
+
+def test_the_boot_names_a_remote_whose_release_origin_lacks_and_the_sync_it_needs(booted):
+    """SE's origin is a mirror that lags another remote: the boot says so at once, with the one
+    command after the sync, rather than calling SE current."""
+    git(booted["se"], "remote", "add", "public", "https://git.example.org/team/se-public")
+    remote = booted["world"].remote
+    booted["world"] = dataclasses.replace(booted["world"], remote=lambda url: (
+        [(3, 0, 0)] if url.endswith("se-public") else remote(url)))
+    line = boot(booted)[0][2]
+    assert line.startswith("SE: installed 1.0.0, newest 2.0.0: the upgrade takes 2.0.0; but remote "
+                           "public holds 3.0.0: origin is a mirror behind it, so sync origin from "
+                           "public first, then run `uv run python ")
+    assert line.endswith(f"{booted['se'].as_posix()}/scripts/se_start.py update`")
 
 
 def test_the_upgrade_moves_se_and_each_lock_within_its_pin_and_takes_no_breaking_release(booted):

@@ -279,9 +279,6 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
      it shows, as the hook warning `se Stop hook, advice only under Copilot ...` while that worker
      is undelivered. If it never shows there, the `Stop` hook never ran: note it in the cold-run
      record.
-   - A draft skill by name: in a scratch copy, set `se.toml` `[plugin] draft_skills = ["<draft>"]`,
-     build (`scripts/se_plugin.py`), run `copilot --agent se` there. Expect `/<draft>` to load it
-     and no turn to load it unasked; note the result in step 1's record.
 2. **VS Code, SE's checkout.** Open the checkout, install the plugin from it (**Chat: Install
    Plugin from Source** with the checkout's folder), trust it ([trust](#remedies)),
    add the door with the user-level line of [The MCP door](start.md#the-mcp-door)

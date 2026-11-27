@@ -642,8 +642,7 @@ def test_deliver_opens_no_pull_request_where_the_push_is_refused(checkout, monke
 
 
 UNRESOLVED = {
-    "no work issue recorded": (None, "this checkout records no work issue, so where "
-                                     f"{WORK_BRANCH} belongs is unknown"),
+    "no work issue recorded": (None, "this checkout records no work issue and has no field report"),
     "another branch's work issue": (("other-branch", "repo:origin"),
                                     "the recorded work issue #7 is titled 'other-branch'"),
     "two repo labels": ((WORK_BRANCH, "repo:origin", "repo:elsewhere"),
@@ -665,6 +664,30 @@ def test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_pus
     error = capsys.readouterr().err
     assert refusal in error and "nothing was pushed to origin" in error
     assert not origin_has(checkout, WORK_BRANCH)
+
+
+def test_a_checked_authorized_fix_is_published_without_an_issue_snapshot(
+        checkout, monkeypatch, capsys):
+    branch = "fix/authorized-example"
+    git(checkout, "switch", "-q", "-c", branch)
+    commit(checkout, name="fix.txt")
+    report = checkout / ".se" / "work" / "field-report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "<!-- se:field-report -->\n"
+        "**Work issue:** none, authorized fix  **Branch:** `fix/authorized-example`  "
+        "**Result:** complete\n"
+        "<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(work_tickets, "checked_report",
+                        lambda root, file, issue_body: file.read_text(encoding="utf-8"))
+    monkeypatch.setattr(work_tickets, "push_gate", lambda root, name: None)
+
+    assert work_tickets.main(["push", "--worktree", str(checkout)]) == 0
+
+    assert git(checkout.parent / "origin.git", "rev-parse", branch) == git(checkout, "rev-parse", "HEAD")
+    assert "is an authorized fix without a work issue" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(("labels", "repo", "tracker"), [

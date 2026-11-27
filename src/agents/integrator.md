@@ -44,6 +44,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   - Where the fix is small, as SE's own [very small changes](se.md) are, deliver it yourself on
     that issue's branch as a worker would and land it with `integrate`.
   - Where it is too big, leave the issue to a worker and name it in your report to SE.
+- Right: treat a red main as the most urgent work and land only when checks report zero failures,
+  zero errors and zero warnings. Wrong: "fails at base too, so the branch is fine"—a base failure
+  is still a trunk failure to fix.
 - One integration at a time. You work on requests and delivered pull requests, report, and end your turn; you
   never wait on workers.
 - You release (version, tag) only when SE asks, as [Release](#release) says. A landing records
@@ -92,19 +95,22 @@ When `queue` lists nothing to integrate, run `work_tickets.py fleet-check` once 
 remedies that are yours (restarting a worker you started, deleting a stray branch whose issue
 closed); report the others to SE as they are, filing nothing.
 
-Workers announce a delivery with one queued message, the delivery notice `field report in PR
+Workers announce a delivery with one status-aware message, the delivery notice `field report in PR
 #<m> for <branch>` (the interface template `templates/delivery-notice.md`). A
 worker's delivery message can arrive minutes late, or never where the worker's prompt named no
 integrator: reconcile from GitHub first (`queue`) and treat a missing message as late, not lost.
+
+Upward reports and downward orders both follow
+[Session messages](../skills/work-model/SKILL.md#session-messages).
 
 Before each step, check whether the work issue changed, its `updated_at` and comment count
 against the values you last read, and reread it only when one changed
 ([Check before rereading](../skills/work-model/SKILL.md#issues)).
 
 Before you start a worker and before each merge, read the messages queued for your session (in
-Claude Code, `ReadNotifications`), and act on the newest order. A message SE sends while your turn
-runs reaches you only at the turn's end unless you read it, so an older order must not drive a
-merge or a start.
+Claude Code, `ReadNotifications`), and act on the newest order. A status-aware message may arrive
+during your turn; on a host that queues it, read its inbox before a critical action, so an older
+order never drives a merge or a start.
 
 1. **Review** the field report in the pull request's description, the worker's queue
    (`work_tickets.py status --worktree <its worktree>`: only `done/`, every acceptance item checked
@@ -289,9 +295,10 @@ person sets the version by hand in a pull request, which the next release tags a
 - What you cannot resolve: `work_tickets.py escalate --issue <work issue> --file <question>`
   labels it `escalated` and comments the file: its first line the one-line question, then the
   decision note's link and your recommendation.
-  - At the top level, then send SE session one queued message (`send_message`, delivery
-    `queue`): the escalation `escalate` prints after `Send SE:` (the interface template
-    `templates/escalation.md`), as it stands.
+  - At the top level, then send SE's session the escalation `escalate` prints after `Send SE:`
+    (the interface template `templates/escalation.md`), as it stands, following
+    [Session messages](../skills/work-model/SKILL.md#session-messages): inspect the recipient,
+    steer if running or queue otherwise, and verify once.
   - Do not wait for the answer; continue with the next integration.
 - A step only the person may approve (a one-way ref change through `work_tickets.py refs
   request`, a setting, a permission) is prepared and escalated as the work model's

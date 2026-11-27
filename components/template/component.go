@@ -170,7 +170,7 @@ func LoadFolder(folder, repository string) (Catalog, error) {
 		if err != nil {
 			return nil, err
 		}
-		files[name] = string(data)
+		files[name] = normalizeNewlines(string(data))
 	}
 	return Load(Layer{repository, files, func(name string) string { return TemplatesFolder + "/" + name }})
 }

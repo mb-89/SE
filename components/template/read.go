@@ -55,7 +55,9 @@ type Document struct {
 	Source   string
 	Misses   map[string]string
 	Read     Object
-	Recorded string // the template version the body records; "" for none
+	Recorded string    // the template version the body records; "" for none
+	inputs   *Template // the template it was read with: its recorded inputs, else the one given
+	err      error     // why its recorded inputs cannot be read with; Check and Render give it
 }
 
 func norm(text string) string {
@@ -299,8 +301,21 @@ func ValueOf(item *Field, raw string) any {
 	return strip(text)
 }
 
-// Parse reads body into the template's fields; title fills its title field where one is given.
+// Parse reads body into the template's fields; title fills its title field where one is given. It
+// reads with the inputs the body records (templates.py "Version"), which Check and Render keep.
 func Parse(t *Template, body string, title *string) *Document {
+	chosen, err := inputsFor(t, body)
+	if err != nil {
+		doc := parse(t, body, title)
+		doc.err = err
+		return doc
+	}
+	doc := parse(chosen, body, title)
+	doc.inputs = chosen
+	return doc
+}
+
+func parse(t *Template, body string, title *string) *Document {
 	if t.IsAdapter() {
 		fields := Object{}
 		if title != nil {

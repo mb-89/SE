@@ -17,31 +17,42 @@ by the project's `AGENTS.md`; see [What the project provides](#what-the-project-
 
 ## Roles and flow
 
-One issue in, one issue out; the same for local sessions and cloud agents.
+One work issue in, one issue out; an explicitly authorized fix may instead use the issue-free
+delivery path below. The same rules apply to local sessions and cloud agents.
 
 - **Work issue (in)**: one GitHub issue per package from `work.md`, carrying only the task. Title
   = branch name, a name as [Issues](#issues) says, labelled as it says. Everything that
   is the same for every package lives in the agent definitions and this skill, never in issues. A
-  session prompt names only the agent, the issue and the worktree.
+  session prompt names only the agent, the issue or authorized-fix request, and the worktree.
+- **Authorized fix (issue-free)**: only work explicitly authorized without filing an issue may use
+  this path. Its field report says exactly `**Work issue:** none, authorized fix`.
+  - The report remains the evidence record, is complete with `None` under "Not delivered", and the
+    pull request still passes the public check, suite, review and landing gates.
+  - No other missing or unrecorded issue is accepted; partial work needs a work issue.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
   related repository its tests use) is read-only.
   - Everything comes in through its work issue, checked for a change before each ticket so it can
-    change in flight ([Check before rereading](#issues)).
+    change in flight ([Check before rereading](#issues)), or through the explicit authorization for
+    an issue-free fix.
   - Everything goes out through its pull request, whose description is its field report. What it
     needs outside the box goes into the field report.
 - **Out**: a pushed branch, a pull request to the integration branch whose description is the
-  field report, and one notification to the integrator. No field-report issue is filed: one piece
-  of work is one issue, the work issue, which the integrator closes once the work is integrated.
+  field report, and one notification to the integrator. No field-report issue is filed: the
+  integrator closes the work issue once integrated, or closes only the pull request for an
+  authorized issue-free fix.
   - The report's one template is the pull request template,
     [`.github/pull_request_template.md`](../../.github/pull_request_template.md). The report
     sits between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines.
-  - `field-report --draft` writes it there, and every reader (`field-report --check`, `guard`,
+  - `field-report --draft` writes it there; without an issue use `--authorized-fix` to write the
+    explicit declaration, and every reader (`field-report --check`, `guard`,
     `release-trailer`, `integrate`, `queue`) finds it there. A description without them holds no
     report and is refused.
   - Field-report issues filed before this are history: they keep their `field-report` label and
     are not migrated; nothing new gets that label.
   - The field report holds what was not done, decisions with confidence, spec gaps, its answers
     to the standing questions (its Retro section) and tickets for other repositories.
+    Every agent records all friction there, or in its equivalent final report, following
+    [Friction and observation](#friction-and-observation).
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
@@ -81,21 +92,48 @@ One issue in, one issue out; the same for local sessions and cloud agents.
     whose sole default answer is "Nothing else".
   - The standing questions are one block, asked alike by the retro, the overhaul and every field
     report; the overhaul adds its own.
+  - Its last three are the tooling questions, which every role answers in every field report, in
+    any project, whatever it used; "None" does not answer them, and `field-report --check` refuses
+    a report that leaves one empty, naming it:
+    - What took the longest, and why?
+    - What tool did you wish was present: in SE, kern, the project, or anything outside our
+      tooling?
+    - Tooling starfish: what should our tooling start, stop, keep, do more of and do less of?
+      Removals count too.
+  - The retro's collect lists the window's answers by question; a gap two reports name is a
+    finding.
 
-    The retro report moves the issue to report state: SE may file only its findings with
-    `work_tickets.py file --finding`, or record declined/merged outcomes with `retro.py outcome`.
-    The issue closes when every finding has an outcome.
+    The person reviews the prefilled report and blesses it. `retro.py bless <issue>` records that
+    blessing, opens the filing gate immediately, posts the report and closes the retro in one call,
+    without a landing or another session. Finding outcomes are tracked separately with
+    `work_tickets.py file --finding` and `retro.py outcome`.
     SE files no issue by itself before then
     ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
   any new issue: `work_tickets.py file` files a due one first.
 
-  A running retro refuses filing; in report state, only its findings may be filed; it is done once
-  every finding has an outcome. An open overhaul refuses all filing; running work goes on.
+  An unblessed running retro refuses filing; the older report-state path allows only its findings.
+  A blessed retro never holds filing back, even while its closing write is pending. An open
+  overhaul refuses all filing; running work goes on.
 
   Each runs in a session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
   (["Retro due"](../../docs/fleet.md#retro-due)).
+
+### Session messages
+
+Before every message, inspect the receiving chat's current status, not just the parent session's.
+This applies upward and downward alike: worker delivery or completion to its integrator,
+integrator reports to SE, and orders sent to a running agent.
+
+Under Copilot, `get_current_session` lists the current session's chats and their statuses;
+use the host's session metadata for a recipient outside that list. A running (`inProgress`)
+recipient takes `send_message` with `delivery: "steer"`; otherwise use `delivery: "queue"`.
+If steering returns `cannotSteer`, resend the identical message with `queue`.
+
+After sending, verify once with `get_session_context` that the message is not pending.
+Pending means delivery is unconfirmed: report that blocker, rather than claiming receipt or
+polling repeatedly. A fallback resend remains the same logical notice, not an extra delivery.
 
 ## Issues
 
@@ -290,18 +328,21 @@ Nothing is pushed to it directly: `integrate` lands each integration as a squash
 waits for the required check `check`, as the README's
 [Landing on main](../../docs/settings.md#landing-on-main) says.
 
-Every pull request into the integration branch names the work it does, so no work is done outside
-the issues dispatch reads:
+Every pull request into the integration branch identifies its work, so no work is done outside the
+issues dispatch reads or an explicitly authorized issue-free delivery:
 
 - Its description names at least one issue of the repository that is open and labelled `work`,
   with `Refs`, `Closes` or `Fixes` and `#<n>` or the issue's URL; it may name several.
+- An authorized fix with no work issue instead has the exact first line `Work issue: none,
+  authorized fix` and the same declaration in its field report header. This is the only issue-free
+  exception; its report is checked without issue-based acceptance items.
 - A landing pull request passes by its `Lands <work pull request>` line, where that work pull
-  request's description names one.
+  request's description names its work issue or explicitly declares the authorized fix.
 - The repository owner's own pull request labelled `housekeeping` is exempt.
 - The job `check` enforces it with `<se>/scripts/pr_issues.py`, through the Actions token.
 - `pr_issues.py` is the one parser of how a description names its issue: the job's field-report
   step reads the work issue from the description's first line with it, so both accept the short
-  and the full form.
+  and the full form, or the exact authorized-fix declaration.
 
 A delivery is against current main: with several workers in parallel each landing makes the other
 branches stale, and against the new main a stale branch reads to `integrate`'s guard as deleting
@@ -415,6 +456,9 @@ boundary.
     to it).
 - Every error message names where it comes from (the command, file or input) and, where
   possible, the remedy.
+- Inputs are frozen at the start of work, including template versions, nested templates and rules
+  ([gen-006](references/rules.md#gen-006-frozen-inputs)). A reopen starts a new input phase;
+  `templates.py renew <template> --body-file <file>` also explicitly opts into newer inputs.
 - Work follows the user's priority order; no new investigation starts while a top-priority bug is
   open.
 - Workers run focused tests and what their issue's acceptance names, the complete suite only
@@ -436,6 +480,26 @@ boundary.
   (`intake`, `refresh`, `sync`, `guard`, `deliver`, `escalate`, `block`, `file`, `route`, `ready`,
   `capacity`, `queue`, `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
   manual.
+
+### Friction and observation
+
+Every agent reports all friction in its field report or equivalent final report, including
+waiting, polling, limited tooling, workarounds and retries. For each, record the evidence,
+impact and outcome; say `None` only when there truly was none
+([wrk-010](references/rules.md#wrk-010-report-all-friction)).
+
+Field reports use the existing standing question "What goes badly, each with its moment in
+the log?", even when a workaround ultimately succeeded. Other final reports include the same
+account without needing a new report format. Existing reports keep their recorded inputs.
+
+Prefer callbacks, subscriptions and completion notifications to polling
+([des-019](references/rules.md#des-019-event-driven-targeted-observation)).
+Unnecessary broad or repeated polling is prohibited. If no event interface exists, query only
+the specific object, with an explicit deadline and bounded attempts, and report why it was needed.
+
+Doors should expose targeted, filtered or incremental queries where sensible, rather than make
+callers scan the whole universe. For example, read one task's status or changes since a known
+revision, not every task repeatedly. Record a missing event or query interface as tooling friction.
 
 ### Neutral by construction
 
@@ -477,7 +541,7 @@ The checks that hold it:
 | Part of the rule | Check |
 |---|---|
 | History held only by another remote is never pushed | `work_tickets.py push`, and every command that pushes through it, pushes only a local branch and refuses one carrying commits another remote holds but origin does not; a local tag proves nothing ([docs/settings.md "Project settings"](../../docs/settings.md#project-settings), `tests/test_push_guard.py`) |
-| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label ([docs/fleet.md "Work publication"](../../docs/fleet.md#work-publication), `tests/test_push_guard.py`) |
+| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label, or where its checked field report declares an authorized fix without an issue ([docs/fleet.md "Work publication"](../../docs/fleet.md#work-publication), `tests/test_push_guard.py`) |
 | Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([docs/modules.md "Modules"](../../docs/modules.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
 | The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../AGENTS.md#public-safety)) |
 | No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
@@ -829,7 +893,9 @@ Claude's cloud has no `~/.se/local.toml`, so there the project's identity applie
 repeats any of this section's rules:
 
 - `work_tickets.py sync`, which every role runs at the start, writes whichever applies into the
-  checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits.
+  checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits, and
+  turns signing off there (`commit.gpgsign false`,
+  [Project settings](../../docs/settings.md#project-settings)).
 - A fresh clone, such as a cloud session's, runs the project's setup command before its first
   commit, so the project's hooks run its public check on every commit and push.
 - Commit messages carry no tracker numbers
@@ -897,9 +963,10 @@ is its reusable part, imported from the project's se module.
 - A session may start in another checkout than the one it works in: `cd` to its worktree in every
   command, use absolute paths for every read and edit and for .NET file APIs (`[IO.File]::...`
   resolves relative paths against the process directory), and run git as `git -C <worktree>`.
-- Wait on a background process by its process id (`kill -0 <pid>` in a loop; PowerShell
-  `Get-Process -Id <pid>`), never by `pgrep -f <pattern>`: the pattern matches the waiting shell's
-  own command line, so the wait never ends.
+- Use a background process's completion notification, not a polling loop. With no event interface,
+  a bounded fallback queries only its process id (`Get-Process -Id <pid>`), never a name pattern
+  that might match the waiting shell; record the reason, impact and outcome
+  ([Friction and observation](#friction-and-observation)).
 - Windows PowerShell 5.1: judge native commands by exit code only; pass every issue, comment and
   pull-request body with `--body-file` (quotes or spaces inside native arguments break the call);
   no inline jq expressions with spaces (use `--json` and `ConvertFrom-Json`).
@@ -1017,7 +1084,7 @@ for example:
 | `intake` | `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`, method `get`) and its comments (method `get_comments`) as the tools answered them; it writes the tickets, the snapshot and both read records as `intake --issue` does. Where kern's relay serves the checkout, `intake --issue <n>` reads both from the relay instead (no file). |
 | `refresh` | read the issue and its comments; apply what changed to the tickets; record the comments read with `comments-read --count <n> --newest <id>` and the body read with `body-read --body-file <file>`, from what the GitHub tools read. Where kern's relay serves the checkout, `refresh` reads the issue and its comments from the relay instead. |
 | `intake --outside` | read each `[outside]` repository's open issues and their comments, and keep those [Outside issues](#outside-issues) leaves. |
-| `deliver` | `sync`; `push`; open the pull request to the integration branch, titled like the work issue, with the description `pr-body --issue-body <file> --issue-url <url> --field-report .se/work/field-report.md` prints (the closing line, then the report between its markers); send the notification. No issue is filed. |
+| `deliver` | `sync`; `push`; open the pull request to the integration branch, titled like the work issue, with the description `pr-body --issue-body <file> --issue-url <url> --field-report .se/work/field-report.md` prints; for an authorized issue-free fix, use the report's explicit `Work issue: none, authorized fix` declaration and omit issue arguments; send the notification. No issue is filed. |
 | `start` | start the worker session with the host's session tool, on an outcome branch named like the work issue and based on the integration branch, titled by `session-title` (the `title=` of `start`'s `Launch worker:` line) and tagged `SE` ([Visible sessions](#visible-sessions)). |
 | `integrate`, `refs request` and `refs apply` | [Land](#land). |
 
@@ -1031,7 +1098,8 @@ for example:
     ([docs/fleet.md "Stop hook"](../../docs/fleet.md#stop-hook)), which judges without gh by that record.
   - The field report comes from `field-report.md`, which `field-report --draft
     .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
-    the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
+    the tools answered it (or from `intake`'s snapshot without `--issue-body`); an authorized
+    issue-free fix uses `--authorized-fix` instead; it refuses
     without `--worktree`.
   - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
     <file> --comment-count <n> --newest-comment <id>` (the work issue's body, or the issue as
@@ -1062,7 +1130,8 @@ for example:
   description (`pr-body`'s output) by editing the pull request; the delivery notice names the pull
   request.
 - **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
-  branch, which replaces the worktree) and the integrator session to notify; everything else is in
+  branch, which replaces the worktree) and the integrator session to notify, an explicit
+  authorized-fix request standing in for the work issue; everything else is in
   the role files, this skill and the project's `AGENTS.md`:
 
   ```text
@@ -1116,7 +1185,9 @@ harnesses.
   ([docs/start.md "The MCP door"](../../docs/start.md#the-mcp-door)) offers SE's read-only commands as the
   tools `se/status`, `se/greeting`, `se/tickets`, `se/integration` and `se/overhaul`, each taking
   `command`, `args` and `page`.
-  - Where a tool answers `starting`, call it again in a few seconds; where it answers
+  - Where a tool answers `starting`, prefer its readiness event; with none, retry that command
+    with a deadline and bounded attempts, reporting this fallback as tooling friction.
+    Where it answers
     `not-installed` or `failed`, or the session has no `se` tools, run the same command as its
     script, `uv run python <se>/scripts/<name>.py`.
   - A command no tool offers, every one that writes among them, always runs as its script.

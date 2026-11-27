@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
+import process_door
 import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
@@ -914,8 +915,8 @@ def kern_status(binary: Path, root: Path) -> dict | None:
     """`kern status --json` of the core in the checkout at root, waiting `KERN_WAIT` for one still
     starting: its state and health, or None where the binary does not answer."""
     try:
-        result = subprocess.run([str(binary), "status", "--root", str(root), "--wait", f"{KERN_WAIT}s", "--json"],
-                                capture_output=True, text=True, timeout=KERN_WAIT + 5)
+        result = process_door.run([str(binary), "status", "--root", str(root), "--wait", f"{KERN_WAIT}s", "--json"],
+                                  capture_output=True, text=True, timeout=KERN_WAIT + 5)
         return json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -1106,24 +1107,33 @@ def kern_version(se_root: Path, root: Path | None) -> str:
 
 
 def load_kern(se_root: Path, root: Path | None, kern: Kern, ask: Callable[[Path, Path], dict | None]) -> Loaded:
-    """kern: the binary bootstrap.sh placed and started answers `status` with a running core; else
-    why not. A core the machine switched off is no failure, the person's choice."""
+    """kern: the binary bootstrap.sh placed and started answers `status` with a running core, the
+    session's checkout's (`kern_root`) or, where that record's core is gone, SE's root's; else why
+    not, the session's checkout's cause. A core the machine switched off is no failure, the person's choice."""
     if kern.off:
         return Loaded(se_modules.KERN, "off", note=f"kern is not loaded: {kern.off}")
     if kern.failed:
         return Loaded(se_modules.KERN, cause=kern.failed)
-    core_root = kern_root(se_root, root)
-    binary = kern_binary(kern, core_root)
-    if binary is None:
-        return Loaded(se_modules.KERN, cause=f"no binary is placed for {core_root}; the start's hook places "
-                                             f"and starts it: bash {se_root.as_posix()}/scripts/bootstrap.sh --hook")
-    answer = ask(binary, core_root)
-    state = (answer or {}).get("state")
-    if state != "running":
+    first = kern_root(se_root, root)
+    causes = []
+    for core_root in dict.fromkeys([first, se_root]):
+        binary = kern_binary(kern if core_root == first else Kern(), core_root)
+        if binary is None:
+            causes.append(f"no binary is placed for {core_root}; the start's hook places and starts it: "
+                          f"bash {se_root.as_posix()}/scripts/bootstrap.sh --hook")
+            continue
+        answer = ask(binary, core_root)
+        state = (answer or {}).get("state")
+        if state == "running":
+            break
         log = core_root / ".se" / ".runtime" / "core.log"
-        cause = ("its status does not answer" if answer is None else
-                 "the core ended at its start" if (answer or {}).get("died") else f"the core is {state or 'not running'}")
-        return Loaded(se_modules.KERN, cause=f"{binary} {cause}; see {log}")
+        causes.append(f"{binary} " + ("its status does not answer" if answer is None else
+                                     "the core ended at its start" if (answer or {}).get("died") else
+                                     f"the core is {state or 'not running'}") + f"; see {log}")
+    else:
+        # A record whose core is gone is no core: the live one of SE's root counts, and only where
+        # none runs does the first checkout's cause stand.
+        return Loaded(se_modules.KERN, cause=causes[0])
     try:
         version = kern_version(se_root, root)
     except ModuleError as error:
@@ -1189,15 +1199,15 @@ def detached_options(os_name: str) -> dict:
 
 
 def _spawn_detached(argv: list[str]) -> None:
-    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True, **detached_options(os.name))
+    process_door.start(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, close_fds=True, **detached_options(os.name))
 
 
 def _claude(args: list[str]) -> subprocess.CompletedProcess:
     """Claude Code's command line; a machine without it answers as a failed command."""
     try:
-        return subprocess.run(["claude", *args], capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", stdin=subprocess.DEVNULL, timeout=600)
+        return process_door.run(["claude", *args], capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", stdin=subprocess.DEVNULL, timeout=600)
     except (OSError, subprocess.SubprocessError) as error:
         return subprocess.CompletedProcess(["claude", *args], 127, "", str(error))
 
@@ -1690,6 +1700,36 @@ class SEState:
     pin: str | None = None  # the project's [components.se] version range
     stays: str = ""  # why the boot leaves SE as it is
     error: str = ""
+    ahead: tuple[str, Version, str] | None = None  # another remote of SE's checkout, its newer release, SE's path
+
+
+def _other_remotes(se_root: Path) -> list[tuple[str, str]]:
+    """Each remote of SE's checkout but origin, with its URL: a mirror's origin may lag one."""
+    if not (se_root / ".git").exists():
+        return []
+    names = git_door.run("remote", root=se_root)
+    found = []
+    for name in (names.stdout.split() if names.returncode == 0 else []):
+        if name == "origin":
+            continue
+        url = git_door.run("remote", "get-url", name, root=se_root)
+        if url.returncode == 0 and url.stdout.strip():
+            found.append((name, url.stdout.strip()))
+    return found
+
+
+def _ahead(se_root: Path, newest: Version | None, world: World) -> tuple[str, Version, str] | None:
+    """The remote of SE's checkout holding the newest release above origin's `newest`, where one
+    does: origin is a mirror behind it, and no update takes that release until origin has it."""
+    best = None
+    for name, url in _other_remotes(se_root):
+        try:
+            top = max(world.remote(url), default=None)
+        except (RemoteError, OSError, subprocess.SubprocessError):
+            continue
+        if top is not None and (newest is None or top > newest) and (best is None or top > best[1]):
+            best = (name, top, se_root.as_posix())
+    return best
 
 
 def se_state(se_root: Path, root: Path | None, local, world: World) -> SEState:
@@ -1715,7 +1755,7 @@ def se_state(se_root: Path, root: Path | None, local, world: World) -> SEState:
     if due and (se_root / ".git").exists() and (
             (root is not None and root.resolve() == se_root.resolve()) or _development(se_root)):
         stays = "a development checkout, the boot leaves it"
-    return SEState(item, newest, due, pinned, stays)
+    return SEState(item, newest, due, pinned, stays, ahead=_ahead(se_root, newest, world))
 
 
 def se_line(state: SEState, moved: str = "") -> str:
@@ -1734,6 +1774,11 @@ def se_line(state: SEState, moved: str = "") -> str:
         verdict += (f"; {_v(state.newest)} lies beyond the pin, not taken; to take it, set version = "
                     f"\"^{state.newest[0]}.{state.newest[1]}\" in [components.se] of the project's "
                     f"{se_modules.MANIFEST}")
+    if state.ahead:
+        name, version, path = state.ahead
+        verdict += (f"; but remote {name} holds {_v(version)}: origin is a mirror behind it, so "
+                    f"sync origin from {name} first, then run "
+                    f"`uv run python {path}/scripts/se_start.py update`")
     return f"{head}: {verdict}"
 
 
@@ -2128,10 +2173,24 @@ def shown_notes(notes: list[str]) -> list[str]:
     return [note for note in notes if note.startswith(STOP)]
 
 
+def report_request(se_root: Path) -> str:
+    """What the hand-over asks of the session: the person sees no hook output on some hosts (a
+    Claude Code cloud session), so on every start, restart and compaction, which each run the hook,
+    the session opens its first message with the report it runs live, never this copy or an earlier
+    one (docs/boot.md "The start report")."""
+    return ("SE's start report as this start wrote it; the person may not see it here. As SE, open your "
+            "first message after every start, restart and compaction with the live report: run "
+            f"`uv run python {se_root.as_posix()}/scripts/se_start.py status --greeting` and show its lines "
+            f"above `{FOR_SESSION}` as it prints them, never this copy or a report of an earlier start, "
+            "and add nothing to it. Act on what the start found for the session, and tell the person "
+            "only what needs their decision.")
+
+
 def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude",
                 environment: Mapping[str, str] | None = None, session: list[str] | None = None) -> str:
     """The SessionStart hook output of `host` (scripts/hosts.sh): the start report handed to the
-    session, which opens its first message with it, what the start found for the session alone,
+    session with the request to open its first message with the live report (`report_request`),
+    what the start found for the session alone,
     and SE's root for the session. Claude Code also shows the person the report, a stop above it
     (systemMessage); Copilot's sessionStart reads only `additionalContext`. Where
     `SE_DEFAULT_AGENT` counts, the hand-over ends with the agent the session acts as
@@ -2140,10 +2199,7 @@ def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "
     shown_lines = shown_notes(notes) + lines
     found = ([note] if note else []) + [n for n in notes if n not in shown_lines] + list(session or [])
     text = "\n".join(shown_lines)
-    shown = "" if host == "copilot" else ", already shown to the person"
-    context = (f"{handed(shown_lines, found)}\n\nSE's start report{shown}. As SE, open your first "
-               "message with it as it is and add nothing to it; act on what the start found for the "
-               "session, and tell the person only what needs their decision.\n\n"
+    context = (f"{handed(shown_lines, found)}\n\n{report_request(se_root)}\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
     if sentence:

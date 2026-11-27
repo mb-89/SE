@@ -117,7 +117,7 @@ func TestTemplateRepositoriesResolveAsThePythonEnginesCatalog(t *testing.T) {
 		if want, ok := cs.Get("error"); ok {
 			got := "<resolves>"
 			if err != nil {
-				got = strings.ReplaceAll(filepath.ToSlash(err.Error()), filepath.ToSlash(tmp), "<tmp>")
+				got = strings.ReplaceAll(err.Error(), tmp, "<tmp>")
 			}
 			c.same(name, "error", got, want.(string))
 			continue

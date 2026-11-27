@@ -117,12 +117,14 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
 - **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
   anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
   `discovery`, not `ready`), and the filing asked for is refused, naming it.
-- **Blocking.** While a retro is running, filing is refused with its number. Once its report is in,
-  `file --finding <retro>:<finding>` may file only that finding's work issue; every other filing is
-  refused.
+- **Blessing opens the gate.** The person checks the prefilled report and blesses it;
+  `retro.py bless <issue>` records that approval, immediately releases this retro's gate, posts
+  the report and closes the issue, without a landing or another session. Network calls share one
+  minute; retrying the same command resumes partial writes without duplicate comments.
 
-  A finding may instead be recorded as declined or merged into another finding with `retro.py
-  outcome`. The retro is done and closes when every finding has an outcome. An open overhaul still
+  Finding outcomes remain independently tracked with `file --finding <retro>:<finding>` and
+  `retro.py outcome`; they do not hold the gate. The older `retro.py file` path still leaves a
+  report-state retro open until its outcomes are recorded. An open overhaul still
   refuses every filing. Running work goes on, and issues keep coming back; they count towards the
   next run.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
@@ -216,9 +218,11 @@ What it judges:
 ## Work publication
 
 A work branch is published only to the repository its work issue is for, never to whatever
-origin happens to be. `work_tickets.py push`, and `deliver` through it, check origin before
-anything is pushed or a pull request opened; the integration branch and landing branches keep
-their own guards.
+origin happens to be. An explicitly authorized fix with no issue instead requires a checked field
+report declaring `Work issue: none, authorized fix`.
+
+`work_tickets.py push`, and `deliver` through it, check this before anything is pushed or a pull
+request opened; the integration branch and landing branches keep their own guards.
 
 - The work issue is the one the checkout records (`intake`), titled like the branch.
 - The repository it is for is its one `repo:<name>` label, which every work issue SE files
@@ -226,8 +230,9 @@ their own guards.
   repository is the tracker the checkout routes its issues to.
 - Origin passes where its repository name is that name, in any case: a name, not a host or an
   owner, so the rule holds wherever the project lives.
-- Refused, naming the remedy, with nothing pushed: no recorded work issue, a recorded one titled
-  like another branch, more than one `repo:` label, no origin, and an origin of another name.
+- Refused, naming the remedy, with nothing pushed: no recorded work issue and no such report, a
+  report naming another branch, a recorded issue titled like another branch, more than one
+  `repo:` label, no origin, and an origin of another name.
 
 ## Late push
 

@@ -70,7 +70,7 @@ SUBSTITUTIONS: dict[str, Callable[[str], str]] = {
 
 def normalise(text: str) -> str:
     """`text` with every substitution applied and its line ends as `\\n`."""
-    text = text.replace("\r\n", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     for substitute in SUBSTITUTIONS.values():
         text = substitute(text)
     return text
@@ -95,7 +95,7 @@ def recorded(name: str, text: str, directory: Path = RECORDINGS) -> None:
         return
     if not path.exists():
         raise Differs(f"no recording {path.name} for {name}; record it with: {rewrite_command(name)}")
-    expected = path.read_bytes().decode("utf-8")
+    expected = normalise(path.read_bytes().decode("utf-8"))
     if expected == actual:
         return
     diff = "".join(difflib.unified_diff(expected.splitlines(keepends=True), actual.splitlines(keepends=True),

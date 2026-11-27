@@ -22,7 +22,7 @@ import fake_git
 import hygiene
 import pytest
 from conftest import (MACHINE_HOME, REAL_GIT, XDG_VARIABLES, RefusedGit, door_backend, door_variable,
-                      machine_caches, runner_variables)
+                      machine_caches, runner_variables, use_machine_home)
 from hygiene import binary_findings, git_door_findings, large_findings, marker_findings
 from test_public_check import commit, repo, se_checkout  # noqa: F401  (repo: the public check's fixture)
 
@@ -118,8 +118,9 @@ def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsy
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].startswith("hygiene: passed (10 checks) in ")
+    assert out[-1].startswith("hygiene: passed (11 checks) in ")
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
+    assert out[1] == "hygiene: doors: skipped: the checkout declares no door in scripts/doors"
 
 
 @pytest.mark.usefixtures("fake_git_door")
@@ -131,7 +132,8 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
                   "scripts/tool.py": f"import subprocess\n# {marker}: retry\nsubprocess.run(['git', 'status'])\n",
                   "README.md": "# Leaky\n\nSee [gone](gone.md), copied from /" + "home/alice/notes.\n",
                   "docs/install.md": "Install from bob/project.\n",
-                  "AGENTS.md": "# Agents\n\nSee README \"Gone\" and docs/install.md \"Gone\".\n"})
+                  "AGENTS.md": "# Agents\n\nSee README \"Gone\" and docs/install.md \"Gone\".\n",
+                  "scripts/doors/process.toml": (ROOT / "scripts" / "doors" / "process.toml").read_text(encoding="utf-8")})
     git_door.run("remote", "add", "origin", "https://example.com/bob/project.git", root=repo)
     assert hygiene.main(["--repo", str(repo)]) == 1
     out = capsys.readouterr().out
@@ -139,6 +141,7 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "hygiene: large: dump.json: 101 bytes, over 100" in out
     assert "hygiene: marker: scripts/tool.py:2: names no issue" in out
     assert "hygiene: git-door: scripts/tool.py:3: 1 git subprocess(es) outside the door" in out
+    assert "hygiene: doors: scripts/tool.py:3: call subprocess.run outside the process door" in out
     assert "hygiene: references: README.md line 3: `gone.md`" in out
     assert "hygiene: public: " in out and "README.md:3:" in out and "user-profile-path" in out
     assert "alice" not in out, "the public check names locations and labels, never the matched text"
@@ -149,7 +152,7 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "hygiene: readme: README.md: no code block of one command within its first 10 lines" in out
     assert out.splitlines()[-1].startswith(
         "hygiene: refused by binary, large, marker, git-door, references, public, neutral-home, "
-        "sections, readme (")
+        "sections, readme, doors (")
 
 
 class Item:
@@ -217,12 +220,21 @@ def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None
     assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]
 
 
-# Each test's home is its own and empty (tests/conftest.py `own_home`); the machine's caches stay
+# Each test's home has no user data (tests/conftest.py `own_home`); the machine's caches stay
 # where the machine keeps them (`machine_caches`).
 
 def test_each_test_runs_in_an_empty_home_of_its_own_that_reads_no_git_configuration(own_home) -> None:
     assert Path.home() == own_home and os.environ["HOME"] == os.environ["USERPROFILE"] == str(own_home)
-    assert list(own_home.iterdir()) == [] and own_home != Path(MACHINE_HOME["HOME"] or "/")
+    if os.name == "nt":
+        assert os.environ["APPDATA"] == str(own_home / "AppData" / "Roaming")
+        assert os.environ["LOCALAPPDATA"] == str(own_home / "AppData" / "Local")
+        assert sorted(path.name for path in (own_home / "AppData").iterdir()) == ["Local", "Roaming"]
+        assert not list((own_home / "AppData" / "Local").iterdir())
+        assert not list((own_home / "AppData" / "Roaming").iterdir())
+        assert [path.name for path in own_home.iterdir()] == ["AppData"]
+    else:
+        assert list(own_home.iterdir()) == []
+    assert own_home != Path(MACHINE_HOME["HOME"] or "/")
     assert [name for name in XDG_VARIABLES if name in os.environ] == []
     assert "GIT_CONFIG_GLOBAL" not in os.environ and os.environ["GIT_CONFIG_NOSYSTEM"] == "1"
     (own_home / ".se").mkdir()  # what a test writes under ~ is its own: the next test's home is empty
@@ -230,6 +242,14 @@ def test_each_test_runs_in_an_empty_home_of_its_own_that_reads_no_git_configurat
 
 def test_the_next_test_finds_nothing_the_last_one_wrote_under_its_home(own_home) -> None:
     assert not (Path.home() / ".se").exists()
+
+
+def test_obs_setup_restores_the_machines_windows_app_data(monkeypatch) -> None:
+    for name in ("APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, "isolated")
+    use_machine_home(monkeypatch)
+    for name in ("APPDATA", "LOCALAPPDATA"):
+        assert os.environ.get(name) == MACHINE_HOME[name]
 
 
 def test_the_machine_caches_are_where_each_tool_finds_them_without_its_variable() -> None:

@@ -732,10 +732,12 @@ def test_the_field_report_replaces_evidence_the_host_cannot_carry_with_its_comma
             "be attached, each screenshot's row names the command that takes it again.") in report
 
 
-def test_the_work_model_waits_on_a_background_process_by_its_id():
+def test_the_work_model_prefers_completion_events_and_bounds_process_id_fallback():
     shell = normalized(WORK_MODEL).split("## Commands and shell", 1)[1]
-    assert "Wait on a background process by its process id (`kill -0 <pid>`" in shell
-    assert "never by `pgrep -f <pattern>`" in shell
+    assert "Use a background process's completion notification, not a polling loop." in shell
+    assert "With no event interface, a bounded fallback queries only its process id" in shell
+    assert "never a name pattern that might match the waiting shell" in shell
+    assert "record the reason, impact and outcome" in shell
 
 
 def test_the_worker_builds_an_acceptance_build_at_the_new_pin_before_code():
@@ -1310,3 +1312,14 @@ def test_no_built_agent_or_skill_names_a_handover_issue():
              for match in HANDOVER_ISSUE.finditer(" ".join(path.read_text(encoding="utf-8").split()))]
     assert named == []
     assert ".se/handover.md" in normalized(ROOT / "skills" / "catch-up" / "SKILL.md")
+
+
+def test_the_se_agent_opens_every_first_message_after_a_start_with_the_live_report():
+    """The person may not see hook output (a Claude Code cloud session): SE runs the report live
+    after every start, restart and compaction and never shows a copy."""
+    se = normalized(AGENTS / "se.md")
+    assert ("your first message after every start, restart and compaction opens with SE's start "
+            "report, as it is, and adds nothing to it, without exception") in se
+    assert "Run `uv run python <se>/scripts/se_start.py status --greeting` first" in se
+    assert ("Show never a report you did not just produce, neither the copy the start hook handed you nor one "
+            "from an earlier start") in se

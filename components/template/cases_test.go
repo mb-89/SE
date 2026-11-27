@@ -37,7 +37,7 @@ func readCases(t *testing.T) map[string]Object {
 		if err != nil {
 			t.Fatalf("%s: %v", entry.Name(), err)
 		}
-		sets[entry.Name()] = v.(Object)
+		sets[entry.Name()] = expandInputs(v.(Object))
 	}
 	if len(sets) == 0 {
 		t.Fatal("no shared cases; run `uv run python tests/template_cases.py`")
@@ -45,29 +45,118 @@ func readCases(t *testing.T) map[string]Object {
 	return sets
 }
 
+// expandInputs puts back each recorded-inputs payload a case file holds once, under `inputs`, where
+// its `$inputs:<n>$` stands (tests/template_cases.py `_shared_inputs`).
+func expandInputs(set Object) Object {
+	list, _ := set.Value("inputs").([]any)
+	if len(list) == 0 {
+		return set
+	}
+	pairs := make([]string, 0, 2*len(list))
+	for i, payload := range list {
+		pairs = append(pairs, "$inputs:"+itoa(i)+"$", payload.(string))
+	}
+	replacer := strings.NewReplacer(pairs...)
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch x := v.(type) {
+		case string:
+			return replacer.Replace(x)
+		case []any:
+			out := make([]any, len(x))
+			for i, item := range x {
+				out[i] = walk(item)
+			}
+			return out
+		case Object:
+			out := make(Object, len(x))
+			for i, pair := range x {
+				out[i] = Pair{pair.Key, walk(pair.Value)}
+			}
+			return out
+		}
+		return v
+	}
+	expanded := walk(set).(Object)
+	expanded.Delete("inputs")
+	return expanded
+}
+
 func seTemplates(t *testing.T) Catalog {
 	t.Helper()
 	folder := filepath.Join("..", "..", TemplatesFolder)
-	files := map[string]string{}
-	entries, err := os.ReadDir(folder)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasSuffix(name, templateSuffix) || name == TermsFile {
-			data, err := os.ReadFile(filepath.Join(folder, name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			files[name] = string(data)
-		}
-	}
-	catalog, err := Load(Layer{SERepository, files, func(name string) string { return TemplatesFolder + "/" + name }})
+	catalog, err := LoadFolder(folder, SERepository)
 	if err != nil {
 		t.Fatalf("SE's templates do not load in Go: %v", err)
 	}
 	return catalog
+}
+
+func TestLoadFolderMatchesPythonTextNewlines(t *testing.T) {
+	const source = `---
+name: sample
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A template.
+applies:
+  actions: ["issue.create"]
+fields:
+  - name: goal
+    kind: text
+    required: true
+---
+
+## Goal
+
+<!-- goal: The goal. -->
+`
+	loadDigest := func(t *testing.T, newline string, viaFolderFiles bool) string {
+		t.Helper()
+		folder := t.TempDir()
+		path := filepath.Join(folder, "sample.md")
+		text := strings.ReplaceAll(source, "\n", newline)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var catalog Catalog
+		var err error
+		if viaFolderFiles {
+			files, readErr := folderFiles(folder)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			catalog, err = Load(Layer{ProjectRepository, files, func(name string) string {
+				return TemplatesFolder + "/" + name
+			}})
+		} else {
+			catalog, err = LoadFolder(folder, ProjectRepository)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return catalog["sample"].Digest
+	}
+
+	want := loadDigest(t, "\n", false)
+	readers := []struct {
+		name string
+		load bool
+	}{{"LoadFolder", false}, {"folderFiles", true}}
+	lineEndings := []struct {
+		name string
+		text string
+	}{{"CRLF", "\r\n"}, {"CR", "\r"}}
+	for _, reader := range readers {
+		for _, lineEnding := range lineEndings {
+			t.Run(reader.name+"/"+lineEnding.name, func(t *testing.T) {
+				if got := loadDigest(t, lineEnding.text, reader.load); got != want {
+					t.Fatalf("template digest = %s; LF digest = %s", got, want)
+				}
+			})
+		}
+	}
 }
 
 func fixtureFiles(set Object) map[string]string {

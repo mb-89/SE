@@ -336,6 +336,8 @@ var (
 	angleName            = regexp.MustCompile(`<[^<>\n]+>`)
 	headerPlaceholder    = regexp.MustCompile(`#?<[^<>\n]+>`)
 	firstSection         = regexp.MustCompile(`(?m)^## `)
+	workIssueLine        = regexp.MustCompile(`(?i)\bWork issue:\*{0,2}` + pyS + `*#(\d+)\b`)
+	authorizedFixLine    = regexp.MustCompile(`(?m)^\*\*Work issue:\*\*[ \t]*none, authorized fix(?:[ \t]{2,}\*\*Branch:\*\*|$)`)
 	trailerLine          = regexp.MustCompile(`(?m)^` + releaseTrailer + `:[ \t]*(` + pyNotS + `*)[ \t]*$`)
 )
 
@@ -487,6 +489,10 @@ func fieldReportProblems(body string) ([]string, error) {
 		report[casefold(s.heading)] = s.lines
 	}
 	var problems []string
+	authorizedFix, headerProblem := reportIssue(body)
+	if headerProblem != "" {
+		problems = append(problems, headerProblem)
+	}
 	for _, s := range orderedSections(template) {
 		where := fmt.Sprintf("section \"## %s\"", s.heading)
 		if s.heading == "" {
@@ -548,10 +554,35 @@ func fieldReportProblems(body string) ([]string, error) {
 	if m := reintegrationKind.FindStringSubmatch(header); m != nil && !in(m[1], releaseOrder) {
 		problems = append(problems, fmt.Sprintf("header (above the first section): Re-integration kind %s must be one of %s", repr(m[1]), joinStrings(releaseOrder)))
 	}
-	if !resultLine.MatchString(header) {
+	if m := resultLine.FindStringSubmatch(header); m == nil {
 		problems = append(problems, `header (above the first section): Result must be exactly complete or partial, as "**Result:** complete" or "**Result:** partial"`)
+	} else if authorizedFix {
+		notDelivered := casefold(strings.TrimRight(strip(htmlComment.ReplaceAllString(strings.Join(report["not delivered"], "\n"), "")), "."))
+		if m[1] != "complete" || notDelivered != "none" {
+			problems = append(problems, "an authorized fix without a work issue must be complete and have `None` under `## Not delivered`; use a work issue for partial work")
+		}
 	}
 	return problems, nil
+}
+
+// reportIssue is work_tickets.py `field_report_issue` as `field_report_problems` reads it: whether
+// the header's first line declares an authorized fix, or the problem where it names no work issue.
+func reportIssue(body string) (authorizedFix bool, problem string) {
+	header := htmlComment.ReplaceAllString(strings.Join(orderedSections(body)[0].lines, "\n"), "")
+	first := ""
+	for _, line := range splitLines(header, false) {
+		if strip(line) != "" {
+			first = line
+			break
+		}
+	}
+	if workIssueLine.MatchString(first) {
+		return false, ""
+	}
+	if authorizedFixLine.MatchString(first) {
+		return true, ""
+	}
+	return false, "Field report header must say `**Work issue:** #<n>` or exactly `**Work issue:** none, authorized fix`"
 }
 
 func fieldReportChecker(v any, kw map[string]any) (any, error) {

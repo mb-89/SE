@@ -2,7 +2,7 @@
 
 # Rules
 
-The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after the book.
+The 77 rules in force: the rule book's 65 and 12 guidance notes, the notes after the book.
 
 | Rule | What it says |
 |---|---|
@@ -11,6 +11,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `gen-003` | Fail open for advice, closed for enforcement |
 | `gen-004` | Blameless |
 | `gen-005` | Consistency |
+| `gen-006` | Frozen inputs |
 | `des-001` | Locality |
 | `des-002` | Modularity |
 | `des-003` | Thin adapters |
@@ -29,6 +30,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `des-016` | Every tool has a README and a RUNME |
 | `des-017` | Time is an I/O module |
 | `des-018` | Every I/O module declares its forbid list |
+| `des-019` | Event-driven targeted observation |
 | `tst-001` | Fakes that behave |
 | `tst-002` | Fast tests |
 | `tst-003` | Measured performance, no blind waits |
@@ -47,6 +49,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `wrk-007` | One piece of work, one issue; no command files issues on its own |
 | `wrk-008` | Neutral by construction |
 | `wrk-009` | Visible sessions |
+| `wrk-010` | Report all friction |
 | `dec-001` | Class or case |
 | `dec-002` | Is the problem real |
 | `dec-003` | Keep what we have |
@@ -66,9 +69,10 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `pub-005` | Private terms stay local |
 | `pub-006` | Never bypass the hooks |
 | `pub-007` | One se version per check |
+| `pub-008` | Roles, not personal names |
 | `p-go-001` | The rule of five |
 | `discover-cheap-load-late` | Progressive disclosure and lazy loading: what a command or module is comes from its declaration alone, and its code loads on first use. Read it before you add, list or rewrite a command, a component or a module. |
-| `flake-at-base` | How to tell a flake from your own failure: rerun the one test at the integration branch with a high repeat count. Load it before treating a red test as yours. |
+| `flake-at-base` | How to diagnose a failing test without excusing it: repeat the test at the integration branch, then fix the red check before delivery. |
 | `generated-files-are-marked` | Every file a program writes says so in its first line, naming its generator and its source, and generated.yaml declares it. Read it before you write a generator, change what one writes, or edit a file that says DO NOT EDIT. |
 | `go-module-shape` | The one shape of a new Go module: scaffolded from the go-module template, its go.mod marked, one package with its entry Run and its test. Read it before you create or reshape a Go module. |
 | `guidance-comes-first` | How SE guidance reaches you and how to ask for it on a topic. Read it before any work SE guides. |

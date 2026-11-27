@@ -3,12 +3,10 @@
 # repository.
 # Read by scripts/door_report.py, whose docstring owns the keys.
 door = "git"
+level = "error"
 files = ["scripts/git_door.py", "tests/fake_git.py"]
 contract_tests = ["tests/test_git_door.py"]
 commands = ["git"]
 imports = []
 calls = []
 literals = []
-
-# Empty, like hygiene.py's GIT_ALLOWED: no git subprocess is left outside the door.
-[baseline]

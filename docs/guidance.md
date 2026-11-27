@@ -189,7 +189,6 @@ shrinks to a pointer. No backwards compatibility: links move with the text.
 | The catch-up and decision skills | notes under `guidance/se/` and `guidance/decision/`; the decision deck's guidance becomes the guidance of the decision template |
 | The agent definitions, `src/agents/*.md` | only the box and the role's tags stay; their procedure steps become notes tagged with the role |
 | A project's `AGENTS.md` | the project's own `guidance/` tree; `AGENTS.md` keeps what a host reads before any tool runs: the setup command and the line that the guidance command comes first |
-| Draft skills under `drafts/skills/` | notes in a folder its setting switches on, as the drafts are included today |
 
 - **One owner still.** A rule that several notes need lives in one note, at the depth where all
   of them sit; the others link to it, as SPOT asks
