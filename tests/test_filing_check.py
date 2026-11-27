@@ -111,8 +111,11 @@ def test_filing_is_refused_while_a_retro_is_open_naming_it_and_nothing_is_filed(
     open_retro = issue(40, "retro-due-20261120", created="2026-11-20T00:00:00Z", labels=("retro",))
     for command in ("file", "backlog file"):
         with pytest.raises(work_tickets.ReviewDueError,
-                           match=rf"^work_tickets.py {command}: the retro #40 is open; {command} "
-                                 "files no other issue until every finding has an outcome"):
+                           match=rf"^work_tickets.py {command}: the retro #40 is open and its report "
+                                 r"is not in; post it with `uv run python .*/scripts/retro.py file 40 "
+                                 rf".*`retro.py collect 40` writes\), then file its findings with "
+                                 rf"`--finding 40:<k>`; {command} files no other issue until every "
+                                 "finding has an outcome"):
             check(tmp_path, Door(opened=[open_retro], **landed(25)), command)
     assert filed == []
     found = retro.countdowns(Door(opened=[open_retro], **landed(3, "2026-11-21T00:00:00Z")),
@@ -270,14 +273,40 @@ def test_every_run_kind_files_its_own_findings_once_its_report_is_in(tmp_path, f
     assert filed == []
 
 
+def blessed_door(kind: str, closed: bool) -> "Door":
+    """Run #40 of `kind`, blessed with two findings: open, or closed by its blessing."""
+    run = dict(OPEN_RUNS[kind])
+    if closed:
+        run.update(state="closed", closed_at="2026-11-21T00:00:00Z", state_reason="completed")
+    comments = {40: [{"body": retro.report_state_comment("blessed", 2)}]}
+    return Door(closed=[run], comments=comments) if closed else Door(opened=[run], comments=comments)
+
+
 @pytest.mark.parametrize("kind", sorted(retro.RUN_KINDS))
-def test_every_run_kinds_report_opens_its_findings_and_its_last_outcome_closes_it(kind,
-                                                                                  monkeypatch):
-    """Each kind's report posts its report state, so it stays open for its findings (one with
-    none closes at once), and the outcome of its last finding closes it."""
+def test_a_blessed_run_of_every_kind_holds_nothing_and_its_findings_stay_fileable(tmp_path, filed,
+                                                                                  kind):
+    """No run deadlocks the filing it holds (SE#2006): a blessed run, open while its closing write
+    is pending or closed by it, refuses no filing, and its findings are filed with `file --finding`
+    after it, the overhaul's as the retro's."""
+    for closed in (False, True):
+        door = blessed_door(kind, closed)
+        check(tmp_path, door)
+        assert check_kind(tmp_path, door, retro.FindingRef("40:1")) == kind
+        with pytest.raises(work_tickets.ReviewDueError, match="finding 3 is not in the report"):
+            check(tmp_path, door, finding=retro.FindingRef("40:3"))
+    assert filed == []
+
+
+@pytest.mark.parametrize("kind", sorted(retro.RUN_KINDS))
+def test_every_run_kinds_report_opens_its_findings(kind, monkeypatch):
+    """A retro's report puts it in report state, open for its findings until its blessing or its
+    last outcome; an overhaul's report is its blessing and closes it, the gate open; a report with
+    no finding closes either at once. An outcome on a blessed run records it and closes nothing."""
     steps = retro.file_steps(REPO, 40, ["the report"], 2, what=kind).steps
-    assert [step.tool for step in steps] == ["add_issue_comment", "add_issue_comment"]
-    assert steps[1].arguments["body"].startswith(retro.report_state_comment("report", 2))
+    phase = "blessed" if kind == "overhaul" else "report"
+    assert steps[1].arguments["body"].startswith(retro.report_state_comment(phase, 2))
+    assert [step.tool for step in steps][-1] == ("issue_write" if kind == "overhaul"
+                                                 else "add_issue_comment")
     assert [step.tool for step in retro.file_steps(REPO, 40, ["r"], 0, what=kind).steps][-1] == \
         "issue_write"
 
@@ -285,7 +314,7 @@ def test_every_run_kinds_report_opens_its_findings_and_its_last_outcome_closes_i
         missing: list = []
 
         def __init__(self):
-            self.given = [{"body": retro.report_state_comment("report", 2)}]
+            self.given = [{"body": retro.report_state_comment(phase, 2)}]
             self.closed = False
 
         def comments(self, number):
@@ -305,7 +334,8 @@ def test_every_run_kinds_report_opens_its_findings_and_its_last_outcome_closes_i
     retro.record_outcome(Path("."), REPO, retro.FindingRef("40:1"), "merged", "2", door)
     assert door.closed is False
     retro.record_outcome(Path("."), REPO, retro.FindingRef("40:2"), "issue", "99", door)
-    assert door.closed is True and retro.filing_state(door.given).phase == "done"
+    assert door.closed is (kind == "retro")
+    assert retro.filing_state(door.given).outcomes == {1: ("merged", "2"), 2: ("issue", "99")}
 
 
 def check_kind(tmp_path: Path, door: Door, finding) -> str | None:

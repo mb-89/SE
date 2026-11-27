@@ -23,10 +23,10 @@ document of the overhaul template (`report`): the verdicts, what was looked at, 
 question blocks, each finding with its kind (`work`, which SE files, or `decision`, for the
 owner's decision list; a rule change is always a decision), then the facts and the block, which
 `judgment_problems` checks through the adapter template `templates/overhaul-judgment.md`
-(JUDGMENT_TEMPLATE), as a comment on the overhaul issue, then its report state, as a retro's
-(retro.py RUN_KINDS): SE files each finding with `work_tickets.py file --finding <overhaul>:<k>` or
-records it with `retro.py outcome`, and the last outcome closes the issue; a report with no finding
-closes it at once.
+(JUDGMENT_TEMPLATE), as a comment on the overhaul issue, then its blessed state, and closes the
+issue: the report is its blessing (retro.py RUN_KINDS, file_steps), the filing gate open, and SE
+files each finding with `work_tickets.py file --finding <overhaul>:<k>` or records it with
+`retro.py outcome`, as a blessed retro's.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -585,7 +585,7 @@ STRAYS = ("none", "slightly", "far")
 # answer): the outside world, the consistency of the whole, the rule book itself, the retros'
 # effect, speed, what to mechanize and what to remove.
 LOOKED_AT = ("outside", "consistency", "rules", "retro", "speed", "mechanize", "removal")
-FINDING_FIELDS = ("title", "body", "rule", "place", "controversial", "why", "sources")
+FINDING_FIELDS = ("title", "body", "rule", "place", "controversial", "why", "sources", "others")
 # A finding's `rule` for a rule the book lacks: a rule change.
 NEW_RULE = "new"
 WORK, DECISION = "work", "decision"
@@ -944,7 +944,9 @@ def draft(found: Gathered) -> str:
               f"({', '.join(LOOKED_AT)}; \"nothing to change\" is an answer); `findings`, each "
               f"with `title` (five words or more, the fix), `body`, `rule` (a rule's id, or "
               f"`{NEW_RULE}` for one the book lacks), `place` (the file it changes), "
-              "`controversial` with its `why`, and optionally `sources`; `went_well`. A finding "
+              "`controversial` with its `why`, optionally `sources`, and for the deck `others` "
+              "(how two or more outside tools or conventions solve the same problem, its decision "
+              "note's What others do); `went_well`. A finding "
               "that changes a rule (its place is the rule book, or its rule is "
               f"`{NEW_RULE}`) is always a decision for the person. This part is not posted.",
               JUDGE_END, "", BLOCK_MARKER, review.fenced(block, "yaml")]
@@ -1119,7 +1121,7 @@ def report(text: str, block: dict, number: int) -> str:
                f"it, and records a finding another one takes as merged into it; the {DECISION} "
                f"findings ({', '.join(map(str, decisions)) or 'none'}), every rule change among "
                "them, go on the owner's decision list, then are filed or declined the same way. "
-               "The last outcome closes the overhaul.")
+               "This report closes the overhaul; its findings stay fileable.")
     fields = {
         "verdicts": "\n".join(verdicts),
         "looked_at": "\n".join(f"- **{part}**: {one_line(block['looked_at'][part])}"
@@ -1138,16 +1140,19 @@ def report(text: str, block: dict, number: int) -> str:
 
 
 def finding_chapter(item: dict) -> tuple[str, str]:
-    """A judged finding as its decision chapter of the deck: it opens with the finding itself, then its
-    rule, its place and its sources, and last what the person decides (their go for `work`, their
-    decision for `decision`, every rule change among them)."""
+    """A judged finding as its decision chapter of the deck, a note of the decision template that
+    retro_deck.finding_note writes: the finding is its current situation, its rule, place and sources
+    the problem, the judge's `others` what others do, and the change against keeping what we have the
+    options; a decision's `why` (every rule change among them) is the change's cost."""
     change = " (a rule change)" if item["rule_change"] else ""
-    lines = [item["body"].strip(), "", f"Rule: {item['rule'].strip()}{change}.", "",
-             f"Place: `{item['place'].strip()}`."]
-    lines += [f"- Source: {source.strip()}" for source in item.get("sources") or []]
-    lines += ["", f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
-              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
-    return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
+    sources = "; ".join(source.strip() for source in item.get("sources") or [])
+    problem = (f"Rule: {item['rule'].strip()}{change}. Place: `{item['place'].strip()}`."
+               + (f" Sources: {sources}." if sources else ""))
+    what = ("It is the person's decision." if item["kind"] == DECISION
+            else "Bless sends it to SE, which bundles it into a work issue.")
+    losses = item["why"].strip() if item["kind"] == DECISION else "One work issue."
+    return f"{item['finding']}. {item['title'].strip()}", sibling("retro_deck").finding_note(
+        item, problem, what, losses)
 
 
 def deck_parts(text: str, block: dict, number: int
@@ -1172,10 +1177,10 @@ def run_deck(args: argparse.Namespace) -> int:
     work_tickets = sibling("work_tickets")
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
-    steps, decisions = deck_parts(text, block, args.overhaul)
     deck = sibling("retro_deck")
     count = len(block["findings"])
     try:
+        steps, decisions = deck_parts(text, block, args.overhaul)
         written = deck.text(f"Overhaul #{args.overhaul}",
                             f"{len(block['verdicts'])} rules judged: {count} finding{'' if count == 1 else 's'}",
                             steps, decisions)
@@ -1199,7 +1204,7 @@ def run_file(args: argparse.Namespace) -> int:
     steps = retro.file_steps(tracker, args.overhaul, [report(text, block, args.overhaul)],
                              findings=len(findings), what="overhaul")
     status = (" and closed it, as it has no finding" if not findings
-              else f"; it stays open until each of its {len(findings)} findings has an outcome")
+              else f" and closed it, the filing gate open for its {len(findings)} findings")
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
@@ -1210,8 +1215,7 @@ def run_file(args: argparse.Namespace) -> int:
     print(f"Overhaul #{args.overhaul}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
           f"{DECISION} finding(s), {sum(item['rule_change'] for item in findings)} of them rule "
           f"changes; no issue filed: SE files each with `work_tickets.py file --finding "
-          f"{args.overhaul}:<k>` or records it declined or merged with `retro.py outcome`, and the "
-          "last outcome closes the overhaul")
+          f"{args.overhaul}:<k>` or records it declined or merged with `retro.py outcome`")
     return 0
 
 
@@ -1258,8 +1262,8 @@ def run_facts(args: argparse.Namespace) -> int:
 COMPONENTS = (sibling("se_components").Group(
     "overhaul", "Overhaul",
     "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, "
-    "from the judged draft, file checks the judged draft and posts its report, which opens the "
-    "filing of its findings, and "
+    "from the judged draft, file checks the judged draft, posts its report and closes the issue, "
+    "its findings fileable, and "
     "facts lists a checkout's pruning facts.",
     ("new", "read", "deck", "file", "facts")),)
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
@@ -1323,14 +1327,14 @@ def make_parser() -> argparse.ArgumentParser:
                               help="the person's answers (answers.json): build the deck as their record")
     deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
-        "file", help="check a judged overhaul draft and post its report on the overhaul issue",
+        "file", help="check a judged overhaul draft and close the overhaul issue with its report",
         description="Check the judgment in the draft's block, refusing an incomplete one and "
                     "writing nothing; post the report (the verdicts, what was looked at, each "
                     f"finding with its kind, {WORK} or {DECISION}, a rule change always a "
                     f"{DECISION}, then the facts and the block) on the overhaul issue, then its "
-                    "report state. It files no issue: SE files each finding with work_tickets.py "
-                    "file --finding <overhaul>:<k> or records it with retro.py outcome; the last "
-                    "outcome closes the overhaul, and a report with no finding closes it at once.")
+                    "blessed state, and close it: the report is its blessing, the filing gate "
+                    "open. It files no issue: SE files each finding with work_tickets.py file "
+                    "--finding <overhaul>:<k> or records it with retro.py outcome.")
     file_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
     file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
                               help="the draft overhaul.py read wrote, its block judged")

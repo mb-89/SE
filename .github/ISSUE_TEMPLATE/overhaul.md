@@ -44,14 +44,14 @@ None.
    we can learn from it among them, and fills its block: a verdict per rule, every `looked_at`
    part, the `findings` (each naming its rule, its place and its body) and `went_well`.
 3. `uv run python <se>/scripts/overhaul.py file <this issue> --draft <draft>` checks the
-   judgment and the answers and posts the report here, filing no issue.
+   judgment and the answers, posts the report here and closes this issue, filing no issue.
 4. SE gives each finding an outcome, a `decision` finding after the owner decides: a work issue
    with `work_tickets.py file --finding <this issue>:<k>`, naming `overhaul #<n> finding <k>`, or
-   declined or merged with `retro.py outcome`; the last outcome closes this issue.
+   declined or merged with `retro.py outcome`.
 
 ## Acceptance
 
-- [ ] The report is posted here, and every finding has an outcome, which closes this issue.
+- [ ] The report is posted here and this issue is closed.
 
 ## Verification
 

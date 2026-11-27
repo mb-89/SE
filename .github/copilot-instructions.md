@@ -49,3 +49,43 @@
 - Batch authored-content reads when a field-report guard checks a whole tree; one `git show` per
   tracked path exceeded the delivery timebox. Wrong: start one Git process per file; right: list
   the matching blobs once and read them with `git cat-file --batch`.
+- A default argument binds a module constant when the function is defined, so a test that
+  monkeypatches the constant does not reach it; write `limit=None` and `limit or CONSTANT`
+  in the body.
+- A refusal names its cause and the one command that removes it (`retro.py file <n>`,
+  `retro.py collect <n>`, the sync of a lagging mirror); a refusal that only says "no" costs
+  a round trip to SE and was read as a gate to respect.
+- Origin may be a mirror that lags another remote: an "is SE current" check that reads only
+  origin's tags reports current while a newer release exists; read the other remotes too.
+- When inserting a test above another with the edit tool, end `new_str` with the following
+  test's `def` line intact; dropping it silently merges two tests.
+- A fixing-command hint is not an end-to-end fix: test the person's next action through the gate,
+  closure and read-back in one call. Keep approval separate from later finding outcomes.
+- Freeze effective template fields, nested templates and rule settings, not just a version label.
+  Reopening or an explicit version bump starts a new input phase; a routine check never does.
+- Store a file's frozen-input metadata in front matter, not a long comment in its body: downstream
+  document builders lint body paragraphs and must not render template guidance.
+- A legacy document without saved inputs must not be stamped with today's schema under its older
+  version: resolve that version first, or preserve the legacy record and its explicit diagnostic.
+- Find existing test filenames before selecting a runner command; names inferred from the feature
+  can miss the real suite. Run slow obs-backed files separately to respect a command's timebox.
+- A rule book entry states its rule in one sentence; put its mechanism and examples under
+  Implementations rather than adding sentences to the rule itself.
+- Separate pytest invocations that use the same obs setup lock are not independent; run them
+  serially instead of turning setup contention into repeated three-minute timeouts.
+- Compare a frozen template's effective fields and version in round-trip tests, not its source
+  path or worked examples: those are deliberately not portable acceptance inputs.
+- Privacy regression fixtures construct generic forbidden paths from components; a literal full
+  profile path in tracked test source is itself rejected by the public check.
+- Read a maintenance generator's entry point before passing `--help`: a script without an argument
+  parser may regenerate unconditionally rather than display usage.
+- Upward delivery notices obey the same recipient-status rule as orders: steer a running chat,
+  queue otherwise, retry `cannotSteer` with the identical queued message, and verify once.
+- When a requested guidance change replaces a protected sentence, update its existing assertion
+  to enforce the new rule and retained safeguards, rather than leaving the old rule in the test.
+- Deliver local decks as standalone HTML through an absolute-path Markdown link, never a
+  background server; accept chat verdicts and do not assume a local Send saves answers.
+- Use roles, never personal names, in decision notes and tracked or public output; private
+  names belong only in the ignored local scan list, never a committed example or term list.
+- A timeboxed full-tree report guard is incomplete, not passed; targeted introspection can
+  inventory replaced text but cannot stand in for the acceptance check.

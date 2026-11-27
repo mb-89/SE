@@ -121,42 +121,42 @@ and the report it files as one comment.
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, deck builds
-its one report, a deck, from the judged draft, file checks the judged draft and moves the retro
-issue to report state, outcome records each finding's disposition, and due says whether a retro or
-an overhaul is due or open.
+its one report, a deck, from the judged draft, bless opens filing and closes the retro in one call,
+file checks the judged draft and moves the retro issue to report state, outcome records each
+finding's disposition, and due says whether a retro or an overhaul is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `retro.py bless` | `retro.py bless [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | bless an answered draft, open the filing gate and close the retro in one call |
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
-| `retro.py deck` | `retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
+| `retro.py deck` | `retro.py deck [--draft FILE] --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
-| `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
+| `retro.py file` | `retro.py file [--draft FILE] [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and move the retro issue to report state |
 | `retro.py outcome` | `retro.py outcome (--issue ISSUE \| --declined REASON \| --merged-into FINDING) [--worktree WORKTREE] [--repo REPO] RUN:FINDING` | record a finding's issue, declined or merged outcome on its retro or overhaul |
 
 #### Overhaul
 
 `components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
-report, a deck, from the judged draft, file checks the judged draft and posts its report, which
-opens the filing of its findings, and facts lists a checkout's pruning facts.
+report, a deck, from the judged draft, file checks the judged draft, posts its report and closes the
+issue, its findings fileable, and facts lists a checkout's pruning facts.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
-| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and post its report on the overhaul issue |
+| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
 | `overhaul.py new` | `overhaul.py new [--worktree WORKTREE] [--repo REPO]` | file the overhaul issue through work_tickets.py file |
 | `overhaul.py read` | `overhaul.py read [--out FILE] [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO] overhaul` | write an overhaul's draft |
 
 #### Render
 
 `components/render`: The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py
-builds a deck of decisions, serves it and reads its answers.
+builds a deck of decisions and reads its answers.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `deck.py answers` | `deck.py answers [--record FOLDER] [--destination DESTINATION] answers` | print what the answers ask the agent to act on |
 | `deck.py build` | `deck.py build --destination DESTINATION [--host {claude-app,claude-code,copilot,local}] folder` | build a folder of decision notes into one deck |
-| `deck.py serve` | `deck.py serve [--wait] [--timeout S] artifact` | serve a deck locally and print the answers it is sent |
 | `timeline.py` | `timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT] [--config CONFIG]` | Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first. |
 
 #### Scaffold
@@ -316,7 +316,13 @@ Steps 3 to 5 it builds from the same record:
   `open`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
-commands read from the committed draft. `--json` prints the block's data alone.
+commands read from the filed retro. `--json` prints the block's data alone.
+
+The draft has one known path on the machine, `~/.se/retros/<owner>/<repo>/retro-<n>.md`.
+`collect` writes it there unless `--out` names another file (`--out -` prints it).
+
+`deck`, `bless` and `file` read it from there unless `--draft` names another, so no session searches
+another's folders. Where none is there, they name that path and `retro.py collect` for the retro.
 
 `--sessions <file>` adds the cloud sessions' costs: the file holds each session `list_sessions`
 lists, with its `list_events` result events (kinds `["result"]`) as `"events"`. Each session is
@@ -328,10 +334,16 @@ Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](../src/skills/work-model/SKILL.md#without-gh)).
 
-`retro.py file` files a judged retro, the draft committed as the retro doc on the integration
-branch. The judge completes the collected facts, timeline, matrix, answers to the standing
-questions, and classes and homes; the decisions step leaves findings open for the deck. The judge
-also fills the draft's block:
+`retro.py bless` is the one call after the person checks and blesses the prefilled report:
+it records approval, immediately opens this retro's filing gate, posts the report and closes the
+issue, then reads both back. It needs no landed document, update, build or second session.
+
+Network calls share one minute; repeating the same command resumes partial writes.
+Finding outcomes stay independently tracked and never hold this gate.
+
+`retro.py file` retains the report-state path for a judged retro. The judge completes the collected facts,
+timeline, matrix, answers to the standing questions, and classes and homes; the decisions step
+leaves findings open for the deck. The judge also fills the draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
@@ -346,28 +358,39 @@ a finding on the rule book, or on a check that recurred, that is not controversi
 went well.
 
 It refuses, too, a draft whose steps break the retro template, a step or a standing question left
-open among them, and a draft the integration branch does not hold as it stands: land it there
-first.
+open among them. Collected drafts record their template version and effective rules; checks use
+those inputs even after the template changes. `templates.py renew retro --body-file <draft>`
+explicitly adopts the newest inputs; reopening starts a new input phase.
+
+A draft predating that record whose steps differ only in their headings (the
+six-step template's field feedback first) is read in the current form: its field feedback moves
+under Collect as a `### Field feedback` section, and `file` and `deck` say so.
 
 It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report proper on the retro issue, then its report state, which opens the filing of
-its findings ([docs/fleet.md "Retro due"](fleet.md#retro-due)); the last outcome closes the issue.
+it posts the report proper on the retro issue and leaves it open for the findings' outcomes.
 
-The report opens with `<!-- se:retro-report -->` and is a document of the retro template. It links
-the committed retro doc for the collected facts and block, and carries the drafted timeline,
-standing-question matrix and answers, and the judged classes, strongest home first, each with its
-cause, fix, home and state against the tree, and its findings, numbered, each with its home and its
-kind:
+The report opens with `<!-- se:retro-report -->` and is a document of the retro template. Where
+the integration branch holds the draft as it stands, it links that retro doc for the collected
+facts and block. A retro doc (`docs/retro-*.md`) lands without a work issue, a field report or
+runners.
+
+Otherwise it carries the drafted facts itself, and the block follows in its own comments, each a
+`<!-- se:retro-block <k>/<n> -->` line over a fenced piece of the block's JSON, so filing needs no
+landing.
+
+It carries the drafted timeline, standing-question matrix and answers, and the judged classes,
+strongest home first, each with its cause, fix, home and state against the tree, and its findings,
+numbered, each with its home and its kind:
 
 - `work`: SE files each with `work_tickets.py file`'s `--finding`, its work issue naming
   `retro #<n> finding <k>`, and records a finding another takes as merged into it;
 - `decision`: for the owner's decision list.
 
 It then records what went well and leaves each finding open until its outcome is recorded. The
-standalone deck carries the person's decisions. The facts and the block stay in the retro doc,
-which the report links at the integration branch's commit (the message `templates/retro-doc.md`),
-where the next collect and overhaul read them.
+standalone deck carries the person's decisions. The next collect and overhaul read the facts and
+the block from the retro doc the report links (the message `templates/retro-doc.md`), or from the
+block comments where it links none.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
 without its markers, so no part is checked as a whole report: `file` checked the whole first.
@@ -382,14 +405,23 @@ The deck is a document of the retro-deck template
 ([templates/retro-deck.md](../templates/retro-deck.md)), built with obs
 (`scripts/retro_deck.py`):
 
-- a title page with exactly two lines: `<repository name>: Retro #<n>` and `Retro report`;
+- a title page with exactly two lines: `<repository name>: Retro #<n>` and its document type,
+  `Retro report`, rendered once (a retro has no subtitle);
 - every step the retro ran, one chapter each, each thing once: what was collected, the table of
   what happened (its one table, the chapters of the window), the standing questions with their one
   matrix and the field reports' answers, and the classes with their causes, fixes and
   homes, each naming its findings;
-- then, on the last pages, one decision chapter per finding, each opening with its current
-  situation and asking the person for a bless: their go for a `work` finding, their decision for
-  a `decision` finding; finally, `Anything else?` with `Nothing else` as its only default answer.
+- then, on the last pages, one decision chapter per finding, each a note of the decision template
+  ([templates/decision.md](../templates/decision.md)): its current situation, the problem (its
+  class, cause and home), what others do (the finding's `others`), then the `pugh` fence with the
+  change against keeping what we have;
+- each asks the person for a bless: their go for a `work` finding, their decision for a
+  `decision` finding;
+- finally, `Anything else?`, a decision note too, with `Nothing else` as its only selectable
+  default and its comment for anything else.
+
+A decision chapter that is no decision note is refused, naming it: the deck's shape comes from
+the templates, never from the judge.
 
 A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
 
@@ -447,7 +479,8 @@ collect` does.
 - `looked_at`, every part answered (`outside`, `consistency`, `rules`, `retro`, `speed`,
   `mechanize`, `removal`; "nothing to change" is an answer);
 - `findings`, each with `title` (five words or more), `body`, `rule` (a rule's id, or `new`),
-  `place` (the file it changes), `controversial` with its `why`, and optionally `sources`;
+  `place` (the file it changes), `controversial` with its `why`, optionally `sources`, and for
+  the deck `others` (how two or more outside tools or conventions solve the same problem);
 - `went_well`.
 
 It refuses, writing nothing, an incomplete judgment: a rule without a verdict, an empty
@@ -457,11 +490,10 @@ without a why, nothing that went well, a question of either block left unanswere
 It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
 it posts the report, opening with `<!-- se:overhaul-report -->`, on the overhaul issue, then its
-report state, as a retro does.
+blessed state, and closes the issue: the report is its blessing, the filing gate open.
 
 SE files each finding with `work_tickets.py file`'s `--finding` or records it with
-`retro.py outcome`, and the last outcome closes the issue; a report with no finding closes it at
-once ([docs/fleet.md "Retro due"](fleet.md#retro-due)).
+`retro.py outcome`, as a blessed retro's ([docs/fleet.md "Retro due"](fleet.md#retro-due)).
 
 The report is a document of the overhaul template
 ([templates/overhaul.md](../templates/overhaul.md)); its judged block stays `overhaul.py`'s to check. Without gh it prints the comments as a plan. Each

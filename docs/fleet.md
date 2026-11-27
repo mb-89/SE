@@ -138,11 +138,18 @@ overhaul) started adds 1, a partial landing among them; each other work issue la
   table, which the filing check and `retro.py outcome` read.
   - While a run is running, filing is refused with its number.
   - Once its report is in, `file --finding <run>:<finding>` may file only that finding's work issue,
-    naming `<kind> #<run> finding <finding>`; every other filing is refused.
-  - A finding may instead be recorded as declined or merged into another finding with `retro.py
-    outcome`. The run is done and closes when every finding has an outcome; a report with no
-    finding closes it at once.
+    naming `<kind> #<run> finding <finding>`; every other filing is refused. A finding may instead
+    be recorded as declined or merged into another finding with `retro.py outcome`.
   - Running work goes on, and issues keep coming back; they count towards the next run.
+- **Blessing opens the gate.** The person checks the prefilled report and blesses it;
+  `retro.py bless <issue>` records that approval, immediately releases this retro's gate, posts
+  the report and closes the issue, without a landing or another session. Network calls share one
+  minute; retrying the same command resumes partial writes without duplicate comments.
+
+  An overhaul's report is its blessing: `overhaul.py file` posts it and closes the overhaul, the
+  gate open. A blessed run's findings stay fileable with `file --finding <run>:<finding>` and
+  `retro.py outcome`, open or closed; they do not hold the gate. The older `retro.py file` path
+  still leaves a report-state retro open until its outcomes are recorded.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
   due included, and a first retro, where none has closed, the whole history from the project's
   first issue; its counters reset when it starts (its issue's creation), so a late retro never
