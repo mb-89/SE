@@ -242,8 +242,8 @@ door, and a run reads its inputs once, computes, then writes its outputs.
 
 ### des-005 Once and only once
 
-Generalize repeated code at the third repetition, not the second, since a little copying is better
-than a little dependency.
+Generalize repeated code into one helper each place calls: a block of six lines or more is written
+once, while a shorter copy is better than a little dependency.
 
 - **Why:** a fact in code has one owner like any other, but a premature abstraction costs more than
   the copy it removes.
@@ -251,8 +251,10 @@ than a little dependency.
   can change.
 - **Prevents:** duplicated and near-duplicated code; an abstraction with one real user.
 - **Implementations:**
-  - se: by judgment, the reviewer for its change; an overhaul reads the duplicate blocks and
-    near-duplicate functions [`<se>/scripts/overhaul.py facts`](../../../scripts/overhaul.py) lists.
+  - se: [`<se>/scripts/overhaul.py check`](../../../scripts/overhaul.py) refuses a block of six
+    lines or more written twice in SE's scripts, in the commit hook and `<se>/scripts/hygiene.py`'s
+    check `code`; the reviewer judges a near-duplicate for its change; an overhaul reads the helpers to
+    make and the near-duplicate functions `overhaul.py facts` lists.
   - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
 - **Related:** gen-002, des-006
 
@@ -384,8 +386,11 @@ another place holds.
 - **Without it:** dead code accumulates and misleads readers about what the system does.
 - **Prevents:** dead code; code for a retired state; a second copy of a fact in code.
 - **Implementations:**
-  - se: "No backwards compatibility unless asked" ([`AGENTS.md`](../../../AGENTS.md)); otherwise
-    by judgment, from what [`<se>/scripts/overhaul.py facts`](../../../scripts/overhaul.py) finds nothing but tests reaches.
+  - se: "No backwards compatibility unless asked" ([`AGENTS.md`](../../../AGENTS.md));
+    [`<se>/scripts/overhaul.py check`](../../../scripts/overhaul.py) refuses a definition in
+    SE's scripts that nothing reaches, not even a test, in the commit hook and
+    `<se>/scripts/hygiene.py`;
+    otherwise by judgment, from what `overhaul.py facts` finds only tests reach.
   - Go line (frozen): the battery's `deadcode -test`; `se overhaul read`'s pruning facts.
 - **Related:** des-006, gen-002
 

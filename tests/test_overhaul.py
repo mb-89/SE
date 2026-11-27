@@ -164,14 +164,114 @@ def test_facts_measure_sizes_lengths_and_the_untouched_and_change_nothing(checko
     assert git_door.run("status", "--porcelain", root=checkout).stdout == ""
 
 
+def test_check_refuses_a_block_written_twice_and_code_nothing_reaches_and_warns_at_warn(checkout, capsys):
+    """The code check (overhaul.py check) refuses each class at its built-in level error, naming
+    every case and the remedy, with no baseline: the fixture's copies and its dead function fail
+    from the first. At warn ([overhaul] in se.toml) it names them and passes."""
+    assert overhaul.main(["check", "--repo", str(checkout)]) == 1
+    refused = capsys.readouterr().err
+    assert "error: duplicate_blocks: 1 found; make one helper each place calls (des-005)" in refused
+    assert re.search(r"  7 lines: scripts/app\.py:\d+-\d+ and scripts/lib\.py:\d+-\d+", refused)
+    assert "error: dead_code: 1 found; delete each" in refused
+    assert "  scripts/app.py:26 function nothing_reaches" in refused
+    settings = checkout / "se.toml"
+    settings.write_text(settings.read_text(encoding="utf-8")
+                        + '\n[overhaul]\nduplicate_blocks = "warn"\ndead_code = "warn"\n', encoding="utf-8")
+    assert overhaul.main(["check", "--repo", str(checkout)]) == 0
+    warned = capsys.readouterr().out
+    assert "warn: duplicate_blocks: 1 found" in warned and "warn: dead_code: 1 found" in warned
+    settings.write_text('[overhaul]\ndead_code = "off"\n', encoding="utf-8")
+    assert overhaul.main(["check", "--repo", str(checkout)]) == 2
+    assert "overhaul.dead_code" in capsys.readouterr().err
+
+
+# Two scripts that write alike only what no helper could share: their imports and the
+# python-script template's entry.
+SHARED_SHAPE = """\
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+import se_script
+
+
+def main(argv=None) -> int:
+    return len(sys.argv) + len(json.dumps(os.environ.get("{name}", "")))
+
+
+if __name__ == "__main__":
+    raise SystemExit(se_script.run(main))
+"""
+
+
+def test_check_reads_a_tree_without_git_and_counts_no_imports_or_script_entry_as_a_copy(tmp_path, capsys):
+    """A commit check's copy of the index holds no git (commit_checks.py): check reads the files.
+    Scripts whose imports and entry are alike hold no duplicate block."""
+    (tmp_path / "scripts").mkdir()
+    for name in ("one", "two"):
+        (tmp_path / "scripts" / f"{name}.py").write_text(SHARED_SHAPE.replace("{name}", name), encoding="utf-8")
+    assert not (tmp_path / ".git").exists()
+    assert overhaul.main(["check", "--repo", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.startswith("overhaul.py check: passed: no duplicate block and no dead code")
+
+
+PLUGIN = """\
+\"\"\"A pytest plugin and the condition a template names.\"\"\"
+
+
+class Plugin:
+    def pytest_configure(self, config):
+        return configured()
+
+
+def configured():
+    return 1
+
+
+def judged(value):
+    return isinstance(value, dict)
+
+
+PLUGIN = Plugin()
+"""
+
+
+def test_a_pytest_hook_and_a_templates_script_reference_reach_their_definitions(tmp_path, capsys):
+    """pytest's plugin manager calls a plugin's `pytest_<hook>` by name, and templates.py resolves a
+    template's `<script>:<name>`: neither is dead code, nor is what they call."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "plugin.py").write_text(PLUGIN, encoding="utf-8")
+    assert overhaul.main(["check", "--repo", str(tmp_path)]) == 1
+    assert capsys.readouterr().err.splitlines()[1:] == ["  scripts/plugin.py:13 function judged"]
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "judged.md").write_text("checks:\n  when: plugin:judged\n", encoding="utf-8")
+    assert overhaul.main(["check", "--repo", str(tmp_path)]) == 0
+
+
+def test_helpers_group_the_places_their_duplicate_blocks_join(checkout, capsys):
+    """Each overhaul's duplicate facts become the helpers to make: places one block joins, or
+    overlapping spans of one file, are one helper, the most places first."""
+    blocks = [{"lines": 6, "a": "scripts/a.py:1-6", "b": "scripts/b.py:3-8"},
+              {"lines": 7, "a": "scripts/a.py:2-8", "b": "scripts/c.py:10-16"},
+              {"lines": 6, "a": "scripts/d.py:1-6", "b": "scripts/e.py:1-6"}]
+    assert overhaul.helpers(blocks) == [
+        ["scripts/a.py:1-6", "scripts/a.py:2-8", "scripts/b.py:3-8", "scripts/c.py:10-16"],
+        ["scripts/d.py:1-6", "scripts/e.py:1-6"]]
+    assert overhaul.main(["facts", "--repo", str(checkout)]) == 0
+    assert re.search(r"- one helper for scripts/app\.py:\d+-\d+, scripts/lib\.py:\d+-\d+",
+                     capsys.readouterr().out)
+
+
 def cpu_seconds() -> float:
     """This process's CPU time and its waited-for children's (facts' git reads), user and system."""
     now = os.times()
     return now.user + now.system + now.children_user + now.children_system
 
 
-# What of se facts reads: its code, its tests and its authored content.
-SE_PARTS = ("scripts", "tests", "src", "docs", "README.md", "AGENTS.md", "se.toml")
+# What of se facts reads: its code, its tests, its authored content and its templates.
+SE_PARTS = ("scripts", "tests", "src", "docs", "templates", "README.md", "AGENTS.md", "se.toml")
 
 
 def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_door):
@@ -194,6 +294,9 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
     found = facts(root, capsys)
     assert cpu_seconds() - started < 10 * time_bound.SCALE
     assert {row["script"] for row in found["sizes"]} >= {"scripts/work_tickets.py"}
+    # SE's own scripts hold the code check's two classes at none (overhaul.py check, at error).
+    assert (found["duplicates"], found["helpers"]) == ([], [])
+    assert [item for item in found["unreached"] if not item["tests"]] == []
 
 
 # A coverage run (overhaul.py coverage) of the fixture: each case's lines in its call, its seconds

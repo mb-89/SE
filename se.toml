@@ -49,6 +49,8 @@ generated = ["uv", "run", "--no-project", "python", "scripts/generated.py", "che
 readme = ["uv", "run", "--no-project", "python", "scripts/readme.py", "check"]
 # Every reach outside a declared door, at its door's level (scripts/door_report.py).
 doors = ["uv", "run", "--no-project", "python", "scripts/door_report.py"]
+# No block written twice and no dead code in scripts/ (scripts/overhaul.py check; des-005, des-015).
+code = ["uv", "run", "--no-project", "python", "scripts/overhaul.py", "check"]
 
 # How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
 # integrator's own, so no commit on main carries an address (docs/settings.md "Landing on main").
