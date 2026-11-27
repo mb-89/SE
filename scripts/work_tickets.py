@@ -5978,19 +5978,23 @@ def field_report_placeholders() -> list[str]:
     return list(dict.fromkeys(re.findall(r"#?<[^<>\n]+>", header)))
 
 
-def ensure_labels(root: Path, repo: str, labels: list[str]) -> None:
-    """Create each of `labels` that `repo` does not have yet, after one listing."""
+def ensure_labels(root: Path, repo: str, labels: list[str]) -> list[str]:
+    """`labels` as `repo` spells them, after one listing: GitHub compares label names without
+    case, so a label that differs from an existing one only in case is that one; each other
+    label is created."""
     existing = json.loads(run_gh(root, [
         "label", "list", "--json", "name", "--limit", "500", *repo_arguments(repo),
     ]) or "[]")
-    names = {label["name"] for label in existing}
+    names = {str(label["name"]).casefold(): str(label["name"]) for label in existing}
     for label in labels:
-        if label not in names:
+        if label.casefold() not in names:
             run_gh(root, [
                 "label", "create", label, "--color", "c5def5",
                 *(("--description", LABEL_DESCRIPTIONS[label]) if label in LABEL_DESCRIPTIONS else ()),
                 *repo_arguments(repo),
             ])
+            names[label.casefold()] = label
+    return [names[label.casefold()] for label in labels]
 
 
 def work_labels(root: Path, explicit: str | None) -> list[str]:
@@ -6737,7 +6741,7 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
                 "body": str(arguments["body"]), "labels": labels}), "issue")
             state.update(number=number, url=issue_url(repo, number))
             return {"number": number}
-        ensure_labels(root, repo, labels)
+        labels = ensure_labels(root, repo, labels)
         output = run_gh_with_body(root, [
             "issue", "create", "--title", str(arguments["title"]),
             *(argument for label in labels for argument in ("--label", label)),
@@ -6759,7 +6763,7 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
                             [*have, *(label for label in labels if label not in have)])
             state["number"] = existing
             return
-        ensure_labels(root, repo, labels)
+        labels = ensure_labels(root, repo, labels)
         run_gh_with_body(root, [
             "issue", "edit", str(existing), "--title", str(arguments["title"]),
             *(argument for label in labels for argument in ("--add-label", label)),

@@ -6781,6 +6781,8 @@ class LabelledGh:
         if command == ["label", "list"]:
             return json.dumps([{"name": name} for name in sorted(self.labels)])
         if command == ["label", "create"]:
+            if arguments[2].casefold() in {name.casefold() for name in self.labels}:
+                raise work_tickets.QueueError("gh: HTTP 422: Validation Failed (already_exists)")
             self.labels.add(arguments[2])
             return ""
         if command == ["issue", "create"]:
@@ -6932,6 +6934,24 @@ def test_filing_checks_the_body_with_the_one_reference_function(worktree, gh, mo
     body.write_text("A body.\n", encoding="utf-8")
     assert run(worktree, "backlog", "file", "--title", "idea", "--body-file", str(body)) == 1
     assert seen == [f"{work_tickets.FLEET_MARKER}\n{TICKET_MARKER}\nA body.\n"]
+
+
+def test_a_label_that_differs_only_in_case_is_the_existing_one(worktree, monkeypatch, capsys):
+    """GitHub compares label names without case: with `repo:se` present, filing with
+    `--repo owner/SE` creates no label and files the issue with `repo:se`."""
+    github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
+                             "url": "https://git.example/owner/se/issues/1"}})
+    github.labels = {"work", "ready", "repo:se"}
+    monkeypatch.setattr(work_tickets, "run_gh", github)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    body = worktree / "work.md"
+    body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
+
+    assert run(worktree, "file", "--title", "case-blind-labels", "--body-file", str(body),
+               "--repo", "git.example/owner/SE") == 0
+    assert github.labels == {"work", "ready", "repo:se"}
+    assert github.issues[2]["labels"] == ["work", "ready", "repo:se"]
+    assert "Filed work issue" in capsys.readouterr().out
 
 
 def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeypatch, capsys):
