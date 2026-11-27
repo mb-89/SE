@@ -49,8 +49,8 @@ var stoppedHooksVerb = cli.Verb{
 			fmt.Fprintln(c.Stderr, "se stopped-hooks: --repo and --hooks are required")
 			return 2
 		}
-		if folder, stopped := sestart.Own(context.Background(), repo, hooks); len(stopped) > 0 {
-			fmt.Fprintln(c.Stdout, sestart.StoppedLine(repo, folder, stopped))
+		if line := sestart.StoppedHooks(context.Background(), repo, hooks); line != "" {
+			fmt.Fprintln(c.Stdout, line)
 		}
 		return 0
 	},

@@ -79,6 +79,17 @@ func Own(ctx context.Context, root, hooks string) (string, []string) {
 	return folder, Stopped(names)
 }
 
+// StoppedHooks is setup's line before it sets core.hooksPath to hooks: the checkout's own hooks at
+// repo that stop running (Own), with the command that keeps them, its paths with forward slashes
+// on every platform; empty where none stops.
+func StoppedHooks(ctx context.Context, repo, hooks string) string {
+	folder, stopped := Own(ctx, repo, hooks)
+	if len(stopped) == 0 {
+		return ""
+	}
+	return StoppedLine(filepath.ToSlash(repo), filepath.ToSlash(folder), stopped)
+}
+
 // gitHooks is git's own hooks folder for the checkout at root, where core.hooksPath is unset:
 // `hooks` in the repository's common git folder, which a linked worktree's `.git` file names
 // through its `commondir`; empty outside a work tree.

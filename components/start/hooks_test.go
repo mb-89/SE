@@ -214,3 +214,20 @@ func TestProjectIsTheNearestFolderWithAnSEToml(t *testing.T) {
 		t.Fatalf("Project(given) %q", got)
 	}
 }
+
+// Setup's line names the checkout and its hooks folder with forward slashes, as on every platform
+// the Python step did (`as_posix`).
+func TestStoppedHooksNamesItsPathsWithForwardSlashes(t *testing.T) {
+	clone, _ := fresh(t)
+	folder := filepath.Join(clone, ".git", "hooks")
+	write(t, filepath.Join(folder, "pre-commit"), "#!/bin/sh\n")
+	line := start.StoppedHooks(ctx, clone, ".githooks")
+	f, c := filepath.ToSlash(folder), filepath.ToSlash(clone)
+	want := start.StoppedLine(c, f, []string{"pre-commit"})
+	if line != want || strings.Contains(line, "\\") {
+		t.Fatalf("line\n%q, want\n%q", line, want)
+	}
+	if line := start.StoppedHooks(ctx, clone, folder); line != "" {
+		t.Fatalf("the folder itself: %q", line)
+	}
+}
