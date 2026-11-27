@@ -659,6 +659,29 @@ number; it appears before the name in the title.
   has answered and nothing more is needed from that session; SE retains the answers and draft paths
   for mechanical filing and closing. Never keep a session "in case": its files survive archiving.
 
+### Done work leaves nothing behind
+
+The owner: "Delete the branch when you're done, delete the session when you're done, delete the
+work tree when you're done. It applies to everything that has to do with SE or is managed by SE."
+One rule, in every project SE works on, whatever it delivers:
+
+- **A worktree** goes after integration, as [Worktrees](#worktrees) says.
+- **A branch** goes when its pull request closes, through the project's `branch-cleanup` workflow,
+  as a cloud session cannot delete a ref itself: the closed pull request's head at once, and in
+  its sweep every other branch whose commits are all on the integration branch or that a closed
+  pull request keeps ([docs/running.md "Workflows"](../../docs/running.md#workflows)).
+  - Nothing unmerged is deleted on its own: a branch with commits nothing else keeps stays for the
+    person, and the start report lists it with every other leftover
+    ([docs/fleet.md "Leftovers"](../../docs/fleet.md#leftovers)), with the one `ref-maintenance`
+    run that deletes them.
+- **A session** goes when its work has landed or it is drained:
+  - SE archives each session it started (a reviewer, a retro, a researcher, a spike, an
+    integrator drained of work) once its work has landed or nothing more is needed from it;
+  - an integrator archives each worker it landed, right after the landing.
+
+A miss is visible: the start report's `Leftovers:` line names what is still there a day after it
+last changed, by kind.
+
 ### Suite at a moved pin
 
 When the acceptance names the complete suite and a dependency pin moves, the suite runs at the new

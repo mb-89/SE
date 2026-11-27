@@ -1123,6 +1123,9 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
     monkeypatch.setattr(work_tickets, "fleet_findings", lambda door, now, lease, name: [
         work_tickets.Finding("stray branch", 3, "closed", "delete it", branch="feat/x"),
         work_tickets.Finding("starting", 4, "started 5 minutes ago", "none")])  # healthy: not named
+    monkeypatch.setattr(work_tickets, "LeftoverDoor", lambda root, repo, base: (root, repo, base))
+    monkeypatch.setattr(work_tickets, "find_leftovers", lambda door, now: [
+        work_tickets.Leftover("unmerged branch", "feat/y", "a" * 40)])
 
     def no_door(*args):
         raise work_tickets.QueueError("gh api issues failed: HTTP 502")
@@ -1131,7 +1134,9 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
     # The overhaul countdown is on by default: a failed read names both countdowns.
     assert se_start.work_check(project) == {"retro": {"error": "gh api issues failed: HTTP 502"},
                                             "overhaul": {"error": "gh api issues failed: HTTP 502"},
-                                            "fleet": {"findings": [{"kind": "stray branch", "issue": 3}]}}
+                                            "fleet": {"findings": [{"kind": "stray branch", "issue": 3}]},
+                                            "leftovers": {"found": [{"kind": "unmerged branch",
+                                                                     "name": "feat/y"}]}}
     (project / "se.toml").write_text("[overhaul]\ndue_after = 0\ndays = 0\n", encoding="utf-8")
     assert "overhaul" not in se_start.work_check(project)  # off: read not, named not
     (project / "se.toml").unlink()

@@ -1076,6 +1076,21 @@ def test_accepted_sessions_have_one_immediate_cleanup_rule_and_role_references()
         assert "immediate cleanup rule" in normalized(path)
 
 
+def test_done_work_leaves_nothing_behind_is_one_rule_the_roles_follow():
+    text = between(WORK_MODEL, "### Done work leaves nothing behind", "### Suite at a moved pin")
+    for rule in ("**A worktree** goes after integration", "**A branch** goes when its pull request closes",
+                 "`branch-cleanup` workflow", "Nothing unmerged is deleted on its own",
+                 "**A session** goes when its work has landed or it is drained",
+                 "SE archives each session it started",
+                 "an integrator archives each worker it landed, right after the landing",
+                 "`Leftovers:` line"):
+        assert rule in text, rule
+    for path in (AGENTS / "se.md", AGENTS / "integrator.md"):
+        assert "#done-work-leaves-nothing-behind" in path.read_text(encoding="utf-8"), path
+    assert "archiving the accepted worker's session right after the landing" in normalized(
+        AGENTS / "integrator.md")
+
+
 def test_worker_acknowledges_refreshed_comments_and_quotes_replaced_sentences():
     text = normalized(AGENTS / "worker.md")
     assert "comments-read --count <current count> --newest <current newest id> --worktree <worktree>" in text

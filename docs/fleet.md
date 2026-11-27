@@ -48,6 +48,29 @@ sessions, so the check then reads the fleet itself.
 resume the session once the limit lifts and comment on its issue the line it quotes, which
 `templates/limit-restart.md` writes, at most once per issue. [scripts/limit_restart.py](../scripts/limit_restart.py) owns what counts.
 
+## Leftovers
+
+Done work leaves nothing behind ([work model "Done work leaves nothing behind"](../src/skills/work-model/SKILL.md#done-work-leaves-nothing-behind)).
+`work_tickets.py leftovers` lists what is still there a day after it last changed, by kind, each
+with its last commit and age; it only reads. The start report names them in one line, `Leftovers:`,
+with the command.
+
+- **Branches** of origin that no open pull request heads and no open in-progress issue works on (its
+  title), beside the integration branch, `se` and `rehearsal`: of a closed pull request whose head
+  is still its tip, merged (every commit on the integration branch, by GitHub's comparison, as a
+  cloud clone is shallow), a session's (`ccr-`, `claude/`), else unmerged.
+- **Worktrees** of the checkout whose branch is merged or a closed pull request's head, and no open
+  pull request's.
+- **Sessions**, with `--sessions <file>`, the sessions `list_sessions` lists: those titled `SE/...`
+  that are completed and not archived.
+
+The `branch-cleanup` workflow deletes on its own only the branches nothing can lose, those of a
+closed pull request and the merged ones ([Workflows](running.md#workflows)).
+
+The report ends with the one run of the `ref-maintenance` workflow that deletes every branch it
+lists, each under its lease, which the person starts from the repository's Actions page with
+`dry_run` off. Worktrees go with `work_tickets.py close --remove`, sessions with `archive_session`.
+
 ## Dispatcher
 
 `work_tickets.py dispatch` starts a fleet that stopped, with no model: an hour with nothing to start

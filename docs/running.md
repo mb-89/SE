@@ -194,25 +194,36 @@ uv run python <se>/scripts/se_workflows.py check
   - `check` also fails where a workflow calls `suite-time` with a `shards:` number other than
     `se.toml` `[tests] shards` (default 1), naming both; an expression there is the run's, not
     compared.
-- `branch-cleanup.yml` deletes a closed pull request's head branch, merged or not, and never a
-  fork's, `main`, the default branch, `se`, `rehearsal`, a `ccr-` or `claude/` branch, another open
-  pull request's head or a branch that moved since; its header owns the guards.
-  - SE runs it on its own `pull_request` trigger; a project adds a trigger file of its own beside
-    the copy, such as `branch-cleanup-on-close.yml`:
+- `branch-cleanup.yml` deletes the branches finished work leaves behind where nothing can be lost:
+  a closed pull request's head branch, merged or not, and, in its sweep after every close, daily
+  and by hand, every branch whose commits are all on the default branch or whose tip a closed pull
+  request keeps.
+  - It never deletes a fork's, `main`, the default branch, `se`, `rehearsal`, a `ccr-` or
+    `claude/` branch, an open pull request's head, an in-progress issue's branch, a claim in
+    flight or a branch that moved since; its header owns the guards.
+  - A branch with commits nothing else keeps stays, and the start report lists it
+    ([Leftovers](fleet.md#leftovers)).
+  - It runs on `pull_request_target`, as GitHub runs no `pull_request` workflow for a pull request
+    that conflicts with its base, which a worker's does once its landing is on main.
+  - SE runs it on its own triggers; a project adds a trigger file of its own beside the copy, such
+    as `branch-cleanup-on-close.yml`:
 
 ```yaml
 name: branch-cleanup-on-close
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
+  schedule:
+    - cron: "17 3 * * *"
 permissions:
   contents: write
   pull-requests: read
+  issues: read
 jobs:
   cleanup:
     uses: ./.github/workflows/branch-cleanup.yml
     with:
-      number: ${{ github.event.pull_request.number }}
+      number: ${{ github.event.pull_request.number || 0 }}
       head_ref: ${{ github.event.pull_request.head.ref }}
       head_sha: ${{ github.event.pull_request.head.sha }}
       head_repository: ${{ github.event.pull_request.head.repo.full_name }}
