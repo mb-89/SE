@@ -105,7 +105,7 @@ func count(item *Field, value any) int {
 
 func withoutMarkers(text string) string {
 	var kept strings.Builder
-	for _, line := range splitLines(text, true) {
+	for _, line := range splitLines(inputsPattern.ReplaceAllString(text, ""), true) {
 		if strip(line) != FleetMarker && !templateMarkerLine.MatchString(bareLine(line)) {
 			kept.WriteString(line)
 		}
@@ -137,6 +137,8 @@ func withTemplate(front string, t *Template) string {
 			if start, end, _, _, ok := derivedFrom(front[:closing]); ok {
 				loc = []int{start, end}
 			}
+		} else if strings.HasPrefix(l[0], "se_inputs_") {
+			loc = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(l[0]) + `:[^\r\n]*$`).FindStringIndex(front[:closing])
 		} else {
 			loc = frontKey(l[0]).FindStringIndex(front[:closing])
 		}
@@ -200,6 +202,12 @@ func emptyValue(v any) bool {
 
 // Render writes the document as canonical Markdown (scripts/templates.py's docstring, "Writing").
 func Render(t *Template, doc *Document) (string, error) {
+	if doc != nil && doc.err != nil {
+		return "", doc.err
+	}
+	if doc != nil && doc.inputs != nil {
+		t = doc.inputs
+	}
 	if t.IsAdapter() {
 		if doc == nil {
 			return "", fail("templates: %s is an adapter and has no fields to render; the command that writes it writes its body", t.Name)
@@ -379,7 +387,7 @@ func Render(t *Template, doc *Document) (string, error) {
 			out[n-1] += "\n"
 		}
 	}
-	return strings.TrimRight(strings.Join(out, ""), "\n") + "\n", nil
+	return recordInputs(t, strings.TrimRight(strings.Join(out, ""), "\n")+"\n"), nil
 }
 
 // RenderFields writes the document a template's fields fill.
