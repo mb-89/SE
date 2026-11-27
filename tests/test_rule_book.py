@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import warnings
 from pathlib import Path
 
 import pytest
@@ -146,13 +145,16 @@ def test_a_missing_book_is_a_setup_error(tmp_path, capsys):
     assert "cannot read the rule book" in capsys.readouterr().err
 
 
-def test_se_rule_book_passes_and_lists_its_judgment_rules(capsys):
+def test_se_rule_book_passes_and_lists_its_judgment_rules(capsys, record_property):
+    """The rules followed by judgment only are a record, not a warning: zero warnings is a gate,
+    and a rule no check can hold is no defect. Each is a property of the test's case in se.xml,
+    and `rule_book.py` prints them."""
     code = rule_book.main([])
     out = capsys.readouterr().out
     assert code == 0, out
-    listed = [line for line in out.splitlines() if line.startswith("by judgment only:")]
-    if listed:
-        warnings.warn("rules followed by judgment only:\n" + "\n".join(listed), stacklevel=1)
+    for line in out.splitlines():
+        if line.startswith("by judgment only:"):
+            record_property("judgment_only", line.removeprefix("by judgment only:").strip())
 
 
 def test_the_documentation_shows_the_book_as_one_table_and_a_note_per_rule():
