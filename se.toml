@@ -69,6 +69,8 @@ gate = "refuse"
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
 # (docs/tests.md "Test budget").
 [tests]
+# The se binary the setup tests run, built once per tree outside the budget (tests/se_binary.py).
+setup = ["uv", "run", "python", "tests/se_binary.py"]
 command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120

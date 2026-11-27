@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1233,6 +1234,25 @@ def git_sh() -> str | None:
 SETUPS = ["sh"] + (["powershell"] if os.name == "nt" else [])
 
 
+@pytest.fixture
+def se_bin(se_binary: Path, repo: Path) -> Iterator[Path]:
+    """The se binary built from components/ (tests/conftest.py `se_binary`) in place where setup
+    finds it, the test's own ~/.se/bin, under the name and version se_modules.py app-binary
+    answers for SE's checkout; setup.sh and setup.ps1 name the checkout's own hooks through its
+    `stopped-hooks` (components/start)."""
+    release = tomllib.loads((SE_ROOT / "components" / "release.toml").read_text(encoding="utf-8"))
+    placed = (Path(os.environ["HOME"]) / ".se" / "bin"
+              / f"{release['binary']}-{release['version']}{'.exe' if os.name == 'nt' else ''}")
+    placed.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(se_binary, placed)
+    runme = SE_ROOT / ".se" / ".runtime" / "runme-se"
+    before = runme.read_bytes() if runme.exists() else None
+    yield placed
+    # Setup found the binary in place: it never ran bootstrap.sh --binary, which would write RUNME's
+    # record into SE's checkout (tests/test_docs.py holds that file unchanged).
+    assert (runme.read_bytes() if runme.exists() else None) == before, "setup placed the se binary itself"
+
+
 def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.CompletedProcess[str]:
     if kind == "powershell":
         command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -1248,7 +1268,7 @@ def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.Co
 @pytest.mark.spawns("shell: scripts/setup.sh (setup.ps1 on Windows) names the checkout's own hooks before it "
                     "moves core.hooksPath and appends the local list to a .gitignore without its last "
                     "newline in its own shell, run only as a process")
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@pytest.mark.usefixtures("shared_fake_git", "se_bin")  # its child processes run git and the se binary
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_identity(
         kind: str, repo: Path) -> None:
@@ -1300,7 +1320,7 @@ def se_as_a_local_module(repo: Path) -> None:
 
 @pytest.mark.spawns("shell: scripts/setup.sh --copilot (setup.ps1 -Copilot on Windows) hands copilot.py "
                     "install the repository after its own steps, a wiring of the shell run only as a process")
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@pytest.mark.usefixtures("shared_fake_git", "se_bin")  # its child processes run git and the se binary
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(kind: str, repo: Path) -> None:
     se_as_a_local_module(repo)
@@ -1369,6 +1389,7 @@ def first_setup(kind: str, repo: Path,
 
 
 @pytest.mark.spawns("entry: scripts/setup.sh (scripts/setup.ps1 on Windows)")
+@pytest.mark.usefixtures("se_bin")  # setup runs the se binary
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_points_core_hooks_path_at_se_hooks_and_writes_nothing_for_copilot_without_it(
         kind: str, repo: Path, shared_fake_git: fake_git.StateFile) -> None:

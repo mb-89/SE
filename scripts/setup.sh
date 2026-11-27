@@ -27,8 +27,14 @@ if [ "$repo" = "$se_root" ]; then
 else
     hooks="$se_root/.githooks"
 fi
-# The checkout's own hooks that stop running once core.hooksPath names se's are named first.
-"$script" se_start.py stopped-hooks --repo "$repo" --hooks "$hooks"
+# The checkout's own hooks that stop running once core.hooksPath names se's are named first, by the
+# se binary SE's checkout pins (se_modules.py app-binary, components/start), which bootstrap.sh
+# --binary places where it is missing.
+set -- $("$script" se_modules.py --root "$se_root" app-binary --project "$se_root")
+se_bin="$HOME/.se/bin/$1-$2"
+case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN*) se_bin="$se_bin.exe" ;; esac
+[ -x "$se_bin" ] || bash "$se_root/scripts/bootstrap.sh" --binary >&2 || exit 1
+"$se_bin" stopped-hooks --repo "$repo" --hooks "$hooks"
 "$script" git_door.py -C "$repo" config core.hooksPath "$hooks"
 echo "core.hooksPath of $repo set to $hooks"
 # The merge driver of the generated files a merge regenerates (.gitattributes merge=se-generated):

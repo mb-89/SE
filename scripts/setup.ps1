@@ -30,8 +30,17 @@ if (-not $Repo) { $Repo = $seRoot }
 $target = Invoke-SeScript git_door.py -C $Repo rev-parse --show-toplevel
 if ($LASTEXITCODE -ne 0) { exit 1 }
 if ($target -eq $seRoot) { $hooks = '.githooks' } else { $hooks = "$seRoot/.githooks" }
-# The checkout's own hooks that stop running once core.hooksPath names se's are named first.
-Invoke-SeScript se_start.py stopped-hooks --repo $target --hooks $hooks
+# The checkout's own hooks that stop running once core.hooksPath names se's are named first, by the
+# se binary SE's checkout pins (se_modules.py app-binary, components/start), which bootstrap.sh
+# --binary places where it is missing.
+$spec = -split (Invoke-SeScript se_modules.py --root $seRoot app-binary --project $seRoot)
+if ($LASTEXITCODE -ne 0) { exit 1 }
+$seBin = Join-Path $HOME ".se/bin/$($spec[0])-$($spec[1]).exe"
+if (-not (Test-Path $seBin)) {
+    bash (Join-Path $PSScriptRoot 'bootstrap.sh') --binary | Write-Host
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+& $seBin stopped-hooks --repo $target --hooks $hooks
 Invoke-SeScript git_door.py -C $target config core.hooksPath $hooks
 if ($LASTEXITCODE -ne 0) { exit 1 }
 Write-Output "core.hooksPath of $target set to $hooks"
