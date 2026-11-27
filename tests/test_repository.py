@@ -118,7 +118,7 @@ def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsy
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].startswith("hygiene: passed (10 checks) in ")
+    assert out[-1].startswith("hygiene: passed (11 checks) in ")
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
 
 
@@ -349,3 +349,22 @@ def test_ses_readme_is_one_page_with_its_command_first() -> None:
 def test_a_checkout_without_a_readme_fails_the_readme_check(tmp_path: Path) -> None:
     assert hygiene.readme_findings(tmp_path) == [
         "README.md: missing; every project opens with its one-page README"]
+
+
+def test_no_step_of_the_start_the_se_binary_runs_in_go_has_a_python_twin() -> None:
+    assert hygiene.ported_findings(ROOT) == []
+
+
+def test_a_python_twin_of_a_step_the_se_binary_runs_fails_the_ported_check(tmp_path: Path) -> None:
+    verbs = tmp_path / hygiene.PORTED_VERBS
+    verbs.parent.mkdir(parents=True)
+    verbs.write_text('var v = cli.Verb{\n\tName:  "start-hooks",\n}\n', encoding="utf-8")
+    script = tmp_path / hygiene.PORTED_FROM
+    script.parent.mkdir(parents=True)
+    script.write_text("import argparse\n\n\ndef main(argv=None):\n    parser = argparse.ArgumentParser()\n"
+                      "    commands = parser.add_subparsers(dest='command')\n"
+                      "    commands.add_parser('status')\n    commands.add_parser('start-hooks')\n"
+                      "    return parser.parse_args(argv)\n", encoding="utf-8")
+    assert hygiene.ported_findings(tmp_path) == [
+        "scripts/se_start.py start-hooks: the se binary runs this step in Go (components/cmd/se/start.go); "
+        "remove its Python and call `se start-hooks` where it is called"]
