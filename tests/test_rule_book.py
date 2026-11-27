@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import warnings
 from pathlib import Path
 
 import pytest
@@ -150,9 +149,10 @@ def test_se_rule_book_passes_and_lists_its_judgment_rules(capsys):
     code = rule_book.main([])
     out = capsys.readouterr().out
     assert code == 0, out
+    # The rules followed by judgment only are the command's own output, which names each; the suite
+    # stays at zero warnings, so the test does not repeat them as one.
     listed = [line for line in out.splitlines() if line.startswith("by judgment only:")]
-    if listed:
-        warnings.warn("rules followed by judgment only:\n" + "\n".join(listed), stacklevel=1)
+    assert all(re.match(r"by judgment only: [a-z]+(-[a-z]+)?-\d{3} \S", line) for line in listed), listed
 
 
 def test_the_documentation_shows_the_book_as_one_table_and_a_note_per_rule():
