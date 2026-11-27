@@ -54,8 +54,7 @@ KERN_PLACE = pytest.mark.spawns("shell: scripts/bootstrap.sh's kern_place reads 
 # A fake uv: `python find` fails until `python install` ran; the core switch's read
 # (se_modules.py hooks-core) runs the real script with this interpreter; SE's start prints a greeting unless
 # `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
-# `refresh-moves` exists, else has nothing to move, and is logged apart; its components at start print `components-say` where it
-# exists and stop the start where `components-stop` does; every other call is logged.
+# `refresh-moves` exists, else has nothing to move, and is logged apart; every other call is logged.
 FAKE_UV = """#!/bin/sh
 case "$*" in *"se_start.py "*" start-refresh"*)
   echo refresh >> "$HOME/refreshes"
@@ -64,10 +63,6 @@ case "$*" in *"se_start.py "*" start-refresh"*)
 esac
 echo "uv $*" >> "$HOME/calls"
 case "$*" in *"se_modules.py --local "*" hooks-core"*) shift 5; exec "@PYTHON@" "$@" ;; esac
-case "$*" in *"se_start.py "*" start-components"*)
-  [ -f "$HOME/components-say" ] && cat "$HOME/components-say"
-  [ -f "$HOME/components-stop" ] && exit 1; exit 0 ;;
-esac
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" sync kern"*)
@@ -188,7 +183,19 @@ def machine_in(tmp_path: Path) -> tuple[Path, Path, Path]:
                                      newline="\n")
     (project / "se.toml").write_text('[components.obs]\nref = "%s"\n' % ("0" * 40),
                                      encoding="utf-8", newline="\n")
+    # The se binary in place, as every start after a machine's first leaves it: the components
+    # step runs through it (bootstrap.sh binary_ready); `unplaced` takes it away.
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
     return home, project, tmp_path
+
+
+def unplaced(home: Path, project: Path) -> None:
+    """A machine's first start of the binary's version: no binary in place, and a project with no
+    components, so the kern step places it (its background half) and starts it."""
+    kern_bin(home).unlink()
+    (project / "se.toml").write_text("[project]\n", encoding="utf-8", newline="\n")
 
 
 # A wrapper of the kind a harness puts first on PATH (an rm guard): it records its call, then hands
@@ -236,9 +243,10 @@ def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quie
     log = calls(home)
     assert log[0] == UV_INSTALL
     assert "uv python install 3.11" in log
-    sync = [line for line in log if line.startswith("uv run")]
-    assert sync == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py --root {sh(project)} "
-                    "start-components"]
+    assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {SE_ROOT} " \
+           f"app-binary --project {sh(project)}" in log, "the binary the components step runs through is located"
+    assert [line for line in log if line.startswith("components ")] == [
+        f"components start-components --se {SE_ROOT} --root {sh(project)}"]
     (home / "calls").unlink()
     second = run(home, path, project)
     assert second.returncode == 0 and second.stdout == ""
@@ -326,9 +334,6 @@ def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payl
     (components/start)."""
     home, project, base = machine
     path = fake_bin(base)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     if host == "claude":
         result = run(home, path, project, "--hook", stdin=START)
     elif host == "copilot camelCase":
@@ -353,6 +358,7 @@ def test_the_hook_names_the_hooks_it_could_not_set_where_the_binary_is_not_in_pl
     """Where the kern step could not put the se binary in place, the hooks step sets nothing and
     says so in one line, naming the next start and setup.sh; the start goes on."""
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     result = run(home, path, project, "--hook", stdin=START, SE_HOOK_CORE="off")
@@ -397,9 +403,16 @@ PLATFORM = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}.get(plat
 ASSET = f"{NAME}-{APP_VERSION}-{PLATFORM}.{'zip' if WINDOWS else 'tar.gz'}"
 # A fake kern: logs each call with its stdin; `start` fails while $HOME/kern-fails exists. Its
 # `start-hooks`, the start's hooks step (components/start), is logged as `hooks <its arguments>`
-# and says nothing, as where the hooks are in place.
+# and says nothing, as where the hooks are in place; its `start-components`, the components step,
+# is logged as `components <its arguments>`, prints `components-say` where it exists and stops the
+# start where `components-stop` does.
 FAKE_KERN = """#!/bin/sh
 case "$1" in start-hooks) echo "hooks $*" >> "$HOME/calls"; exit 0 ;; esac
+case "$1" in start-components)
+  echo "components $*" >> "$HOME/calls"
+  [ -f "$HOME/components-say" ] && cat "$HOME/components-say"
+  [ -f "$HOME/components-stop" ] && exit 1; exit 0 ;;
+esac
 input=""
 [ "$1" = hook ] && input=" <<$(cat)"
 echo "kern $*$input" >> "$HOME/calls"
@@ -454,9 +467,6 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     log = [line for line in calls(home) if line.startswith("kern ")]
@@ -478,9 +488,6 @@ def test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hand
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     env = {"HOME": sh(home), "PATH": tool_path(path)}
     result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
                             input=COPILOT_START % sh(project), cwd=base)
@@ -519,9 +526,6 @@ def test_copilot_starts_a_session_once_however_many_sources_fire(machine):
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     first = copilot_start(home, path, base, PASCAL_START % sh(project))
     second = copilot_start(home, path, base, PASCAL_START % sh(project))
     assert first.stdout == '{"greeting": 1}\n' and (second.returncode, second.stdout) == (0, "")
@@ -586,7 +590,7 @@ def test_a_required_component_missing_stops_the_start_and_the_session_is_shown_w
     assert all(f"--note {line}" in greeting for line in STOP.splitlines()), greeting
     steps = start_steps(home)
     assert steps["modules"] and not steps["identity"] and not steps["hooks"] and not steps["file gate"]
-    assert not any("app-binary" in line for line in calls(home)), "no core starts"
+    assert not any(line.startswith("kern ") for line in calls(home)), "no core starts"
     plain = run(home, path, project)
     assert plain.returncode == 1 and plain.stdout == STOP, "without --hook the lines as they are"
 
@@ -615,8 +619,8 @@ def test_a_component_check_that_fails_without_a_word_stops_naming_the_command(ma
 
     assert result.returncode == 1
     assert result.stdout.endswith(f"se bootstrap: SE cannot start: checking the components of {sh(project)}/se.toml "
-                                  f"failed; run: uv run python {sh(SCRIPT.parent)}/se_start.py --root {sh(project)} "
-                                  "start-components\n"), result.stdout
+                                  f"failed; run: {sh(kern_bin(home))} start-components --se {SE_ROOT} --root "
+                                  f"{sh(project)}\n"), result.stdout
 
 
 @pytest.mark.parametrize("source", ['"source":"startup"', '"source":"resume"', '"source":"clear"', None])
@@ -658,9 +662,6 @@ def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     env_file = base / "env"
     env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project),
            "CLAUDE_ENV_FILE": str(env_file)}
@@ -682,7 +683,7 @@ def test_the_core_starts_without_uvs_deprecated_tls_variable(machine):
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).parent.mkdir(parents=True, exist_ok=True)
     kern_bin(home).write_text(FAKE_KERN.replace(
         'echo "kern $*$input" >> "$HOME/calls"',
         'echo "kern $*$input native=${UV_NATIVE_TLS-unset} system=${UV_SYSTEM_CERTS-unset}" >> "$HOME/calls"'),
@@ -699,9 +700,6 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     (home / "kern-fails").touch()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert f"--kern-failed {NAME} start: kern start: boom --kern-bin" in greeting_call(home)
@@ -719,6 +717,7 @@ def test_the_first_start_of_a_version_fetches_its_release_waits_for_it_then_star
     """kern is required (docs/boot.md "Required components"): the start waits for the fetch in its
     background and hands the greeting the binary it placed."""
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     for tool in missing:
         drop_tool(path, tool)
@@ -743,6 +742,7 @@ def test_the_first_start_of_a_version_fetches_its_release_waits_for_it_then_star
 @KERN_BACKGROUND
 def test_an_archive_that_fails_its_checksum_is_never_run(machine):
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     release(home, corrupt=True)
@@ -752,9 +752,49 @@ def test_an_archive_that_fails_its_checksum_is_never_run(machine):
     assert not any(line.startswith("kern ") for line in calls(home))
 
 
+@needs_platform
+@KERN_BACKGROUND
+def test_a_first_start_with_components_places_the_binary_before_the_components_step_runs_through_it(machine):
+    """The components step runs through the se binary (components/start): where it is not in place,
+    the start fetches it first, within the kern step's wait and without starting it; the step then
+    runs, and the kern step starts the binary now in place."""
+    home, project, base = machine
+    kern_bin(home).unlink()
+    path = fake_bin(base)
+    uv_in_place(home)
+    release(home)
+    result = run(home, path, project, "--hook", stdin=START)
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    log = settled(home)
+    fetch = next(i for i, line in enumerate(log) if ASSET in line)
+    step = log.index(f"components start-components --se {SE_ROOT} --root {sh(project)}")
+    core = log.index(f"kern start --root {sh(project)} --home {SE_ROOT}")
+    assert fetch < step < core, log
+    assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
+
+
+@COMPONENTS
+def test_a_binary_that_cannot_be_placed_for_the_components_step_stops_the_start_naming_the_remedy(machine):
+    home, project, base = machine
+    kern_bin(home).unlink()
+    path = fake_bin(base)
+    uv_in_place(home)
+    result = run(home, path, project, "--hook", stdin=START)
+    assert result.returncode == 1 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    note = (f"--note se bootstrap: SE cannot start: the se binary {sh(kern_bin(home))}, which resolves the "
+            f"components of {sh(project)}/se.toml, is not in place: no {NAME} {APP_VERSION} release at {APP_BASE}, "
+            f"and no go to build it from {sh(ROOT)}/{BUILD_DIR}; start the session again once it is, or run: "
+            f"bash {SE_ROOT}/scripts/bootstrap.sh --binary")
+    assert note in greeting_call(home)
+    steps = start_steps(home)
+    assert not steps["modules"] and not steps["identity"] and not steps["hooks"]
+    assert not any(line.startswith("kern ") for line in calls(home)), "no core starts"
+
+
 @KERN_BACKGROUND
 def test_with_no_release_kern_is_built_from_ses_kern_and_the_start_waits_for_it(machine):
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     # A fake go: `go build -o <out> ./cmd/se` in SE's components/ writes the fake binary.
@@ -778,6 +818,7 @@ def test_a_fetch_that_outlasts_the_wait_goes_on_and_the_start_names_kern_failed(
     """SE_KERN_WAIT bounds the wait within the host's hook budget: past it the fetch goes on in its
     background, and the greeting is told kern failed, with the remedy, which stops the start."""
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     release(home)
@@ -800,6 +841,7 @@ def test_a_fetch_that_outlasts_the_wait_goes_on_and_the_start_names_kern_failed(
 @KERN_STEP
 def test_with_no_release_and_no_go_kern_failed_names_both(machine):
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
@@ -812,6 +854,7 @@ def test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_it
     """app-binary answers `-` for the download base where the checkout's origin names no home: no
     release is asked for, and the start builds the binary from its folder as where none matches."""
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     (home / "app-binary").write_text(f"{NAME} {APP_VERSION} - {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
@@ -869,7 +912,7 @@ def test_bootstrap_outside_a_session_leaves_kern_alone(machine):
     path = fake_bin(base)
     uv_in_place(home)
     assert run(home, path, project).returncode == 0
-    assert not any("kern" in line for line in calls(home))
+    assert calls(home) and not any(line.startswith("kern ") for line in calls(home)), "no core starts"
 
 
 @KERN_STEP
@@ -877,6 +920,7 @@ def test_without_a_pin_kern_failed_names_it(machine):
     """kern is required: where se_modules.py app-binary answers nothing, the greeting is told kern
     failed, which stops the start; nothing is fetched or started."""
     home, project, base = machine
+    unplaced(home, project)
     path = fake_bin(base)
     uv_in_place(home)
     (home / "app-binary").unlink()  # se_modules.py app-binary answers nothing
@@ -899,9 +943,6 @@ def kern_in_place(machine) -> tuple[Path, Path, Path]:
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
-    kern_bin(home).parent.mkdir(parents=True)
-    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
-    kern_bin(home).chmod(0o755)
     return home, project, path
 
 
@@ -1038,6 +1079,7 @@ def placed(home: Path, root: Path) -> None:
 @BINARY
 def test_binary_fetches_the_release_in_the_foreground_links_it_and_starts_nothing(machine):
     home, _, base = machine
+    kern_bin(home).unlink()  # --binary places it
     root = binary_root(base)
     release(home)
     result = run_binary(home, fake_bin(base), root)
@@ -1049,6 +1091,7 @@ def test_binary_fetches_the_release_in_the_foreground_links_it_and_starts_nothin
 @BINARY
 def test_binary_builds_with_go_where_no_release_matches(machine):
     home, _, base = machine
+    kern_bin(home).unlink()  # --binary places it
     root = binary_root(base)
     path = fake_bin(base)
     (path / "go").write_text(f"""#!/bin/sh
@@ -1070,6 +1113,7 @@ chmod +x "$3"
 @BINARY
 def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machine):
     home, _, base = machine
+    kern_bin(home).unlink()  # --binary places it
     root = binary_root(base)
     result = run_binary(home, fake_bin(base), root)
     assert result.returncode == 1
@@ -1152,6 +1196,7 @@ def test_binary_places_kern_before_it_builds_the_binary_on_it(machine):
     """The build fallback builds $pins/$builddir, whose go.mod replaces kern by the placed clone:
     --binary syncs it first; the build names its folder and package, no default of kern/."""
     home, _, base = machine
+    kern_bin(home).unlink()  # --binary places it
     root = pinning_se(base, None)
     path = fake_bin(base)
     (path / "go").write_text(f"""#!/bin/sh

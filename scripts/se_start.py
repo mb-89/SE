@@ -6,10 +6,9 @@
 starts the check in the background when the cache is stale; `check` runs that check, and where gh
 is signed in also counts the work landed since the last retro and runs the fleet check; `refresh`
 moves every module that is due within its range, and SE itself, into place; `start-refresh` moves
-an installed SE that is a git checkout to its latest release at the session's start;
-`start-components` resolves the project's components there, stopping the start where a required one
-is missing. The hooks step, `start-hooks` and `stopped-hooks`, is the `se` binary's, ported to Go
-(components/start). What each command does and where SE runs it is docs/start.md "Start and refresh".
+an installed SE that is a git checkout to its latest release at the session's start. The hooks
+step (`start-hooks`, `stopped-hooks`) and the components step (`start-components`) are the `se`
+binary's, ported to Go (components/start). What each command does and where SE runs it is docs/start.md "Start and refresh".
 """
 
 from __future__ import annotations
@@ -1145,7 +1144,7 @@ def load_kern(se_root: Path, root: Path | None, kern: Kern, ask: Callable[[Path,
 def load_required(se_root: Path, root: Path | None, local_config: Path | None, kern: Kern,
                   world: "World") -> tuple[list[Loaded], list[str]]:
     """Load SE's required components from SE's root, whatever the working directory: SE's tree placed
-    at its lock (from what is placed first, as `start-components` places a project's), then each
+    at its lock (from what is placed first, as the se binary's `start-components` places a project's), then each
     answering, kern as `load_kern`, obs by importing, every other as a component obs installs
     (`load_obs_component`). What loaded, and the stop lines (`STOP`) naming each that did not."""
     if not (se_root / se_modules.MANIFEST).is_file():
@@ -2043,29 +2042,9 @@ def update(se_root: Path, root: Path | None, local_config: Path | None, world: W
     return lines, failed
 
 
-#: The first words of the start's stop (docs/components.md "Required and optional at start").
+#: The first words of the start's stop (docs/components.md "Required and optional at start"), the
+#: same as the se binary's (components/start `Stop`) until the greeting is ported to it.
 STOP = "SE cannot start"
-
-
-def start_components(root: Path | None, local_config: Path | None,
-                     finder: "se_modules.Finder | None" = None) -> tuple[list[str], bool]:
-    """At the session's start, before the core starts: resolve the tree of the project's
-    `[components]` and theirs, as docs/components.md "Required and optional at start" says. What is
-    placed comes first: a clone at its locked commit is used without asking any remote, so a start
-    with every component placed stays within its budget and works offline; the rest is found by
-    name and placed (`se_modules.place_tree`). The lines to show, and whether the start stops: a
-    required component missing anywhere in the tree, or any other failure to resolve it (a lock
-    the found release disagrees with, a bad list), is one message opening with `STOP`; an optional
-    component missing is one line, and the start goes on. A project without an se.toml says
-    nothing. It fails closed: SE works with nothing half-started."""
-    if root is None or not (root / se_modules.MANIFEST).is_file():
-        return [], False
-    try:
-        local = se_modules.load_local(local_config or se_modules.default_local_config())
-        _, said = se_modules.place_tree(root, local, finder=finder)
-    except ModuleError as error:
-        return f"{STOP}: {error}".splitlines(), True
-    return said, False
 
 
 def root_line(se_root: Path) -> str:
@@ -2186,9 +2165,6 @@ def build_parser() -> argparse.ArgumentParser:
                         "newest release, then the upgrade guide's sections between the versions")
     commands.add_parser("start-refresh", help="bootstrap.sh at the session's start: move an installed SE that "
                         "is a git checkout to its latest release; exit code 0 where it moved")
-    commands.add_parser("start-components", help="bootstrap.sh at the session's start, before the core: resolve "
-                        "the project's components from what is placed; exit code 1 where a required one is "
-                        "missing, which stops the start")
     return parser
 
 
@@ -2211,14 +2187,6 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         if line:
             print(line)
         return 0 if moved else 1
-    if args.command == "start-components":
-        try:
-            lines, stopped = start_components(root, args.local)
-        except Exception as error:  # noqa: BLE001 - the start fails closed, whatever went wrong
-            lines, stopped = [f"{STOP}: resolving the components failed: {type(error).__name__}: {error}"], True
-        if lines:
-            print("\n".join(lines))
-        return 1 if stopped else 0
     if args.command == "boot":
         lines, failed = boot(SE_ROOT, root, args.local, world, args.upgrade)
         print("\n".join(lines))

@@ -28,9 +28,15 @@ uv run python <se>/scripts/se_start.py update
     Claude Code installed are left to `refresh`.
   - Where the session's working tree is SE's own checkout, the core runs that checkout's release
     pins, not the installed SE's, so a session on `main` runs `main`'s.
-- Then, still before the core starts, the hook resolves the tree of the project's components,
-  `se_start.py start-components`
-  ([docs/components.md](components.md#required-and-optional-at-start)).
+- Then, still before the core starts, the hook resolves the tree of the project's components with
+  the `se` binary's `se start-components` ([components/start](../components/start/components.go),
+  [docs/components.md](components.md#required-and-optional-at-start)).
+  - The binary is put in place for it first, fetched or built as the kern step does, within the
+    same wait, and started only by the kern step; one that is not in place stops the start, as
+    the core could not start either, naming `bootstrap.sh --binary`.
+  - Until kern's `components` verb finds components in Go ([The packages](components.md#the-packages),
+    package 1), the step runs SE's Python finder, `se_modules.py sync --quiet`, which prints only
+    what the run says besides each placed component.
   - What is placed comes first: a clone at the commit `se.lock` locks is used without asking any
     remote, so a start with every component placed works offline; the rest is found by name and
     placed at its pin ([Modules](modules.md#modules)).

@@ -1592,6 +1592,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync = commands.add_parser("sync", help="find the components and theirs by name, place each at its pin, "
                                "or use their local paths")
     sync.add_argument("names", nargs="*", help="components of the root's list; default: all")
+    sync.add_argument("--quiet", action="store_true", help="print only what the run says besides each placed "
+                      "component's line: the start's components step, which the se binary's start-components "
+                      "runs (components/start)")
     status = commands.add_parser("status", help="show the source of each component and its drift from the pin")
     status.add_argument("names", nargs="*", help="components; default: all")
     moved = commands.add_parser("breaking", help="list each pin of the component tree, nested ones "
@@ -1659,7 +1662,10 @@ def main(argv: list[str] | None = None) -> int:
         names = [args.name] if args.command == "update" and args.name else getattr(args, "names", [])
         if args.command == "sync":
             select(modules, names)
-            print("\n".join(sync_tree(root, local, names)))
+            if not args.quiet:
+                print("\n".join(sync_tree(root, local, names)))
+            elif said := place_tree(root, local, names)[1]:
+                print("\n".join(said))
             return 0
         finder = Finder(root, local)
         for module in select(modules, names):
