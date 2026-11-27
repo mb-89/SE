@@ -557,7 +557,8 @@ def test_the_draft_names_every_rule_with_what_checks_it(checkout):
     assert checks["gen-002"] == ["test", "check", "judgment"]
     assert checks["gen-004"] == ["judgment"]
     assert checks["pub-001"] == ["check"]
-    assert checks["p-go-001"] == []
+    assert "p-go-001" not in checks, "a retired rule is no live rule"
+    assert checks["doc-006"] == ["check"]
     assert block["looked_at"] == {part: "" for part in overhaul.LOOKED_AT}
     assert block["verdicts"] == block["findings"] == block["went_well"] == []
 

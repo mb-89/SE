@@ -195,6 +195,26 @@ breaks one is refused before it is committed, not first at landing.
   ([Public safety](../AGENTS.md#public-safety), "Hooks"); unset, the hook runs nothing more.
   `scripts/commit_checks.py` owns the table and the run.
 
+### Rule of five
+
+```toml
+[rule_of_five]
+level = "warn"
+surfaces = [".", "spec", "src"]
+```
+
+`[rule_of_five]` sets the check of the rule of five
+([doc-006](../src/skills/work-model/references/rules.md#doc-006-the-rule-of-five)).
+`scripts/rule_of_five.py` owns what it counts and what each level does.
+
+- `level` is `error` where unset: a new project starts clean and stays so. A project whose
+  surfaces are crowded sets `warn` while it restructures them; the check refuses a `warn` that
+  finds nothing left, naming the step to `error`.
+- `surfaces` defaults to the root, `spec/` and `src/`, each where it exists.
+
+A project runs it at commit as one of its [commit checks](#commit-checks):
+`["uv", "run", "--no-project", "python", "<se>/scripts/rule_of_five.py", "check"]`.
+
 ### Landing on main
 
 Every integration lands on the integration branch through a landing pull request and its check

@@ -49,6 +49,13 @@ generated = ["uv", "run", "--no-project", "python", "scripts/generated.py", "che
 readme = ["uv", "run", "--no-project", "python", "scripts/readme.py", "check"]
 # Every reach outside a declared door, at its door's level (scripts/door_report.py).
 doors = ["uv", "run", "--no-project", "python", "scripts/door_report.py"]
+# At most five visible files and five visible folders per surface (scripts/rule_of_five.py).
+rule-of-five = ["uv", "run", "--no-project", "python", "scripts/rule_of_five.py", "check"]
+
+# The rule of five's level: warn while SE's crowded root is restructured, then error
+# (scripts/rule_of_five.py, docs/settings.md "Rule of five").
+[rule_of_five]
+level = "warn"
 
 # How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
 # integrator's own, so no commit on main carries an address (docs/settings.md "Landing on main").

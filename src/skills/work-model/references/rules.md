@@ -639,6 +639,24 @@ chapter, then its command line as the second, generated at each build from `RUNM
   - Other repositories: by judgment.
 - **Related:** des-016, doc-001, doc-002
 
+### doc-006 The rule of five
+
+A surface a person sees (the root, `spec/` and `src/`) holds at most five visible files and five
+visible folders.
+
+- **Why:** a person looking at the project sees what is there for them, not the tools it is built
+  with.
+- **Without it:** the surface fills with build files and the person cannot find their way in.
+- **Prevents:** a surface cluttered with tooling; a cluttered root that only grows.
+- **Implementations:**
+  - se: [`<se>/scripts/rule_of_five.py`](../../../../scripts/rule_of_five.py), run at commit
+    (`se.toml` `[commit_checks]`) and by `hygiene.py` (its check `rule-of-five`), at the level
+    `se.toml` `[rule_of_five]` sets ([Rule of five](../../../../docs/settings.md#rule-of-five)),
+    with no baseline.
+  - Go line (frozen): the battery's `rule-of-five` rule, configured in
+    the Go line's src/internal/rules/five.yaml, with an allowlist that only shrinks.
+- **Related:** doc-002, tst-004
+
 ## wrk: work and fleet
 
 ### wrk-001 GitHub is the only shared state
@@ -1123,7 +1141,8 @@ visible folders.
 - **Implementations:**
   - Go line (frozen): the battery's `rule-of-five` rule, configured in
     the Go line's src/internal/rules/five.yaml, with an allowlist that only shrinks.
-- **Related:** doc-002
+- **Related:** doc-006
+- **Retired:** moved to the live rule doc-006, which a check holds.
 
 ## Old principle numbers
 
@@ -1151,7 +1170,7 @@ The 22 design principles that came over from `main` and the rules they became.
 | 18 | doc-001 | Talk only about what you own |
 | 19 | doc-002 | Write for your reader |
 | 20 | wrk-004 | The fleet works, sessions discuss |
-| 21 | p-go-001 | The rule of five |
+| 21 | doc-006 | The rule of five |
 | 22 | wrk-005 | Steer before, check at the push |
 
 The principles file's "How code is written" became `des-005` to `des-015`.
