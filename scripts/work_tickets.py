@@ -2825,18 +2825,17 @@ def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
     read = {path for path, _ in new_files if path is not None}
     elsewhere = {
         prose_key(sentence)
-        for path, text in tracked_authored_contents(root, branch, globs)
+        for path, text in tracked_contents(root, branch)
         if path not in read
         for sentence in authored_sentences(text)
     }
     return [(path, sentence) for path, sentence in found if prose_key(sentence) not in elsewhere]
 
 
-def tracked_authored_contents(
-    root: Path, revision: str, globs: list[str],
-) -> list[tuple[str, str]]:
-    """The authored files in `revision`, read in one git door call per tree and one batched
-    object read, rather than one `git show` process per file."""
+def tracked_contents(root: Path, revision: str) -> list[tuple[str, str]]:
+    """Each file `revision` tracks with its text, authored or not (a sentence moved to any of them
+    keeps its words, SE#1796): one tree listing and one batched object read, rather than one
+    `git show` process per file."""
     listed = run_git(root, "ls-tree", "-r", "-z", revision)
     if listed.returncode != 0:
         raise QueueError(f"Cannot list the files of {revision}: {failure_detail(listed)}")
@@ -2846,8 +2845,7 @@ def tracked_authored_contents(
             continue
         metadata, separator, path = entry.partition("\t")
         fields = metadata.split()
-        if separator and len(fields) == 3 and fields[1] == "blob" and any(
-                authored_content_matches(path, glob) for glob in globs):
+        if separator and len(fields) == 3 and fields[1] == "blob":
             blobs.append((path, fields[2]))
     if not blobs:
         return []

@@ -803,7 +803,7 @@ def test_deliver_refuses_an_se_outside_the_projects_se_pin_naming_both_versions(
         worktree, monkeypatch, capsys):
     (worktree / "se.toml").write_text('[components.se]\nversion = "^1.0"\n', encoding="utf-8", newline="\n")
     running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
-    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: pytest.fail("delivered"))
+    monkeypatch.setattr(work_tickets, "load_snapshot", lambda root: pytest.fail("delivered"))
 
     assert work_tickets.main(["deliver", "--worktree", str(worktree)]) == 1
 
@@ -859,8 +859,8 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
              "body": issue_body.read_text(encoding="utf-8")}
     pushed: list[str] = []
     posted: list[str] = []
-    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: issue)
-    monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: None)
+    monkeypatch.setattr(work_tickets, "load_snapshot", lambda root: issue)
+    monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: issue["body"])
     monkeypatch.setattr(work_tickets, "sync", lambda root: None)
     monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body, version: [])
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/o/r")
@@ -951,7 +951,7 @@ def behind_main_repository(case: Path, main_text: str, branch_text: str) -> tupl
     report = repository / ".se" / "work" / "field-report.md"
     report.parent.mkdir(parents=True)
     report.write_text(
-        "<!-- se:field-report -->\n**Work issue:** #1\n## Removed behaviour, deleted or weakened "
+        "<!-- se:field-report -->\n**Work issue:** #1  **Branch:** `behind-main`\n## Removed behaviour, deleted or weakened "
         "tests, and authored prose\n\n- `docs/guide.md: First line.`\n<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
@@ -962,8 +962,8 @@ def stub_delivery_outside_git(monkeypatch: pytest.MonkeyPatch, pushed: list[str]
     """deliver's GitHub side and its template gate stubbed out; its git side stays real."""
     issue = {"number": 1, "title": "behind-main", "url": "https://git.example/o/r/issues/1",
              "body": "## Acceptance\n\n- [ ] A test.\n"}
-    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: issue)
-    monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: None)
+    monkeypatch.setattr(work_tickets, "load_snapshot", lambda root: issue)
+    monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: issue["body"])
     monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body, version: [])
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/o/r")
     monkeypatch.setattr(work_tickets, "push", lambda root, branch: pushed.append(
