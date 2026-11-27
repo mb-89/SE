@@ -2965,6 +2965,11 @@ def open_pull_request_number(root: Path, repo: str, branch: str) -> int | None:
 
 PUSH_ATTEMPTS = 10
 PUSH_RETRY_SECONDS = 60
+# A required check still running on the pushed commit (GH013 "Required status check ... is in
+# progress", or "is expected" before it reports): the push is accepted once the check passes, so it
+# waits; named before the final refusals, which a GH013 answer may also match.
+CHECK_IN_PROGRESS = "check in progress"
+PUSH_WAIT_REFUSAL = re.compile(r"required status checks? .*\b(?:is|are) (?:in progress|expected)", re.I)
 # Refusals a push never retries: the same push is refused again until something changes.
 PUSH_FINAL_REFUSALS = (
     ("non-fast-forward", re.compile(r"non-fast-forward|\(fetch first\)|\[rejected\]", re.I)),
@@ -2993,7 +2998,10 @@ def github_wait(seconds: float) -> None:
 
 
 def push_refusal(output: str) -> tuple[str, bool]:
-    """Name a push refusal and whether it is transient; a final refusal wins over a transient one."""
+    """Name a push refusal and whether it is transient; a final refusal wins over a transient one,
+    and a required check still running wins over both."""
+    if PUSH_WAIT_REFUSAL.search(output):
+        return CHECK_IN_PROGRESS, True
     for name, pattern in PUSH_FINAL_REFUSALS:
         if pattern.search(output):
             return name, False
@@ -3007,8 +3015,11 @@ def run_git_push(root: Path, arguments: list[str]) -> subprocess.CompletedProces
     return git_door.push(root, arguments)
 
 
-def git_push(root: Path, arguments: list[str]) -> None:
-    """`git push <arguments>`, retried once a minute, ten attempts, on a transient refusal."""
+def git_push(root: Path, arguments: list[str],
+             wait_check: Callable[[], object] | None = None) -> None:
+    """`git push <arguments>`, retried once a minute, ten attempts, on a transient refusal. Where
+    a required check is still running and `wait_check` is given, it waits for that check's run to
+    finish instead and retries once."""
     command = f"git push {' '.join(arguments)}"
     for attempt in range(1, PUSH_ATTEMPTS + 1):
         print(f"Push attempt {attempt}/{PUSH_ATTEMPTS}: {command}")
@@ -3026,6 +3037,20 @@ def git_push(root: Path, arguments: list[str]) -> None:
                 f"because it is not transient): {detail}. Remedy: fix the cause first, for a "
                 f"non-fast-forward run work_tickets.py sync, then work_tickets.py push again"
             )
+        if refusal == CHECK_IN_PROGRESS and wait_check is not None:
+            print(f"Push refused ({refusal}); waiting for the check to finish, then retrying once")
+            wait_check()
+            wait_check = None  # the retry below is the one retry; a second refusal is final
+            pushed = run_git_push(root, arguments)
+            if pushed.returncode == 0:
+                metrics.door_call()
+                print(f"Pushed: {command}")
+                return
+            detail = (pushed.stderr + pushed.stdout).strip() or f"exit code {pushed.returncode}"
+            refusal, _ = push_refusal(detail)
+            raise QueueError(
+                f"{command} refused by the remote ({refusal}) after the check finished: {detail}. "
+                "Remedy: read the check's run, then run the same command again")
         if attempt < PUSH_ATTEMPTS:
             print(f"Push refused ({refusal}, transient); retrying in {PUSH_RETRY_SECONDS} s: {detail}")
             github_wait(PUSH_RETRY_SECONDS)
@@ -8872,12 +8897,15 @@ def write_landing_commit(root: Path, base: str, title: str, message: str) -> str
     return commit
 
 
-def fast_forward(root: Path, target: str, base: str, landed: str, once: bool = False) -> None:
+def fast_forward(root: Path, target: str, base: str, landed: str, once: bool = False,
+                 wait_check: Callable[[], object] | None = None) -> None:
     """Move origin's `target` from `base` to exactly `landed`, the landing commit `check` passed,
     by a plain push: a fast-forward, so GitHub writes no commit of its own and marks the landing
     pull request merged. Already there, nothing is pushed; moved elsewhere, or refused, nothing
     falls back to GitHub's squash merge. `once`: integrate --landing chose the fast-forward, and a
-    refusal says that integrating again without it lands as se.toml says."""
+    refusal says that integrating again without it lands as se.toml says. A required check still
+    running on `landed` (a second `check` run) is waited for (`wait_check`, else the push's
+    retries), never answered with a ruleset change."""
     moved = remote_head(root, target)
     if moved == landed:
         print(f"Fast-forward: origin's {target} is already {landed[:12]}")
@@ -8889,8 +8917,14 @@ def fast_forward(root: Path, target: str, base: str, landed: str, once: bool = F
             "Integrate again, which merges the newest integration branch and reuses the pull "
             "request")
     try:
-        git_push(root, ["origin", f"{landed}:refs/heads/{target}"])
+        git_push(root, ["origin", f"{landed}:refs/heads/{target}"], wait_check)
     except QueueError as error:
+        if f"({CHECK_IN_PROGRESS}" in str(error):
+            raise QueueError(
+                f"origin refused to fast-forward {target} to the landing commit {landed[:12]} "
+                f"while a required check still ran on it: {error}. Nothing fell back to GitHub's "
+                "squash merge. Remedy: once the check's run on the landing commit finished, "
+                "integrate again, which reuses the landing pull request") from None
         raise QueueError(
             f"origin refused to fast-forward {target} to the landing commit {landed[:12]}: "
             f"{error}. Nothing fell back to GitHub's squash merge. Remedy: {FAST_FORWARD_REMEDY}"
@@ -9496,7 +9530,8 @@ def push_landing(root: Path, door: GitHub, target: str, base: str, landed: str,
     """A fast-forward landing's merge step: move origin's `target` to `landed` (fast_forward) and
     read landing pull request `number` back, which GitHub marks merged at `landed` itself; the
     landed commit. `once` as fast_forward takes it."""
-    fast_forward(root, target, base, landed, once)
+    fast_forward(root, target, base, landed, once,
+                 lambda: wait_for_check(door, landed, f"landing pull request #{number}"))
     read = door.pull(number, MERGE_CONFIRMATION.format(number=number))
     if read.get("merged"):
         print(f"Landing pull request #{number}: merged at {str(read.get('merge_commit_sha'))[:12]}")

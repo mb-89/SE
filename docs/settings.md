@@ -405,6 +405,9 @@ one landing: `integrate <pull request> --landing fast-forward` (or `--landing sq
 - A refused fast-forward push leaves the integration branch, the landing pull request and its
   branch as they were and falls back to nothing; integrating again without `--landing` lands as
   `se.toml` says. The integrate comment names the mode a flagged run used.
+- A fast-forward refused while a required check still runs on the landing commit (GH013 "is in
+  progress", such as a second `check` run) is no ruleset problem: `integrate` waits for that check
+  and pushes once more, or, with no check to wait on, retries as for a transient refusal.
 - The identity gate and a public mirror's guard keep reading `se.toml`: a flagged landing commit
   is `mb <mb>` either way, which both pass.
 

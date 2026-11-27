@@ -4089,6 +4089,58 @@ def test_a_refused_fast_forward_names_the_rule_change_and_never_squash_merges(
     assert any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
 
 
+def test_a_fast_forward_refused_while_check_runs_waits_for_it_and_pushes_again(
+        main_checkout, monkeypatch, github, capsys):
+    """GH013 "Required status check is in progress" (a second `check` run on the landing
+    commit, SE#1998): integrate waits for the check and pushes once more; no message names the
+    ruleset."""
+    fast_forward_landings(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    push = work_tickets.run_git_push
+    refused: list[str] = []
+
+    def running(root, arguments):
+        if arguments[-1].endswith(":refs/heads/main") and not refused:
+            refused.append(arguments[-1])
+            return subprocess.CompletedProcess(arguments, 1, "", (
+                "remote: error: GH013: Repository rule violations found for refs/heads/main.\n"
+                "remote: - Required status check \"check\" is in progress.\n"))
+        return push(root, arguments)
+    monkeypatch.setattr(work_tickets, "run_git_push", running)
+    waited: list[str] = []
+    wait_for_check = work_tickets.wait_for_check
+    monkeypatch.setattr(work_tickets, "wait_for_check",
+                        lambda door, sha, url: waited.append(sha) or wait_for_check(door, sha, url))
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    landed = origin_main(main_checkout)
+    assert refused and landed.startswith(commit)
+    assert waited[-1] == landed  # the wait after the refusal, on the landing commit
+    out = capsys.readouterr().out
+    assert "Push refused (check in progress); waiting for the check to finish" in out
+    assert "ruleset" not in out.lower() and "Require a pull request" not in out
+
+
+def test_a_push_refused_while_check_runs_is_waited_on_never_answered_with_a_rule_change(
+        tmp_path, monkeypatch):
+    """Without a door to wait on, the push retries as for a transient refusal; when it gives
+    up, the remedy is to integrate again once the check finished, not a ruleset change."""
+    answer = subprocess.CompletedProcess([], 1, "", (
+        "remote: error: GH013: Repository rule violations found for refs/heads/main.\n"
+        "remote: - Changes must be made through a pull request.\n"
+        "remote: - Required status check \"check\" is in progress.\n"))
+    assert work_tickets.push_refusal(answer.stderr) == ("check in progress", True)
+    monkeypatch.setattr(work_tickets, "remote_head", lambda root, target: "b" * 40)
+    monkeypatch.setattr(work_tickets, "run_git_push", lambda root, arguments: answer)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.fast_forward(tmp_path, "main", "b" * 40, "c" * 40)
+    message = str(refused.value)
+    assert "while a required check still ran on it" in message and "integrate again" in message
+    assert "removes the rule" not in message and "Rulesets" not in message
+
+
 def test_an_unknown_landing_setting_is_refused_before_anything_is_merged(main_checkout, monkeypatch,
                                                                          github):
     delivered_worker(main_checkout, monkeypatch)
