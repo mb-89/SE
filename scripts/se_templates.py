@@ -2039,6 +2039,9 @@ def backstop_plan(name: str, event: dict, root: Path, switch: str) -> dict:
     template, met = gate_template(catalog, write, root)
     if template is None:
         return plan
+    if name == "issues" and event.get("action") == "reopened":
+        body = templates.renew(template, body)
+        plan["renew_template"] = template.name
     rendered, title = filed(template, body, None, title)
     found = [*met, *findings(template, root, plan["repo"], title, rendered)]
     if not any(item.severity == templates.REFUSE for item in found):

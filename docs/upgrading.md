@@ -443,6 +443,29 @@ On main, released as 17.0.0 at the next release.
   the project still wants into `src/skills/` as a skill, or file it as work.
 - **Check:** `uv run python <se>/scripts/se_plugin.py build` exits 0.
 
+### Standalone decision decks
+
+- **Change:** SE no longer serves decision decks or posts their answers to a local server.
+- **Steps:** stop any old deck-serving process by its recorded process ID, and remove local
+  serving steps from deck workflows.
+  - Build with `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html
+    --host <host>` and send a clickable Markdown link to the absolute HTML path.
+  - Local Send offers answers to copy into chat; do not claim it saves a file.
+  - The Claude App artifact workflow and `answers --record` are unchanged.
+- **Check:** `uv run python <se>/scripts/deck.py --help` lists only `build` and `answers`.
+  Open the HTML directly, without a server; local Send names its host and offers answers to copy.
+
+### Field reports answer three tooling questions
+
+- **Change:** the standing questions (`templates/standing-questions.md` 2.0.0) add three that
+  every role answers in every field report: what took the longest and why; what tool you wished
+  was present; and the tooling starfish (start, stop, keep, more, less). `field-report --check`
+  refuses an empty answer or `None.`, naming the question.
+- **Steps:** answer the three questions in the `## Retro` section of every open pull request's
+  field report before its next check. Answered retro drafts keep the block they were answered in.
+- **Check:** `uv run python <se>/scripts/work_tickets.py field-report --check <report.md>` passes
+  for each open report.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

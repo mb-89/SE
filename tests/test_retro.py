@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import retro
+import retro_deck
 import templates
 import se_component
 import se_usage
@@ -122,8 +123,12 @@ def steps() -> str:
 
 
 def fill_steps(text: str) -> str:
-    """The draft `text` with every standing question answered None and decisions left open."""
-    text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
+    """The draft `text` with every standing question answered None ("The tests." where None does not
+    answer it) and decisions left open."""
+    open_ended = {item.name for item in retro.questions().fields if not item.none_ok}
+    text = re.sub(r"^(### [^\n]+\n\n)<!-- (\w+): [^\n]*-->$",
+                  lambda match: match[1] + ("The tests." if match[2] in open_ended else "None."),
+                  text, flags=re.MULTILINE)
     return re.sub(r"^(<!-- decisions: [^\n]*-->)$", r"\1\n\nOpen: The deck carries the person's answer.",
                   text, count=1, flags=re.MULTILINE)
 
@@ -147,16 +152,20 @@ def run(conclusion: str, completed: str | None, name: str = "check") -> dict:
             "conclusion": conclusion if completed else None, "completed_at": completed}
 
 
+# The tool two field reports of the window wished was present: one gap, named twice.
+WISHED = "In SE: a command that runs only the tests a change touches."
+
+
 def answers(checkout: Path) -> dict[str, object]:
     """A window after retro #5 closed: #11 landed after one refused delivery, #12 landed but
     escalated and its landing's check failed, #13 a duplicate, #14 closed without a field report;
     #25 landed naming no work issue and one commit reached main by hand."""
     commit = shas(checkout)
     previous = {"version": 1, "sizes": {"closed": 7, "landed": 5, "duplicates": 0, "escalated": 3}}
-    work_a = report(answered(goes_well="the fake door", goes_badly="a slow fixture"),
+    work_a = report(answered(goes_well="the fake door", goes_badly="a slow fixture", wished_tool=WISHED),
                     "- The live run against GitHub: no token in the container.\n"
                     "- A second item\n  that wraps.").replace(issue_url(0), issue_url(11))
-    work_b = report(answered(bad_output_cause="`src/agents/worker.md`: say it once"),
+    work_b = report(answered(bad_output_cause="`src/agents/worker.md`: say it once", wished_tool=WISHED),
                     "None").replace(issue_url(0),
                                                                           issue_url(12))
     return {
@@ -250,8 +259,8 @@ def test_the_window_gives_the_sizes_and_the_per_issue_counts(checkout):
     assert (by[11].landing_pull, by[11].report_pull) == (21, 22)
     assert (by[12].refused, by[12].escalations, by[12].suite_seconds) == (0, 1, 40.0)
     assert by[13].duplicate and not by[13].landed and not by[14].landed
-    assert by[11].retro == {"goes_well": "the fake door", "goes_badly": "a slow fixture"}
-    assert by[12].retro == {"bad_output_cause": "`src/agents/worker.md`: say it once"}
+    assert by[11].retro == {"goes_well": "the fake door", "goes_badly": "a slow fixture", "wished_tool": WISHED}
+    assert by[12].retro == {"bad_output_cause": "`src/agents/worker.md`: say it once", "wished_tool": WISHED}
     assert by[11].not_delivered == ["The live run against GitHub: no token in the container.",
                                     "A second item that wraps."]
     assert by[12].not_delivered == []
@@ -536,7 +545,8 @@ def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)
 
-    assert text.startswith("# Retro draft for #30\n")
+    assert "# Retro draft for #30\n" in text
+    assert retro.templates().marked_version(retro.retro_template(), text) == retro.retro_template().version
     assert "| landed | 2 | 5 |" in text
     assert "| #11 feat/a | 1 | 1 | 35.4 s | #22 |" in text
     assert "- **check**: " in text and "broken 1 of 3\n  - #23: check failure" in text
@@ -940,6 +950,18 @@ LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a fiel
                 "home": "scripts/work_tickets.py", "home_kind": "refusal"}
 
 
+def test_collect_lists_the_windows_answers_to_the_tooling_questions_so_a_gap_named_twice_shows(checkout):
+    """The owner, 26 Nov: every field report says what took the longest and what tool it wished was
+    present; the retro's collect lists the window's answers by question, so a gap two reports name
+    stands together."""
+    lines = retro.answer_lines(collected(checkout))
+    names = [item.name for item in retro.questions().fields]
+    assert names[-3:] == ["longest", "wished_tool", "tooling_starfish"]
+    heading = retro.questions().field("wished_tool").heading
+    at = lines.index(f"#### {heading}")
+    assert lines[at + 2:at + 4] == [f"- #11: {WISHED}", f"- #12: {WISHED}"]
+
+
 def judged_draft(checkout: Path, **changes: object) -> str:
     """The collect's draft of retro #30 with its block judged: two findings of one class, the
     second controversial; `changes` replace the judgment's lists."""
@@ -949,10 +971,12 @@ def judged_draft(checkout: Path, **changes: object) -> str:
         "findings": [
             {"title": "Refuse a landing whose work issue has no field report",
              "body": "#14 closed without one.", "class": "Lost reports",
-             "home": "scripts/work_tickets.py", "controversial": False, "check": "field-report"},
+             "home": "scripts/work_tickets.py", "controversial": False, "check": "field-report",
+             "others": "Gerrit and GitHub both gate a merge on its checks."},
             {"title": "Make the field report a rule of the rule book",
              "body": "A rule, not a habit.", "class": "Lost reports",
-             "home": retro.RULE_BOOK, "controversial": True, "why": "it changes a rule"}],
+             "home": retro.RULE_BOOK, "controversial": True, "why": "it changes a rule",
+             "others": "Gerrit and GitHub both gate a merge on its checks."}],
         "went_well": ["The fake door kept the tests fast."]})
     data.update(changes)
     text = fill_steps(retro.draft(collected(checkout)))
@@ -1054,13 +1078,18 @@ def test_the_deck_holds_every_step_then_finding_decisions_and_anything_else(chec
         "2. Make the field report a rule of the rule book",
         "Anything else?"]
     work, decision, anything_else = (text for _, text in decisions)
-    # Each opens with its current situation, the finding as the judge wrote it, and asks last (SE#1826, 10).
-    assert work.startswith("#14 closed without one.\n\nClass: Lost reports, its cause and fix under Classes and homes.")
-    assert work.endswith("Home: `scripts/work_tickets.py`; check `field-report`.\n\n**Work, for your go**: Bless "
-                         "sends it to SE, which bundles it into a work issue.")
-    assert decision.startswith("A rule, not a habit.") and decision.endswith("**Decision, for your decision**: it changes a rule")
-    assert "Cause:" not in decision
-    assert anything_else == "Nothing else"
+    # A project's retro deck: every decision chapter is a note of the decision template, the same sections
+    # in the same order, then the pugh fence.
+    for _, note in decisions:
+        assert re.findall(r"^## (.+)$", note, re.MULTILINE) == ["Current situation", "The problem", "What others do"]
+        assert "\n```pugh\ncriteria:\n" in note and retro_deck.decision_problems(note) == []
+    assert work.startswith("## Current situation\n\n#14 closed without one.\n\n## The problem\n\nClass: Lost reports. "
+                           "a landing need not name a field report")
+    assert "Home: `scripts/work_tickets.py`; check `field-report`." in work
+    assert "Bless sends it to SE, which bundles it into a work issue." in work and '"losses": "One work issue."' in work
+    assert decision.startswith("## Current situation\n\nA rule, not a habit.") and '"losses": "it changes a rule"' in decision
+    assert "Gerrit and GitHub both gate a merge on its checks." in decision
+    assert (heading_and_note := decisions[-1]) == retro_deck.ANYTHING_ELSE and heading_and_note[1] == anything_else
 
 
 def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
@@ -1069,7 +1098,15 @@ def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
     block["findings"] = []
     block["classes"] = []
     _, decisions = retro.deck_parts(block, text)
-    assert decisions == [("Anything else?", "Nothing else")]
+    assert decisions == [retro_deck.ANYTHING_ELSE]
+
+
+def test_deck_refuses_a_finding_without_what_others_do_naming_it(checkout, tmp_path, monkeypatch, capsys):
+    """The decision template asks What others do, so a finding without `others` builds no deck."""
+    text = judged_draft(checkout, findings=[finding()])
+    code, asked = built_deck(checkout, tmp_path, monkeypatch, text)
+    assert (code, asked) == (1, {})
+    assert 'finding 1 ("Refuse a landing whose work issue has no field report") has no `others`' in capsys.readouterr().err
 
 
 def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checkout, tmp_path, monkeypatch, capsys):
@@ -1079,7 +1116,7 @@ def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checko
     assert asked["host"] == "copilot" and asked["answers"] is None
     template = templates.own("retro-deck")
     fields = templates.parse(template, asked["written"]).fields
-    assert fields["title"] == "example: Retro #30" and fields["subtitle"] == "Retro report"
+    assert fields["title"] == "example: Retro #30" and not fields.get("subtitle")
     assert [finding.fix for finding in templates.check(template, templates.parse(template, asked["written"]))
             if finding.severity == templates.REFUSE] == []
     assert [path.name for path in (tmp_path / "out").iterdir()] == ["retro-30.html"]
@@ -1134,6 +1171,214 @@ class FakeTracker:
     def actions(self, root, repo):
         return {name: (lambda arguments, _, name=name: self.calls.append((name, arguments)))
                 for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
+
+
+@pytest.fixture
+def blessing(checkout, monkeypatch):
+    class Tracker:
+        missing = []
+
+        def __init__(self):
+            self.given = []
+            self.closed = False
+            self.calls = []
+            self.fail_after = None
+            self.seconds = 0.0
+            self.gate_open_at_bless = False
+
+        def issue(self, number):
+            self.seconds += 0.2
+            if number == 30:
+                return {"number": 30, "title": "retro-due-20261126", "labels": ["retro"],
+                        "created_at": "2026-11-26T09:00:00Z",
+                        "closed_at": "2026-11-26T09:01:00Z" if self.closed else "",
+                        "state": "closed" if self.closed else "open", "state_reason": "completed"}
+            return {"number": number, "state": "open", "labels": ["work"],
+                    "body": "retro #30 finding 1"}
+
+        def comments(self, number):
+            self.seconds += 0.2
+            return self.given
+
+        def open_issues(self):
+            return [] if self.closed else [self.issue(30)]
+
+        def closed_issues(self):
+            return [self.issue(30)] if self.closed else []
+
+        def pulls(self):
+            return []
+
+        def actions(self, root, tracker, door):
+            def write(arguments, detail, name):
+                self.seconds += 2
+                self.calls.append((name, arguments))
+                if name == "comment_issue":
+                    self.given.append({"body": arguments["body"]})
+                    if retro.BLESSED_DRAFT.search(arguments["body"]):
+                        work_tickets.filing_check(root, REPO, "file", self,
+                                                 datetime(2026, 11, 26, 9, 1, tzinfo=timezone.utc))
+                        self.gate_open_at_bless = not self.closed
+                else:
+                    self.closed = True
+                if self.fail_after == len(self.calls):
+                    self.fail_after = None
+                    raise work_tickets.QueueError("GitHub response lost after write")
+
+            return {name: (lambda arguments, detail, name=name: write(arguments, detail, name))
+                    for name in ("comment_issue", "close_issue")}
+
+    tracker = Tracker()
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
+    monkeypatch.setattr(retro, "issue_actions", tracker.actions)
+    monkeypatch.setattr(retro.time, "monotonic", lambda: tracker.seconds)
+    return tracker
+
+
+@pytest.mark.parametrize("old_form", [False, True])
+def test_bless_goes_from_answered_draft_to_closed_with_gate_open_in_one_call(
+        checkout, tmp_path, monkeypatch, blessing, old_form, capsys):
+    text = judged_draft(checkout)
+    if old_form:
+        text = retro.templates().INPUTS_PATTERN.sub("", text)
+        text = re.sub(r"^## ([1-5])\.", lambda match: f"## {int(match[1]) + 1}.",
+                      text, flags=re.MULTILINE)
+        text = text.replace("## 2. Collect", "## 1. Field feedback\n\n"
+                            "<!-- field_feedback: Answer. -->\n\nRetros take too long.\n\n"
+                            "## 2. Collect", 1)
+    draft = tmp_path / "answered.md"
+    draft.write_text(text, encoding="utf-8")
+    before = draft.read_bytes()
+    monkeypatch.setattr(work_tickets, "integration_ref",
+                        lambda root: pytest.fail("bless must not need a landed doc or sync"))
+    assert retro.main(["bless", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert blessing.seconds < 60
+    assert blessing.closed and blessing.gate_open_at_bless
+    assert retro.filing_state(blessing.given).phase == "blessed"
+    assert draft.read_bytes() == before
+    block = retro.posted_block([item["body"] for item in blessing.given], 30,
+                              lambda sha, path: pytest.fail("no landed doc needed"))
+    assert len(block["findings"]) == 2
+    for finding in (None, retro.FindingRef("30:1")):
+        work_tickets.filing_check(checkout, REPO, "file", blessing,
+                                 datetime(2026, 11, 26, 9, 1, tzinfo=timezone.utc), finding)
+    retro.record_outcome(checkout, REPO, retro.FindingRef("30:1"), "issue", "99", blessing)
+    assert blessing.closed and retro.filing_state(blessing.given).phase == "blessed"
+    assert "blessed and closed; filing gate open" in capsys.readouterr().out
+
+
+def test_bless_closes_a_draft_without_findings_with_the_gate_open_in_one_call(
+        checkout, tmp_path, monkeypatch, blessing, capsys):
+    draft = tmp_path / "answered.md"
+    draft.write_text(judged_draft(checkout, classes=[], findings=[]), encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "integration_ref",
+                        lambda root: pytest.fail("bless must not need a landed doc or sync"))
+    assert retro.main(["bless", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert blessing.seconds < 60
+    assert blessing.closed and blessing.gate_open_at_bless
+    assert retro.filing_state(blessing.given).phase == "blessed"
+    work_tickets.filing_check(checkout, REPO, "file", blessing,
+                             datetime(2026, 11, 26, 9, 2, tzinfo=timezone.utc))
+    assert "blessed and closed; filing gate open" in capsys.readouterr().out
+
+
+def test_the_template_and_the_agent_ask_se_once_and_post_the_report_before_the_deck():
+    root = Path(retro.__file__).resolve().parents[1]
+    template = (root / "templates" / "retro.md").read_text(encoding="utf-8")
+    agent = (root / "src" / "agents" / "retro.md").read_text(encoding="utf-8")
+    collect = template[template.index("<!-- collect:"):template.index("## 2.")]
+    assert "top-level SE session" in collect and "does not wait" in collect
+    assert "Ask SE for its input" in agent and "Do not wait for it" in agent
+    decisions = template[template.index("<!-- decisions:"):]
+    assert decisions.index("report state") < decisions.index("deck")
+    assert agent.index("**Report state first.**") < agent.index("**A lean deck")
+    assert agent.index("`retro.py file <issue>`") < agent.index("`retro.py deck <issue>")
+
+
+def test_a_finding_from_se_s_input_is_marked_in_the_deck_and_no_other_source_passes(checkout):
+    item = {"finding": 1, "title": "Name the sync a lagging mirror needs", "body": "SE saw it.",
+            "class": "Lost reports", "home": "scripts/se_start.py", "kind": retro.WORK,
+            "source": retro.SE_SOURCE, "others": "Gerrit and GitHub both gate a merge on its checks."}
+    title, body = retro.finding_chapter(item, [])
+    assert title.endswith("(from SE)") and body.startswith("## Current situation\n\nFrom SE")
+    wrong = judged_draft(checkout, findings=[{**finding(), "source": "elsewhere"}])
+    with pytest.raises(retro.QueueError, match="source is"):
+        retro.judged(wrong, 30)
+
+
+@pytest.mark.parametrize("fail_after", [1, 2, 4])
+def test_bless_resumes_after_a_lost_write_response_without_duplicate_comments(
+        checkout, tmp_path, blessing, fail_after, capsys):
+    draft = tmp_path / "answered.md"
+    draft.write_text(judged_draft(checkout), encoding="utf-8")
+    command = ["bless", "30", "--draft", str(draft), "--repo", REPO, "--worktree", str(checkout)]
+    blessing.fail_after = fail_after
+    assert retro.main(command) == 1
+    assert "GitHub response lost" in capsys.readouterr().err
+    assert blessing.gate_open_at_bless
+    assert retro.main(command) == 0
+    assert blessing.closed
+    bodies = [item["body"] for item in blessing.given]
+    assert len(bodies) == len(set(bodies)) == 3
+    writes = len(blessing.calls)
+    assert retro.main(command) == 0
+    assert len(blessing.calls) == writes
+
+
+def test_bless_refuses_an_incomplete_draft_before_opening_the_gate(
+        checkout, tmp_path, blessing, capsys):
+    draft = tmp_path / "answered.md"
+    draft.write_text(judged_draft(checkout, went_well=[]), encoding="utf-8")
+    assert retro.main(["bless", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 1
+    assert not blessing.calls and not blessing.closed
+    assert "not complete" in capsys.readouterr().err
+
+
+def test_bless_caps_network_processes_at_the_remaining_minute(monkeypatch, capsys):
+    processes = work_tickets.process_door
+
+    class Timeout:
+        def run(self, argv, options):
+            assert options["timeout"] == 55
+            raise retro.subprocess.TimeoutExpired(argv, options["timeout"])
+
+    def blocked(args, deadline):
+        monkeypatch.setattr(retro.time, "monotonic", lambda: 5)
+        processes.run(["gh", "api", "rate_limit"])
+
+    monkeypatch.setattr(retro.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(retro, "bless", blocked)
+    with processes.use(Timeout()):
+        assert retro.main(["bless", "30"]) == 1
+    assert "one-minute network budget" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command", ["collect", "file", "bless"])
+def test_private_drafts_are_refused_before_writing_or_posting(
+        checkout, tmp_path, monkeypatch, blessing, command, capsys):
+    private = "\\".join(("C:", "Users", "alice", "private", "notes.txt"))
+    text = judged_draft(checkout).replace("## 1. Collect", f"{private}\n\n## 1. Collect")
+    path = tmp_path / "draft.md"
+    if command == "collect":
+        found = collected(checkout)
+        monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+        monkeypatch.setattr(retro, "collect", lambda *args, **kwargs: found)
+        monkeypatch.setattr(retro, "draft", lambda _: text)
+        options = ["--out", str(path)]
+    else:
+        path.write_text(text, encoding="utf-8")
+        options = ["--draft", str(path)]
+    assert retro.main([command, "30", *options, "--repo", REPO,
+                       "--worktree", str(checkout)]) == 1
+    output = capsys.readouterr()
+    assert "private material" in output.err
+    assert private not in output.out + output.err
+    assert not blessing.calls
+    if command == "collect":
+        assert not path.exists()
 
 
 def test_record_outcome_closes_only_after_last_finding(monkeypatch, capsys):
@@ -1319,28 +1564,129 @@ def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkey
 
 
 @pytest.mark.parametrize("where", ["outside", "uncommitted", "changed"])
-def test_file_refuses_a_draft_main_does_not_hold_and_writes_nothing(checkout, tmp_path,
-                                                                     monkeypatch, where):
-    writes = []
+def test_file_posts_the_block_on_the_issue_where_main_does_not_hold_the_draft(
+        checkout, tmp_path, monkeypatch, capsys, where):
+    """Filing needs no landing: where no commit of main holds the draft as it stands, the report
+    carries the drafted facts and the block follows in its own comments, which the next collect
+    reads back (`posted_block`)."""
+    tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
-    monkeypatch.setattr(work_tickets, "run_plan", lambda plan, actions: writes.append(plan))
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(retro, "COMMENT_LIMIT", 2000)
     text = judged_draft(checkout)
     if where == "outside":
         draft = tmp_path / "draft.md"
-        draft.write_text(text, encoding="utf-8")
-        refusal = "is not in the checkout"
     else:
         draft = checkout / "docs" / "retro-30.md"
         if where == "changed":
             commit_doc(checkout, text.replace("Lost reports", "Lost", 1))
         draft.parent.mkdir(exist_ok=True)
-        draft.write_text(text, encoding="utf-8")
-        refusal = "does not hold the draft docs/retro-30.md as it stands"
+    draft.write_text(text, encoding="utf-8")
 
-    with pytest.raises(work_tickets.QueueError, match=refusal):
-        retro.run_file(retro.make_parser().parse_args(["file", "30", "--draft", str(draft), "--repo",
-                                                  REPO, "--worktree", str(checkout)]))
-    assert writes == []
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+
+    bodies = [arguments["body"] for name, arguments in tracker.calls if name == "comment_issue"]
+    assert not any(retro.DOC_PATTERN.search(body) for body in bodies)
+    blocks = [body for body in bodies if body.startswith("<!-- se:retro-block ")]
+    assert len(blocks) > 1 and all(len(body) <= 2000 for body in blocks)
+    assert bodies[-1].startswith("<!-- se:retro-state report findings=2 -->")
+    block = retro.posted_block(bodies, 30, lambda sha, path: None)
+    assert [item["title"] for item in block["findings"]] == [
+        item["title"] for item in retro.judged(text, 30)["findings"]]
+    assert "carrying the facts and the block itself" in capsys.readouterr().out
+
+
+def test_file_reads_a_draft_of_the_older_six_step_template_in_the_current_form(
+        checkout, tmp_path, monkeypatch, capsys):
+    """A draft answered under the six-step template (field feedback first) files: its field
+    feedback moves under Collect and the steps take their current headings."""
+    text = judged_draft(checkout)
+    headings = {"## 1. Collect": "## 2. Collect", "## 2. Table of what happened":
+                "## 3. Table of what happened", "## 3. The standing questions":
+                "## 4. The standing questions", "## 4. Classes and homes": "## 5. Classes and homes",
+                "## 5. The person decides": "## 6. The person decides"}
+    old = retro.templates().INPUTS_PATTERN.sub("", text)
+    for new, before in headings.items():
+        old = old.replace(f"\n{new}\n", f"\n{before}\n", 1)
+    first = old.index("## 2. Collect")
+    old = (old[:first] + "## 1. Field feedback\n\n<!-- field_feedback: The person's answer. -->\n\n"
+           "Retros take too long.\n\n" + old[first:])
+    assert retro.steps_problems(old)
+    converted = retro.current_form(old)
+    assert converted is not None and not retro.steps_problems(converted)
+    assert "### Field feedback\n\nRetros take too long." in converted
+    assert retro.current_form(text) is None
+
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    draft = tmp_path / "old.md"
+    draft.write_text(old, encoding="utf-8")
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert "follows an older retro template" in capsys.readouterr().out
+
+
+def test_file_checks_the_template_inputs_recorded_at_collection_not_the_newest_form(
+        checkout, tmp_path, monkeypatch):
+    text = judged_draft(checkout)
+    engine = retro.templates()
+    old = retro.retro_template()
+    assert engine.marked_version(old, text) == old.version
+    latest = dataclasses.replace(old, version="99.0.0", fields=(*old.fields, engine.Field(
+        name="later", kind="text", heading="Added after the answers", required=True)))
+    own = engine.own
+    monkeypatch.setattr(engine, "own", lambda name: latest if name == "retro" else own(name))
+    tracker = FakeTracker()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    draft = tmp_path / "answered.md"
+    draft.write_text(text, encoding="utf-8")
+    assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    report = tracker.calls[0][1]["body"]
+    assert engine.parse(latest, report).recorded == old.version
+    assert not retro.steps_problems(report)
+    renewed = engine.renew(latest, text)
+    assert any("Added after the answers" in problem for problem in retro.steps_problems(renewed))
+
+
+def test_a_draft_that_records_no_version_is_judged_by_the_template_at_its_start(checkout, monkeypatch):
+    """A draft collected before drafts recorded their inputs, then the standing questions grew: the
+    deck refused it for the new questions. It is judged by the template of its window's end."""
+    engine = retro.templates()
+    old = retro.retro_template()
+    text = judged_draft(checkout)
+    legacy = engine.TEMPLATE_MARKER_PATTERN.sub("", engine.INPUTS_PATTERN.sub("", text))
+    assert not engine.marked_version(old, legacy)
+    latest = dataclasses.replace(old, version="99.0.0", fields=(*old.fields, engine.Field(
+        name="later", kind="text", heading="Added after the start", required=True)))
+    own = engine.own
+    monkeypatch.setattr(engine, "own", lambda name: latest if name == "retro" else own(name))
+    asked = []
+    monkeypatch.setattr(retro, "template_version_at", lambda template, when: asked.append(when) or old.version)
+    monkeypatch.setattr(engine, "historical_inputs",
+                        lambda template, version: old if version == old.version else None)
+    assert not retro.steps_problems(legacy)
+    assert asked and asked[0].startswith("20")
+    assert any("Added after the start" in problem for problem in retro.steps_problems(engine.renew(latest, text)))
+
+
+def test_file_reads_the_draft_at_its_known_path_and_names_collect_where_none_is(
+        checkout, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    known = retro.draft_path(REPO, 30)
+    assert known == tmp_path / "home" / ".se" / "retros" / "owner" / "repo" / "retro-30.md"
+    command = ["file", "30", "--repo", REPO, "--worktree", str(checkout)]
+    assert retro.main(command) == 1
+    err = capsys.readouterr().err
+    assert f"no draft of retro #30 at {known}" in err and "`retro.py collect 30`" in err
+    known.parent.mkdir(parents=True)
+    known.write_text(judged_draft(checkout), encoding="utf-8")
+    assert retro.main(command) == 0
+    assert "GitHub plan: the report of retro #30" in capsys.readouterr().out
 
 
 def test_file_without_gh_posts_report_state_and_leaves_findings_open(checkout, monkeypatch, capsys):
@@ -1354,7 +1700,7 @@ def test_file_without_gh_posts_report_state_and_leaves_findings_open(checkout, m
     assert '1. add_issue_comment {"body": "<!-- se:retro-report -->' in out
     assert '2. add_issue_comment {"body": "<!-- se:retro-state report findings=2 -->' in out
     assert "issue_write" not in out
-    assert "create" not in out.replace("created", "")
+    assert not re.search(r"^\d+\. (?:create_issue|issue_write) ", out, re.MULTILINE)
 
 
 def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
@@ -1461,7 +1807,7 @@ def test_the_retro_template_names_the_two_commands():
     template = (Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE"
                 / "retro.md").read_text(encoding="utf-8")
     assert "scripts/retro.py collect <this issue> --out <draft>" in template
-    assert "scripts/retro.py file <this issue> --draft <draft>" in template
+    assert "scripts/retro.py bless <this issue> --draft <draft>" in template
 
 
 def test_an_ad_hoc_component_used_in_enough_sessions_is_a_promotion_candidate(checkout):

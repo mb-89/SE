@@ -2,15 +2,10 @@
 // (obs-html's --trusted-runtime-bundle). It sends the answers through the adapter of the host the deck was
 // built for, `globalThis.seDeck.host` (deck.py's `--host`, HOSTS there), one adapter per host (ADAPTERS):
 //
-//   claude-app   the Claude app (cloud and mobile): the Claude app's runtime (`claude.use`) first, then
-//                obs-html serve where that served the page; its sink's name is "Claude".
-//   claude-code  Claude Code on the person's machine: obs-html serve first, then the Claude app's runtime
-//                where the deck was published there after all; its sink's name is "Claude Code".
-//   copilot      GitHub Copilot in VS Code: obs-html serve, which writes answers.json beside the deck for
-//                the session to read; its sink's name is "Copilot".
-//   local        any other host: no sink of its own, so obs-html's own sinks take the answers (its server
-//                where it served the page, else the text to copy), as obs's answers contract asks of a
-//                host's bundle where its host is not present.
+//   claude-app   the Claude app (cloud and mobile): its runtime (`claude.use`); the sink names "Claude".
+//   claude-code  standalone HTML: rejects with "Claude Code", so obs-html offers the answers to copy.
+//   copilot      standalone HTML: rejects with "Copilot", so obs-html offers the answers to copy.
+//   local        any other host: no sink of its own; obs-html owns the fallback.
 //
 // A deck whose data names no host is the Claude app's (decks built before the host was written); one that
 // names a host the bundle does not know registers no sink and says so on the console. The adapter registers
@@ -28,16 +23,14 @@
 //       failed while answers.json was saved, and its code reached the console alone);
 //   (a) then `answers.json` through the `artifact` capability's files form: the record the session reads,
 //       saved even where (b) failed.
-// Send succeeds when either way does; the result names each way and the error code of each that failed. Where neither the
-// runtime nor obs-html serve is there, the adapter rejects with a message naming its host ("sending is not
+// Send succeeds when either way does; the result names each way and the error code of each that failed. Without the
+// runtime, the adapter rejects with a message naming its host ("sending is not
 // available here") and obs-html shows the text to copy.
 //
 // Telling the reader is obs-html's notice center's (obs's adapters/html/spec/capabilities/answers.md,
-// Contract): this bundle draws nothing on the page. The sink's name is the adapter's, so on a confirmed send
-// obs's entry says "1 verdict and 2 comments sent to Copilot." and its passing line, which deck.py turns on,
-// "Sent to Copilot."; where obs-html serve served a Claude app deck (`ObsHtmlAnswers.server()` gives its
-// address when this bundle first runs) the sink gives no name, as the answers go to whichever session
-// serves the deck, and both say "sent." alone. A send where only one way worked posts one warning entry of
+// Contract): this bundle draws nothing on the page. The sink names the adapter's host; only the Claude App
+// runtime confirms a send, with the passing line "Sent to Claude.". Local hosts offer the answers to copy.
+// A send where only one way worked posts one warning entry of
 // its own, `se-answers-partly`, in plain words, revealed where the message to Claude failed, as the reader
 // may have a step to take; a later send where both work, or where both fail, removes it. Where both fail it
 // rejects with code `not_sent` and `failed`, and a message to copy the answers and paste them into the chat,
@@ -128,20 +121,6 @@
         return {threadId: result?.threadId};
     };
 
-    // Where obs-html serve served the page: its own address (obs-html answers.js decides).
-    const viaServer = async (address, payload) => {
-        let response;
-        try {
-            response = await root.fetch(address, {method: "POST", headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(payload, null, 2)});
-        } catch (error) {
-            throw new Error(`obs-html serve cannot be reached (${error?.message || error}); start it again and open its URL`);
-        }
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(`obs-html serve refused the answers with HTTP ${response.status}: ${body.error || ""}`);
-        return {ways: ["server"], written: body.written};
-    };
-
     // The partial send's entry in obs-html's notice center, in plain words (no file, command, code or id).
     const PARTLY = "se-answers-partly";
     const notices = () => root.obsNotices;
@@ -198,40 +177,30 @@
     // Where neither way is there: the adapter's host named, so the reader is never told of another host.
     const unavailable = (host, how) => new Error(`sending is not available here: this view ${how}, so nothing ` +
         `reached ${host}. Copy the answers and hand them over`);
-    const address = () => root.ObsHtmlAnswers?.server?.();
-    // Where obs-html serve served the page: its address, given from the bundle's first run.
-    const served = Boolean(address());
 
     // One adapter per host (the header's table): its sink's id, its name in the reader's words, and its send.
     const ADAPTERS = {
         "claude-app": {
             id: "claude-artifact",
-            // Where obs-html serve served the page, the answers go to whichever session serves it, so the
-            // sink names no reader.
-            name: served ? null : "Claude",
+            name: "Claude",
             send: async payload => {
                 const runtime = claude();
                 if (runtime) return await viaClaude(runtime, payload);
-                if (address()) return await viaServer(address(), payload);
-                throw unavailable("Claude", "has no Claude app runtime and was not opened through obs-html serve");
+                throw unavailable("Claude", "has no Claude app runtime");
             },
         },
         "claude-code": {
             id: "claude-code",
             name: "Claude Code",
-            send: async payload => {
-                if (address()) return await viaServer(address(), payload);
-                const runtime = claude();
-                if (runtime) return await viaClaude(runtime, payload);
-                throw unavailable("Claude Code", "was not opened through deck.py serve");
+            send: async () => {
+                throw unavailable("Claude Code", "is a standalone deck");
             },
         },
         "copilot": {
             id: "copilot",
             name: "Copilot",
-            send: async payload => {
-                if (address()) return await viaServer(address(), payload);
-                throw unavailable("Copilot", "was not opened through deck.py serve");
+            send: async () => {
+                throw unavailable("Copilot", "is a standalone deck");
             },
         },
         // No sink: obs-html's own take the answers.
