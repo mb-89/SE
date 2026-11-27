@@ -4,9 +4,8 @@ network, no process).
 - Named or left out: each authored note (`NOTES`) is a chapter, named by a `[[...]]` entry of
   docs.md, the manifest docs/documentation.md "Documentation" owns, or a key of `UNLISTED` with a one-line reason,
   so a new note stays out of the documentation only by a stated decision. `UNLISTED` stays true: a
-  key docs.md names, or one that is no scanned note, fails. `drafts/` (kept out of docs.md by
-  `tests/test_skill_drafts.py`), the generated layouts, the template and story folders and the
-  evals' prompts are no authored notes.
+  key docs.md names, or one that is no scanned note, fails. The generated layouts, the template and
+  story folders and the evals' prompts are no authored notes.
 - Links and anchors: every relative Markdown link in the guides (`LINKED`) resolves, and its
   `#anchor` is one of the target's headings, by the rule and the `anchors()` of
   `tests/test_agent_definitions.py`, which holds the agent and skill texts and the GitHub templates
