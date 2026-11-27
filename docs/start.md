@@ -147,6 +147,13 @@ no Go components. The plugin's hooks start the binary and post every session eve
     ([required components](boot.md#required-components)).
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
+- **The hooks**, once the binary is in place: where the project's `core.hooksPath` is unset, the
+  start points it at se's hooks with `se start-hooks` ([components/start](../components/start/hooks.go),
+  the Go port of the step), as `setup.sh` does, so a fresh clone's first commit runs the public
+  check; a set one stays, and the line names the checkout's own hooks that stop running.
+  - Where the binary is not in place yet, it sets nothing and says so in one line; the next start
+    sets them. `setup.sh` and `setup.ps1` name the stopped hooks with `se stopped-hooks`, placing
+    the binary with `bootstrap.sh --binary` where it is missing.
 - **RUNME** places the binary once, with `bootstrap.sh --binary` (RUNME.conf's `get se` line): it
   fetches or builds `~/.se/bin/<name>-<version>` in the foreground, links it and starts nothing.
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
