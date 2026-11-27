@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -298,7 +300,7 @@ def pytest_handlecrashitem(crashitem: str, report: pytest.TestReport, sched) -> 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Every collected test gets its time bound (tests/time_bound.py), one outside tests/ too."""
-    time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
+    time_bound.mark(items, OBS_LOCK_WAIT_SECONDS, build_wait=SE_BUILD_WAIT_SECONDS)
 
 
 @pytest.fixture
@@ -396,6 +398,56 @@ def obs() -> Path:
             pytest.fail(refusal)
         os.environ[build_docs.OBS_VARIABLE] = str(directory)  # the builds of the tests that take it
         return directory
+
+
+# How long the se_binary fixture waits for its build, another worker's included (its lock); a test
+# that takes it gets this on top of its time bound (tests/time_bound.py).
+SE_BUILD_WAIT_SECONDS = 600
+
+
+def se_build_key() -> str:
+    """What the se binary is built from: every file under components/ but its tests and testdata,
+    and kern's commit, as one digest."""
+    digest = hashlib.sha256()
+    components = ROOT / "components"
+    for path in sorted(components.rglob("*")):
+        name = path.relative_to(components).as_posix()
+        if (path.is_file() and not name.endswith("_test.go") and "/testdata/" not in f"/{name}"
+                and path.suffix in (".go", ".mod", ".sum")):
+            digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
+    with contextlib.suppress(OSError):
+        digest.update((KERN / ".git" / "HEAD").read_bytes())
+    return digest.hexdigest()[:16]
+
+
+@pytest.fixture(scope="session")
+def se_binary() -> Path:
+    """The se binary built from components/ (the scripts that run its verbs, setup.sh and setup.ps1
+    among them), once per tree and checkout at a time: kept in .se/.runtime/test-se/<build key>, so
+    a later run of the same tree builds nothing. The build is the suite's setup, not a test: it
+    runs the real go in the machine's home, under a lock as the obs fixture's build."""
+    binary = ROOT / ".se" / ".runtime" / "test-se" / se_build_key() / ("se.exe" if os.name == "nt" else "se")
+    if binary.is_file():
+        return binary
+    if shutil.which("go") is None:
+        pytest.fail("no go to build the se binary from components/ (scripts/setup.sh runs it)")
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(waiting.exclusive(ROOT / ".se" / "se-build.flock", SE_BUILD_WAIT_SECONDS))
+        except TimeoutError as error:
+            pytest.fail(str(error))
+        if binary.is_file():
+            return binary
+        with pytest.MonkeyPatch.context() as patch, process_door.use(process_door.RealProcesses()):
+            use_machine_home(patch)
+            part = binary.with_name(binary.name + f".part{os.getpid()}")
+            part.parent.mkdir(parents=True, exist_ok=True)
+            built = subprocess.run(["go", "build", "-o", str(part), "./cmd/se"], cwd=ROOT / "components",
+                                   capture_output=True, text=True, check=False)
+            if built.returncode:
+                pytest.fail(f"go build ./cmd/se failed:\n{built.stderr}")
+            part.replace(binary)
+    return binary
 
 
 # kern, the Go core, at the pin se.toml [components.kern] reads from components/go.mod (docs/modules.md

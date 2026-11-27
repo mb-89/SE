@@ -1231,28 +1231,17 @@ def git_sh() -> str | None:
 SETUPS = ["sh"] + (["powershell"] if os.name == "nt" else [])
 
 
-@pytest.fixture(scope="module")
-def built_se(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The se binary SE's checkout pins, built once from components/ with go: setup.sh and setup.ps1
-    name the checkout's own hooks through its `stopped-hooks` (components/start)."""
-    if shutil.which("go") is None:
-        pytest.skip("no go to build the se binary setup runs")
-    binary = tmp_path_factory.mktemp("se") / ("se.exe" if os.name == "nt" else "se")
-    built = subprocess.run(["go", "build", "-o", str(binary), "./cmd/se"], cwd=SE_ROOT / "components",
-                           capture_output=True, text=True, check=False)
-    assert built.returncode == 0, built.stderr
-    return binary
-
-
 @pytest.fixture
-def se_bin(built_se: Path) -> Path:
-    """The built se binary in place where setup finds it, the test's own ~/.se/bin, under the name
-    and version se_modules.py app-binary answers for SE's checkout."""
+def se_bin(se_binary: Path) -> Path:
+    """The se binary built from components/ (tests/conftest.py `se_binary`) in place where setup
+    finds it, the test's own ~/.se/bin, under the name and version se_modules.py app-binary
+    answers for SE's checkout; setup.sh and setup.ps1 name the checkout's own hooks through its
+    `stopped-hooks` (components/start)."""
     release = tomllib.loads((SE_ROOT / "components" / "release.toml").read_text(encoding="utf-8"))
     placed = (Path(os.environ["HOME"]) / ".se" / "bin"
               / f"{release['binary']}-{release['version']}{'.exe' if os.name == 'nt' else ''}")
     placed.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(built_se, placed)
+    shutil.copy2(se_binary, placed)
     return placed
 
 
