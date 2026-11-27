@@ -6194,11 +6194,12 @@ def twin_rule(key: tuple[str, str | None]) -> str:
 
 
 def comment_quote(text: str) -> str:
-    """`text` as a Markdown quote, without the fleet marker and template markers, so a comment
-    shows it as data and names no template it is not filled from."""
-    marker = sibling("templates").TEMPLATE_MARKER_PATTERN
-    lines = "\n".join(line for line in text.replace(FLEET_MARKER, "").splitlines()
-                      if not marker.fullmatch(line)).strip().splitlines()
+    """`text` as a Markdown quote, without the fleet marker, template markers and recorded template
+    inputs, so a comment shows it as data and names no template it is not filled from."""
+    templates = sibling("templates")
+    marker = templates.TEMPLATE_MARKER_PATTERN
+    lines = "\n".join(line for line in templates.INPUTS_PATTERN.sub("", text.replace(FLEET_MARKER, ""))
+                      .splitlines() if not marker.fullmatch(line)).strip().splitlines()
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
@@ -6512,6 +6513,7 @@ def template_findings(root: Path, repo: str, chosen, title: str, body: str,
     finding."""
     templates = sibling("templates")
     try:
+        chosen = templates.inputs_for(chosen, body)
         private = templates.private_findings(chosen, title, body, root)
         if given is not None:
             private += [finding for finding in templates.private_findings(chosen, title, given, root)
@@ -6963,15 +6965,21 @@ def filing_check(root: Path, repo: str, command: str, door=None,
             names = ", ".join(f"#{number}" for number in found["overhaul"].open)
             raise ReviewDueError(f"work_tickets.py file --finding: the overhaul {names} is open; "
                                  f"file nothing until it is closed ({REVIEW_HELP})")
-        if len(found["retro"].open) != 1 or found["retro"].open[0] != finding.retro:
+        state = retro.filing_state(door.comments(finding.retro))
+        blessed = state.marker_phase == "blessed"
+        if blessed:
+            target = door.issue(finding.retro)
+            if not target or not retro.is_retro(retro.issue_of(target)):
+                raise ReviewDueError(f"work_tickets.py file --finding {finding}: "
+                                     f"#{finding.retro} is not a retro issue")
+        elif len(found["retro"].open) != 1 or found["retro"].open[0] != finding.retro:
             names = ", ".join(f"#{number}" for number in found["retro"].open) or "none"
             raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
                                  f"#{finding.retro} is not the only open retro ({names})")
-        state = retro.filing_state(door.comments(finding.retro))
         if getattr(door, "missing", []):
             raise QueueError(f"work_tickets.py file --finding {finding}: the retro's comments "
                              "are missing; read them before filing")
-        if state.phase != "report" or state.findings is None:
+        if state.phase not in ("report", "blessed") or state.findings is None:
             raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
                                  f"#{finding.retro} is {state.phase}, not in report state")
         if finding.finding > state.findings:
@@ -6990,11 +6998,25 @@ def filing_check(root: Path, repo: str, command: str, door=None,
                 if getattr(door, "missing", []):
                     raise QueueError(f"work_tickets.py {command}: comments for retro {names} are "
                                      "missing; read them before filing")
+                waiting = [(number, state) for number, state in zip(found[kind].open, states)
+                           if state.marker_phase != "blessed"]
+                if not waiting:
+                    continue
+                names = ", ".join(f"#{number}" for number, _ in waiting)
+                states = [state for _, state in waiting]
                 if len(states) == 1 and states[0].phase == "report":
                     raise ReviewDueError(f"work_tickets.py {command}: retro {names} is in report "
                                          f"state; file only its findings with `work_tickets.py file "
                                          f"--finding {names.removeprefix('#')}:<k>`, or record "
                                          f"declined/merged outcomes with `retro.py outcome`; {held}")
+                number = waiting[0][0]
+                if len(states) == 1:
+                    raise ReviewDueError(
+                        f"work_tickets.py {command}: the retro {names} is open and its report is "
+                        f"not in; post it with `uv run python {SE_ROOT.as_posix()}/scripts/retro.py "
+                        f"file {number} --worktree {root.as_posix()}` (it reads the draft at "
+                        f"{retro.draft_path(repo, number)}, which `retro.py collect {number}` "
+                        f"writes), then file its findings with `--finding {number}:<k>`; {held}")
             raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
     for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
         if found[kind].due:
