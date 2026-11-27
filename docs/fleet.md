@@ -100,6 +100,19 @@ The same tree may be held by more than one remote or checkout
   like source, and no text is normalized, whitespace included. Exit code 1 with any such path, 0
   without (`tests/test_parity.py`).
 
+## Bug fixes ride along
+
+A bug fix gets no issue of its own: SE adds it as a comment on the earliest next related issue,
+naming the fix and its test, and that issue's worker fixes it on its branch and names it in the
+field report's Delivered table. SE files a bug issue only when no issue is running.
+
+The person, 27 Nov: "In the future, I don't want you to file any more issues for bug fixes. I just want to add bug
+fixes as a comment to one of the next issues. And really only if no issue is running, then you file
+an issue for a bug fix."
+
+The same holds for the fix a partial landing leaves: it rides as a comment on a named next issue
+([integrator](../src/agents/integrator.md)).
+
 ## Retro due
 
 ```toml
