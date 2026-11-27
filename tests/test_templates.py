@@ -131,12 +131,12 @@ NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "o
 #: The documents a deck is built from (deck.build): the retro's and the overhaul's one report.
 DECKS = ("retro-deck",)
 #: The interface templates with fields: the texts SE's sessions pass to each other.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover",
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker",
               "rules-page", "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc",
               "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart",
               "release-trailer", "review-done", "run-closed")
-#: The templates that claim files (`file.write`): the work issue's body file.
-FILES = ("work-file",)
+#: The templates that claim files (`file.write`): the work issue's body file and the handover.
+FILES = ("work-file", "handover")
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
 #: scaffold writes, each claiming the scripts or modules it shapes.
 CODE_TEMPLATES = ("python-script", "python-module", "python-component", "go-module")
@@ -266,7 +266,9 @@ def test_the_marker_names_the_repository_the_template_its_version_and_its_digest
     work = catalog["work"]
     texts = [(ROOT / "templates" / f"{name}.md").read_text(encoding="utf-8") for name in ("work", "ticket")]
     digest = hashlib.sha256("".join(text + "\0" for text in texts).encode("utf-8")).hexdigest()
-    requirement = hashlib.sha256((ROOT / "templates" / "requirement.md").read_bytes() + b"\0").hexdigest()
+    requirement = hashlib.sha256(
+        (ROOT / "templates" / "requirement.md").read_text(encoding="utf-8").encode("utf-8") + b"\0"
+    ).hexdigest()
     nested = hashlib.sha256(f"sha256:{digest}\0sha256:{requirement}\0".encode("utf-8")).hexdigest()
     assert work.marker_line == f"<!-- se:template se/work 1.2.0 sha256:{nested} -->"
     assert templates.render(work, work_fields(catalog)).splitlines()[1] == work.marker_line
@@ -1059,7 +1061,8 @@ def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tm
     file's and its code templates' scripts and modules among them, and another folder's own."""
     assert templates.main(["list", "--owned", "--tree"]) == 0
     assert capsys.readouterr().out == ("**/go.mod: go-module\n.se/components/*/__init__.py: python-component\n"
-                                       ".se/issues/*.md: work-file\ngo.mod: go-module\n"
+                                       ".se/handover.md: handover\n.se/issues/*.md: work-file\n"
+                                       "go.mod: go-module\n"
                                        "scripts/*.py: python-module\nscripts/*.py: python-script\n")
     write_template(tmp_path, "steps", MINIMAL.format(
         name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
@@ -1658,10 +1661,11 @@ def test_the_retro_report_is_a_document_of_the_retro_template_and_passes(catalog
                                         home=HOME)
     assert template.name == "retro"
     assert [finding for finding in found if finding.severity == templates.REFUSE] == []
-    unfilled = retro_report().replace("> The integrator stalled twice on a red suite.", "")
+    unfilled = re.sub(r"(## 1\. Collect\n\n).*?(?=\n## 2\.)", r"\1", retro_report(),
+                      flags=re.DOTALL)
     _, found = templates.verdict(catalog, "comment.create", unfilled, repo=REPO, home=HOME)
     assert [(finding.field, finding.rule) for finding in found
-            if finding.severity == templates.REFUSE] == [("field_feedback", "required")]
+            if finding.severity == templates.REFUSE] == [("collect", "required")]
 
 
 def overhaul_block(**changes: object) -> dict:
@@ -1907,12 +1911,25 @@ def overhaul_report() -> str:
 
 def retro_steps(catalog, monkeypatch) -> list[Case]:
     cases = []
-    for text, template in ((retro_report(), "retro"), (overhaul_report(), "overhaul")):
-        cases += step_cases(retro.file_steps(REPO, 30, [text]), {"comment_issue": template})
+    for text, template, marker, findings in (
+            (retro_report(), "retro", retro.REPORT_MARKER, 2),
+            (overhaul_report(), "overhaul", overhaul.REPORT_MARKER, 0)):
+        plan = retro.file_steps(REPO, 30, [text], findings, what=template)
+        for step in plan.steps:
+            body = step.arguments.get("body")
+            selected = template if isinstance(body, str) and body.startswith(marker) else FREE
+            cases += step_cases(work_tickets.Plan(plan.title, (step,)),
+                                {step.action: selected})
     parts = retro.parts(retro_report(), 30, limit=400)
-    cases += step_cases(retro.file_steps(REPO, 30, parts[:1]), {"comment_issue": FREE})
-    cases += step_cases(retro.file_steps(REPO, 30, parts[1:2]), {"comment_issue": FREE})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[:1], 2), {"comment_issue": FREE})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[1:2], 2), {"comment_issue": FREE})
     return cases
+
+
+def retro_outcome(catalog, monkeypatch) -> list[Case]:
+    return [Case("comment.create", FREE, retro.outcome_comment(1, "declined", "not needed")),
+            Case("comment.create", FREE, retro.report_state_comment("done", 1)),
+            Case("issue.edit", NO_BODY)]
 
 
 def tracker_comment(catalog, monkeypatch) -> list[Case]:
@@ -2020,6 +2037,7 @@ CONTRACT = {
     "review:file_steps": ("review.py file", review_steps),
     "review:run_file": ("review.py file", review_run),
     "retro:file_steps": ("retro.py file and overhaul.py file", retro_steps),
+    "retro:record_outcome": ("retro.py outcome and work_tickets.py file --finding", retro_outcome),
 }
 
 
@@ -2101,7 +2119,7 @@ def test_every_whole_document_a_fill_makes_carries_its_templates_marker(catalog)
     filled = [name for name, template in catalog.items()
               if template.example and set(template.actions) & {"issue.create", "comment.create"}
               and not (template.is_adapter or template.message or template.writes_file)]
-    assert {"work", "ticket", "routed", "handover"} <= set(filled)
+    assert {"work", "ticket", "routed"} <= set(filled)
     for name in filled:
         template = catalog[name]
         rendered, _, _ = templates.fill(template, dict(template.example["fields"]), "raw input",

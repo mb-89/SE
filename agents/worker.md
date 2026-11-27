@@ -100,6 +100,10 @@ every package, so work issues and session prompts never repeat it.
    issue's body (with its "Changes after filing") and its comments and reports what changed; apply
    the changes to the tickets (`intake` again adds tickets for added requirements), run
    `work_tickets.py sync`, then move the ticket to `held`.
+
+   After reading and addressing refreshed comments, explicitly record
+   `work_tickets.py comments-read --count <current count> --newest <current newest id> --worktree <worktree>`.
+   Keep the unread-comment gate: acknowledging comments never replaces addressing them.
 4. **Work the ticket**:
    - Build first: where the acceptance names a real build (a module at a new pin, an output a
      project command regenerates), build it at that pin before writing code, so a failure that is
@@ -164,6 +168,9 @@ every package, so work issues and session prompts never repeat it.
        sentence the branch deletes or rewrites, and nothing is pushed or posted.
      - A sentence that stands with the same words in another file the branch tracks, its link
        targets aside, is no deletion: a section moved to another page needs no naming.
+     - Quote each replaced authored sentence contiguously as `<path>: <sentence>` under
+       "Removed behaviour, deleted or weakened tests, and authored prose"; do not split its words
+       across lines or replace them with a paraphrase.
      - A folder the branch moves with its tests to another repository is named there once, as
        the work model's [Tests](../skills/work-model/SKILL.md#tests) says (`Moved: <folder> to
        <repository> at <commit>`), never test by test.

@@ -41,9 +41,10 @@ LAST_OVERHAUL = issue(2, "overhaul-20261101", "2026-11-02T00:00:00Z", "2026-11-0
 class Door:
     """The check's reads: the closed and open issues and the pull requests, as given."""
 
-    def __init__(self, closed=(), opened=(), pulls=()) -> None:
+    def __init__(self, closed=(), opened=(), pulls=(), comments=None) -> None:
         self.closed = [LAST_RETRO, LAST_OVERHAUL, *closed]
         self.opened, self.given_pulls, self.missing = list(opened), list(pulls), []
+        self.given_comments = comments or {}
 
     def closed_issues(self):
         return self.closed
@@ -56,6 +57,9 @@ class Door:
 
     def issue(self, number):
         return next(item for item in [*self.closed, *self.opened] if item["number"] == number)
+
+    def comments(self, number):
+        return self.given_comments.get(number, [])
 
 
 def landed(count: int, when: str = "2026-11-10T00:00:00Z") -> dict:
@@ -76,8 +80,8 @@ def filed(monkeypatch, tmp_path) -> list[str]:
     return runs
 
 
-def check(tmp_path: Path, door: Door, command: str = "file") -> None:
-    work_tickets.filing_check(tmp_path, REPO, command, door, NOW)
+def check(tmp_path: Path, door: Door, command: str = "file", finding=None) -> None:
+    work_tickets.filing_check(tmp_path, REPO, command, door, NOW, finding)
 
 
 def test_twenty_issues_opened_in_one_session_make_no_retro_due_and_filing_goes_on(tmp_path,
@@ -96,8 +100,8 @@ def test_twenty_that_come_back_file_the_retro_first_and_refuse_the_filing(tmp_pa
     assert str(refused.value) == (
         "work_tickets.py file: a retro is due (20 came back since the last retro (due at 20)), "
         "filed first: Filed work issue https://github.com/owner/repo/issues/91; file files no "
-        "other issue until the person has decided every finding of it in an SE session and it is "
-        "closed; running work goes on (docs/fleet.md \"Retro due\")")
+        "other issue until every finding has an outcome and the retro is done; running work goes "
+        "on (docs/fleet.md \"Retro due\")")
     assert issubclass(work_tickets.ReviewDueError, work_tickets.QueueError)
 
 
@@ -108,12 +112,39 @@ def test_filing_is_refused_while_a_retro_is_open_naming_it_and_nothing_is_filed(
     for command in ("file", "backlog file"):
         with pytest.raises(work_tickets.ReviewDueError,
                            match=rf"^work_tickets.py {command}: the retro #40 is open; {command} "
-                                 "files no other issue until the person has decided"):
+                                 "files no other issue until every finding has an outcome"):
             check(tmp_path, Door(opened=[open_retro], **landed(25)), command)
     assert filed == []
     found = retro.countdowns(Door(opened=[open_retro], **landed(3, "2026-11-21T00:00:00Z")),
                              REPO, "main", tmp_path, NOW)
     assert (found["retro"].count, found["retro"].open) == (3, [40])
+
+
+def test_report_state_allows_only_a_named_finding_issue(tmp_path, filed):
+    open_retro = issue(40, "retro-due-20261120", created="2026-11-20T00:00:00Z", labels=("retro",))
+    marker = retro.report_state_comment("report", 2)
+    door = Door(opened=[open_retro], comments={40: [{"body": marker}]})
+
+    check(tmp_path, door, command="file", finding=retro.FindingRef("40:1"))
+
+    with pytest.raises(work_tickets.ReviewDueError, match="retro #40 is in report state"):
+        check(tmp_path, door)
+    with pytest.raises(work_tickets.ReviewDueError, match="finding 3 is not in the report"):
+        check(tmp_path, door, command="file", finding=retro.FindingRef("40:3"))
+    assert filed == []
+
+
+def test_report_state_refuses_finding_without_report_or_after_its_outcome(tmp_path, filed):
+    open_retro = issue(40, "retro-due-20261120", created="2026-11-20T00:00:00Z", labels=("retro",))
+    finding = retro.FindingRef("40:1")
+    for comments, reason in (
+        ([], "is running, not in report state"),
+        ([{"body": retro.report_state_comment("report", 2) + "\n"
+           + retro.outcome_comment(1, "declined", "not needed")}], "already recorded as declined"),
+    ):
+        with pytest.raises(work_tickets.ReviewDueError, match=reason):
+            check(tmp_path, Door(opened=[open_retro], comments={40: comments}), finding=finding)
+    assert filed == []
 
 
 def test_an_open_overhaul_holds_filing_back_too(tmp_path, filed):

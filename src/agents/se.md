@@ -128,13 +128,21 @@ its tools.
   closed work issues (older ones, from before reports moved there, in their `field-report` issues).
   - It falls due by what comes back ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due)): your next
     `work_tickets.py file` files it first and refuses the issue you meant, naming it. While a
-    retro or an overhaul is open, you file no new issue; running work goes on.
+    retro is running, file no issue; after its report, file only its findings with
+    `work_tickets.py file --finding <retro>:<finding>`.
+
+    Record declined or merged outcomes with `retro.py outcome`; the retro closes when all findings
+    have an outcome. An open overhaul still blocks all filing; running work goes on.
   - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
-    name>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
-    session. It asks the person for the field feedback first, runs the template's `retro.py
-    collect` and `retro.py file`, has the person decide every finding, and closes the issue.
-  - When it reports the issue closed, file its work findings: a work issue names each finding it
-    takes as the message `templates/finding-ref.md` writes it, so the next retro scores it.
+    name> --number <issue>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
+    session.
+
+    It runs `retro.py collect`, judges and prepares the deck, then files the report with
+    `retro.py file`.
+
+    When the report is in, file each accepted work finding with `work_tickets.py file --finding`;
+    record declined or merged findings with `retro.py outcome`. A work issue names each finding it takes as the message
+    `templates/finding-ref.md` writes it, so the next retro scores it.
 - **Overhaul issues**, to ask whether the design is still right, fall due after enough retros or
   days ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due)) and are filed the same way, from
   [overhaul.md](../../.github/ISSUE_TEMPLATE/overhaul.md) (`overhaul.py new` files one by hand).
@@ -161,6 +169,8 @@ its tools.
     your checkout's `.claude/settings.json` holds the same rules (docs/install.md "Claude Code cloud").
   - At your first turn, title your own session `SE` and add the tag `SE`; on the person's request,
     rename the earlier sessions of SE's work to the scheme, as [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says.
+  - Apply the work model's [immediate cleanup rule](../skills/work-model/SKILL.md#visible-sessions)
+    to reviewer and retro sessions; the integrator owns cleanup of the workers it lands.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
   [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, then answer with a
   comment on the escalated issue or a request to the session that escalated.
@@ -175,7 +185,7 @@ its tools.
     the issue yourself, or take it to the person as a decision.
 - **Reviews**: on the person's request "review PR #n", start one [reviewer](reviewer.md) session
   for it, as an independent session on the model the workers run or a stronger one, never a weaker.
-  - Its title is `session-title reviewer <project> <pull request number>`, its tag `SE`
+  - Its title is `session-title reviewer <project> <pr-branch-name> --number <pull request number>`, its tag `SE`
     ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)).
   - Its prompt names only the reviewer agent, the pull request, its repository and your session
     (in the cloud, the prompt the README's [Claude Code cloud](../../docs/install.md#claude-code-cloud)

@@ -117,15 +117,20 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
 - **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
   anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
   `discovery`, not `ready`), and the filing asked for is refused, naming it.
-- **Blocking.** While a retro or an overhaul is open, every other filing is refused with the
-  reason and its number, until the person has decided its findings in an SE session and it is
-  closed. Running work goes on, and issues keep coming back; they count towards the next run.
+- **Blocking.** While a retro is running, filing is refused with its number. Once its report is in,
+  `file --finding <retro>:<finding>` may file only that finding's work issue; every other filing is
+  refused.
+
+  A finding may instead be recorded as declined or merged into another finding with `retro.py
+  outcome`. The retro is done and closes when every finding has an outcome. An open overhaul still
+  refuses every filing. Running work goes on, and issues keep coming back; they count towards the
+  next run.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
   due included, and a first retro, where none has closed, the whole history from the project's
   first issue; its counters reset when it starts (its issue's creation), so a late retro never
   makes the next one due at once.
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
-  session; its first step asks the person for the field feedback.
+  session; SE presents the completed report deck to the person.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
   `retro.py due` prints both countdowns. It reads back to the newest run's start, all with no
   retro yet (`recent_reads`). The [start greeting](start.md#start-and-refresh) names a run due or

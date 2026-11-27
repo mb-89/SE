@@ -11,6 +11,8 @@ A reference is `Refs`, `Closes`, `Fixes` or `Lands`, then `#<n>` or this reposit
 `https://github.com/<owner>/<repo>/issues/<n>` (or `/pull/<n>`). The pull request passes when:
 
 - one reference names an issue of this repository that is open and labelled `work`; or
+- a retro report names its open retro issue with `Refs #<n>` and
+  `<!-- se:retro-report <n> -->`; or
 - one `Lands` reference names a pull request (a landing's work pull request) whose description
   names such an issue; or
 - it was opened by the repository owner's account and carries the label `housekeeping`; or
@@ -59,6 +61,7 @@ import se_script
 WORK_LABEL = "work"
 HOUSEKEEPING_LABEL = "housekeeping"
 RELEASE_LANDING = re.compile(r"land/release-v\d+\.\d+\.\d+")  # work_tickets.py RELEASE_LANDING
+RETRO_REPORT = re.compile(r"<!-- se:retro-report ([1-9]\d*) -->")
 KEYWORDS = ("refs", "closes", "fixes", "lands")
 RETRY_SECONDS = 5  # the wait before the one read again after a server error
 REMEDY = ("name the work issue in the description's first line, `Refs <issue url>` (work_tickets.py "
@@ -140,10 +143,19 @@ def issue_verdict(item: dict | None) -> str | None:
     return None
 
 
+def is_open_retro(item: dict | None) -> bool:
+    """Whether `item` is an open retro issue eligible for its own report pull request."""
+    if item is None or item.get("state") != "open":
+        return False
+    title = str(item.get("title") or "").lower()
+    return "retro" in labels(item) or title.startswith("retro-")
+
+
 def names_work_issue(api: Api, body: str, out: list[str], lands: bool) -> bool:
     """Whether `body` names an open work issue; with `lands`, a `Lands` reference to a pull request
     counts when that pull request's description names one. Writes one line per reference."""
     passed = False
+    marker = RETRO_REPORT.search(body)
     for keyword, number in references(body, api.repository):
         item = api.issue(number)
         if keyword == "lands" and item is not None and "pull_request" in item:
@@ -153,6 +165,11 @@ def names_work_issue(api: Api, body: str, out: list[str], lands: bool) -> bool:
             out.append(f"  Lands #{number}: pull request, its description:")
             if names_work_issue(api, str(item.get("body") or ""), out, lands=False):
                 passed = True
+            continue
+        if (keyword == "refs" and marker is not None and int(marker[1]) == number
+                and is_open_retro(item)):
+            out.append(f"  Retro report #{number}: open retro issue")
+            passed = True
             continue
         why = issue_verdict(item)
         out.append(f"  {keyword.capitalize()} #{number}: " + ("open work issue" if why is None
@@ -199,7 +216,7 @@ def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
                                f"{HOUSEKEEPING_LABEL}: exempt"]
         lines.append(f"pr-issues: pull request #{number} into {branch} names:")
         if names_work_issue(api, str(pull.get("body") or ""), lines, lands=True):
-            lines.append("pr-issues: passed, it names an open work issue")
+            lines.append("pr-issues: passed, it names an open work issue or its retro report")
             return 0, lines
     lines.append(f"::error::pr-issues: pull request #{number} names no open issue of "
                  f"{api.repository} labelled {WORK_LABEL} (Refs|Closes|Fixes #<n> or the issue's "

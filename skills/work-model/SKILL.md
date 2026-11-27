@@ -75,16 +75,25 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   person ([dec-011](references/rules.md#dec-011-persons-decide-agents-execute)).
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
-  script it changes.
-  - A retro takes the six steps of its template: field feedback, collect, the table of what
-    happened, the standing questions, classes and homes, and the person's decisions.
+  script it changes. The retro agent prepares the report and deck; SE presents them to the person.
+  - A retro takes the five steps of its template: collect, the table of what happened, the standing
+    questions, classes and homes, and the person's decisions. Its deck ends with "Anything else?",
+    whose sole default answer is "Nothing else".
   - The standing questions are one block, asked alike by the retro, the overhaul and every field
-    report; the overhaul adds its own. The retro's report closes the retro issue and files nothing; SE bundles its
-  findings into work issues ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+    report; the overhaul adds its own.
+
+    The retro report moves the issue to report state: SE may file only its findings with
+    `work_tickets.py file --finding`, or record declined/merged outcomes with `retro.py outcome`.
+    The issue closes when every finding has an outcome.
+    SE files no issue by itself before then
+    ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
-  any new issue: `work_tickets.py file` files a due one first and refuses every other filing while
-  one is open, until the person has decided its findings; running work goes on. Each runs in a
-  session of SE's [retro agent](../../agents/retro.md), which
+  any new issue: `work_tickets.py file` files a due one first.
+
+  A running retro refuses filing; in report state, only its findings may be filed; it is done once
+  every finding has an outcome. An open overhaul refuses all filing; running work goes on.
+
+  Each runs in a session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
   (["Retro due"](../../docs/fleet.md#retro-due)).
 
@@ -200,6 +209,8 @@ no procedure but SE's sends the person to a session.
 
 - **One-way ref changes** (force-updating or deleting a branch, moving or deleting a tag) go
   through the repository's `ref-maintenance` workflow, as triples `<old-sha> <new-sha> <ref>`.
+  Accepted work-branch cleanup follows [Visible sessions](#visible-sessions) instead; it needs
+  no new approval.
   1. The integrator pushes the commits the new refs point to, writes the triples to a file and
      runs `work_tickets.py refs request <issue> --triples-file <file>`: it posts the triples on
      the issue, runs the workflow's dry run, posts its output and labels the issue `escalated`.
@@ -526,7 +537,10 @@ session list."
 
 Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
 sidebar shows one SE section, each role's sessions nested under the session that started them.
-`work_tickets.py session-title <role> [<project>] [<topic>]` prints the title, its one owner.
+
+`work_tickets.py session-title <role> [<project>] [<topic>] [--number <number>]` prints the title,
+its one owner. Workers, reviewers and retros require `--number`, the work issue or pull request
+number; it appears before the name in the title.
 
 - **The scheme**: the SE agent's own session is `SE`; `<project>` is the repository's name as
   GitHub spells it (`SE`, `obs`).
@@ -535,10 +549,10 @@ sidebar shows one SE section, each role's sessions nested under the session that
   |---|---|---|
   | The SE agent's own | — | `SE` |
   | A project's integrator | — | `SE/<project>/integrator` |
-  | A worker | below the integrator, started by it | `SE/<project>/worker/<ticket name>` |
+  | A worker | below the integrator, started by it | `SE/<project>/worker/<number>/<ticket name>` |
   | A sub-integrator | below the integrator, started by it | `SE/<project>/integrator/<area>` |
-  | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<pull request number>` |
-  | A retro agent | beside the integrator, started by the SE agent | `SE/<project>/retro/<run's issue name>` |
+  | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<number>/<pr-branch-name>` |
+  | A retro agent | beside the integrator, started by the SE agent | `SE/<project>/retro/<number>/<run's issue name>` |
   | A researcher | beside the integrator, started by the SE agent | `SE/<project>/researcher/<topic>` |
   | A spike | beside the integrator, started by the SE agent | `SE/<project>/spike/<topic>` |
 
@@ -556,13 +570,20 @@ sidebar shows one SE section, each role's sessions nested under the session that
   has it. It removes no tag.
 - **Finding sessions**: a role finds the sessions it started with `list_sessions` and
   `children: true`; one it did not start, such as an earlier SE session's integrator, by its exact
-  title (`SE/<project>/integrator`, `SE/<project>/worker/<ticket name>`). Never by tag:
+  title (`SE/<project>/integrator`, `SE/<project>/worker/<number>/<ticket name>`). Never by tag:
   `list_sessions` refuses a tag filter from inside a session.
 - **Reorganizing**: on the person's request, the SE agent renames existing sessions of SE's work
   to the scheme and adds the tag `SE`, and tells the person which it renamed.
   - It removes only the tags SE's earlier prompts gave (`se:worker:*`, `se:issue:*`,
     `se:integrator:*`, `se-track-b`), never another, such as the host's `config:*` or `cowork-*`.
   - It cannot move a session under another parent, and says so where the person asks for that.
+- **Clean up immediately on acceptance**: the integrator that lands a worker's pull request
+  archives its session and removes its worktree and local and remote branch at once, even if the
+  landing leaves its issue open. Use the safe removal procedure in [Worktrees](#worktrees).
+
+  SE archives a reviewer's session once its review is posted, and a retro's session once the person
+  has answered and nothing more is needed from that session; SE retains the answers and draft paths
+  for mechanical filing and closing. Never keep a session "in case": its files survive archiving.
 
 ### Suite at a moved pin
 
@@ -618,8 +639,7 @@ Pull requests built on an old `main` cause most integration trouble.
 - At most `[workers]` working agents run at once, 4 on a local device by default, the cloud open
   unless set ([docs/settings.md "Workers"](../../docs/settings.md#workers)); a local device also counts its CPU
   cores and memory. File clashes and the serial merge queue apply everywhere.
-- An integrated worker session is deleted once its branch is on `main` and its worktree is
-  removed; a session is kept only while it holds an unresolved discussion with a handover issue.
+- Accepted work follows [Visible sessions](#visible-sessions)' immediate cleanup rule.
 
 ## Worktrees
 
@@ -1125,7 +1145,7 @@ harnesses.
   - Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker',
     '--trust-folder','--no-ask-user','--allow-tool=<list>','-n','<title>','-p','<prompt>'
     -RedirectStandardOutput <worktree>\.se\worker.log -WindowStyle Hidden`.
-  - `<title>` is the worker's title, `session-title worker <project> <branch>`, the `title=` of
+  - `<title>` is the worker's title, `session-title worker <project> <branch> --number <issue>`, the `title=` of
     `start`'s `Launch worker:` line.
   - `<list>` holds the worker's tools: its shell, its file edits and the `se` server.
   - `--trust-folder`: project MCP servers and hooks load only in a trusted folder.

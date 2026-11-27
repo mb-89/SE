@@ -39,7 +39,7 @@ help = "comment a question on an issue, label it escalated and print the escalat
 class = "batch"
 
 [commands."work_tickets.py file"]
-usage = "work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |\n                     --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]"
+usage = "work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |\n                     --fields FILE) [--hold] [--blocked-by N] [--finding RETRO:FINDING]\n                     [--label LABEL] [--repo REPO]"
 summary = "for SE: file a work issue labelled work, ready and repo:<name>"
 group = "Issues"
 help = "for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked"

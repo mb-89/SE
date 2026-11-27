@@ -677,7 +677,22 @@ def session_lines(report: Report, se_root: Path) -> list[str]:
     """What the start found for the session, never shown to the person in the report: a stale plugin,
     a check that failed, the project's components listing, missing skills, the work that is due."""
     return (required_lines(report) + stale_plugin_lines(se_root, report.root) + _check_lines(report, se_root)
-            + component_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root))
+            + component_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root)
+            + handover_lines(report.root))
+
+
+#: The handover, an untracked file in the main checkout that SE's catch-up writes on a local device
+#: (src/skills/catch-up/SKILL.md "Close", templates/handover.md); a cloud session writes none.
+HANDOVER = Path(".se") / "handover.md"
+
+
+def handover_lines(root: Path | None) -> list[str]:
+    """One line naming the handover where the project's checkout holds one: the previous SE session
+    on this machine wrote it, and this one reads it first. Nothing where there is none."""
+    if root is None or not (root / HANDOVER).is_file():
+        return []
+    return [f"Handover: {(root / HANDOVER).as_posix()}, written by the previous SE session on this "
+            "machine; read it first: where the work stands and how to resume"]
 
 
 def required_lines(report: Report) -> list[str]:

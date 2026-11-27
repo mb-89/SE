@@ -61,7 +61,8 @@ project's commands and hot files by the project's `AGENTS.md`.
 ## Procedure
 
 1. **Read the state** (direct tool calls, keep it short):
-   - the open `handover` issue (the only handover), the project's `AGENTS.md` and the open
+   - the handover `.se/handover.md` where the start names it (a local device only), the project's
+     `AGENTS.md` and the open
      [backlog issues](../work-model/SKILL.md#issues) (`work_tickets.py backlog list`);
    - per repository: `git log --oneline -15`, `git status --short`, `git worktree list`,
      `git branch --no-merged main`, commits ahead of the last tag and of `origin/main`;
@@ -87,8 +88,9 @@ project's commands and hot files by the project's `AGENTS.md`.
      pull request with a complete field report. `queue` cannot see it: ask the integrator to
      integrate the branch, in shared-file order.
    - **Stale, superseded**: its work is merged or reimplemented elsewhere (check `git branch --no-merged`,
-     `git log --grep`, the files on `main`). Leave it; list it for a removal decision, or feed its
-     prototype into the package that now owns the topic.
+     `git log --grep`, the files on `main`). Apply the work model's
+     [immediate cleanup rule](../work-model/SKILL.md#visible-sessions) where its work was accepted;
+     otherwise feed its prototype into the package that now owns the topic.
 3. **Report briefly**: what is done (with commits and tags), what is open, which worktrees are live,
    stale or superseded.
 4. **Sort every open item** into exactly one bucket:
@@ -151,9 +153,12 @@ project's commands and hot files by the project's `AGENTS.md`.
    Escalated issues are decisions: present them to the user as decisions (step 7).
 9. **Close**: when everything is integrated and a release is due, send the integrator `release`
    without asking the user ([Releases](../../agents/se.md#tools)); the integrator releases
-   (version, tag, push). Update the single open `handover` issue (state, open issues, running and
-   unintegrated branches, parked decisions, how to resume); close the previous one.
-   Do the same whenever the user is about to leave or switch the machine off.
-
-   Fill it from the interface template `templates/handover.md` (`templates.py fill handover`):
-   the template gate checks its sections on every write.
+   (version, tag, push).
+   - On a local device, write the handover, the untracked file `.se/handover.md` in the main
+     checkout (state, open issues, running and unintegrated branches, parked decisions, how to
+     resume), with `templates.py fill handover --path .se/handover.md`: the template gate checks its
+     sections on every write.
+   - The handover is private: never commit it, file it or copy it into an issue. Write it also
+     whenever the user is about to leave or switch the machine off; the next SE start on this
+     machine names it ([docs/boot.md](../../docs/boot.md)).
+   - In the cloud, write none: the session keeps living, and open work stays in its work issues.

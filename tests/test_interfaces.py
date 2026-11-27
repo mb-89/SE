@@ -14,7 +14,7 @@ import templates
 
 ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "rules-page",
               "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
               "started-comment", "claim-undone", "review-declined", "limit-restart",
               "release-trailer", "review-done", "run-closed")
@@ -50,14 +50,14 @@ def test_the_check_names_a_generated_file_that_differs_is_missing_or_stray_and_t
     edited = json.loads((folder / "escalation.json").read_text(encoding="utf-8"))
     edited["schema"]["required"] = ["issue"]
     (folder / "escalation.json").write_text(json.dumps(edited), encoding="utf-8")
-    (folder / "handover.json").unlink()
+    (folder / "run-closed.json").unlink()
     (folder / "old.json").write_text("{}", encoding="utf-8")
     assert templates.interfaces_drift(catalog, folder) == [
-        "interfaces/handover.json: missing",
+        "interfaces/run-closed.json: missing",
         "interfaces/escalation.json: differs from templates/escalation.md",
         "interfaces/old.json: no interface template makes it"]
     assert templates.write_interfaces(catalog, folder) == ["old.json", "escalation.json",
-                                                            "handover.json"]
+                                                            "run-closed.json"]
     assert templates.interfaces_drift(catalog, folder) == []
     assert templates.write_interfaces(catalog, folder) == []
 
@@ -138,26 +138,31 @@ def test_the_schema_refuses_a_message_it_does_not_describe(values, problem):
     assert problem in str(raised.value)
 
 
-def test_the_schema_checks_lists_choices_and_the_handover_is_no_message():
+def test_the_schema_checks_lists_choices_and_an_interface_without_a_line_is_no_message(tmp_path):
     schema = {"type": "object", "properties": {
         "items": {"type": "array", "items": {"type": "string"}},
         "pick": {"type": "string", "enum": ["a", "b"]}}, "required": [], "additionalProperties": False}
     assert interfaces.problems(schema, {"items": ["x", 2], "pick": "c"}) == [
         "items item 2 is int; the schema takes a string", "pick is 'c'; one of a, b"]
-    with pytest.raises(interfaces.InterfaceError, match="handover is no message"):
-        interfaces.write("handover", {})
+    plain = {key: value for key, value in interfaces.generated("escalation").items() if key != "message"}
+    (tmp_path / "plain.json").write_text(json.dumps(plain), encoding="utf-8")
+    with pytest.raises(interfaces.InterfaceError, match="plain is no message"):
+        interfaces.write("plain", {}, tmp_path)
     with pytest.raises(interfaces.InterfaceError, match="templates.py interfaces"):
         interfaces.generated("nope")
 
 
-def test_the_handover_is_the_template_a_handover_issue_is_checked_by(catalog):
+def test_the_handover_is_the_local_file_its_template_claims_and_no_issue(catalog):
+    """The handover is .se/handover.md on the machine (src/skills/catch-up/SKILL.md "Close"): its
+    template claims that file alone and shapes no issue."""
     template = catalog["handover"]
+    assert template.actions == ("file.write",) and template.writes_file
     body = templates.render(template, template.example["fields"])
-    chosen = templates.select(catalog, "issue.create", body, "Handover 2026-11-22", labels=["handover"])
-    assert chosen.name == "handover"
-    assert templates.select(catalog, "issue.create", "## Goal\n\nShip.\n", "x", labels=[]).name != "handover"
-    found = templates.check(template, templates.parse(template, "<!-- se:fleet -->\n\n## State\n\nAll in.\n",
-                                                      "Handover 2026-11-22"))
+    assert templates.select(catalog, "file.write", body, None, path=".se/handover.md").name == "handover"
+    for action in ("issue.create", "issue.edit"):
+        chosen = templates.select(catalog, action, body, "Handover 2026-11-22", labels=["handover"])
+        assert chosen is None or chosen.name != "handover"
+    found = templates.check(template, templates.parse(template, "## State\n\nAll in.\n", None))
     assert {finding.field for finding in found if finding.severity == templates.REFUSE} == {
         "open_issues", "branches", "decisions", "resume"}
 
