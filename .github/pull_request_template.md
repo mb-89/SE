@@ -1,6 +1,8 @@
 <!-- se:field-report -->
 <!-- The worker's field report, the description of its pull request: one per work issue or explicitly
-     authorized fix without one, written by the worker at delivery between the se:field-report markers. -->
+     authorized fix without one, written by the worker at delivery between the se:field-report markers.
+     A session ends with its work complete; a leftover is a failure. Where a question was trivial,
+     the worker took the good solution and names it under Decisions, for the next retro. -->
 
 **Work issue:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
 <!-- For an authorized fix, replace the issue number with "none, authorized fix"; it must be
@@ -32,10 +34,8 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Not delivered
 
-<!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete.
-     Any partial keeps the work issue open at this landing: a planned split, which names each piece
-     left as a bullet "- **Piece <n>, <what>:** ...", until its last piece; any other until SE
-     re-scopes it. -->
+<!-- "None": the work is complete. Anything else here is a leftover, a failure the next retro
+     counts: each unmet requirement or acceptance item, why, and exact next steps. -->
 
 ## Removed behaviour, deleted or weakened tests, and authored prose
 
@@ -57,7 +57,8 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Decisions
 
-<!-- Every decision taken without the user (disagree and commit). "None" otherwise. -->
+<!-- Every decision taken without the user (disagree and commit), each ask for forgiveness among
+     them, which the next retro collects. "None" otherwise. -->
 
 | Decision | Alternatives | Rationale | Confidence |
 |---|---|---|---|
