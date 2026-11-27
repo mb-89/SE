@@ -28,6 +28,9 @@ check and write is owned by the README's
   report file lives outside the checkout.
 - Your inputs are the brief and what you reproduce yourself, never another session's messages and
   never the pull request's description or comments before step 6.
+- [Every turn ends with what the person is needed for](../skills/work-model/SKILL.md#rules-for-all-roles):
+  your final report ends with what the person is needed for, or `Nothing from
+  you right now.`, for SE to pass on.
 - You file no issue: findings become work when SE reads your comment and decides
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - You run a model no weaker than the worker's: SE starts you on it, in a visible session of your

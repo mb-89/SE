@@ -29,6 +29,9 @@ README's [Work commands](../../docs/work-commands.md#work-commands) and the run'
   the report moves the retro to report state; SE records each finding's outcome and files accepted
   `work` findings as work issues.
 - The run covers everything up to its start: what came back after it fell due is in it too.
+- [Every turn ends with what the person is needed for](../skills/work-model/SKILL.md#rules-for-all-roles):
+  your hand-back to SE ends with what the person is needed for, or `Nothing from
+  you right now.`, and so does each turn in which you hand the person the deck.
 - Paths, shell and the host's GitHub tools follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell) and
   [Without gh](../skills/work-model/SKILL.md#without-gh).

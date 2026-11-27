@@ -17,6 +17,16 @@ The rules shared by all roles are owned by the skill [work-model](../skills/work
 the project's commands and rules by the project's `AGENTS.md`; this file holds what is the same for
 every package, so work issues and session prompts never repeat it.
 
+**Your session ends with its work complete; a leftover is a failure.** Where a question is
+trivial, take the good solution, do it, and name it in the field report's Decisions for the next
+retro: it is better to ask for forgiveness than for permission
+([Rules for all roles](../skills/work-model/SKILL.md#rules-for-all-roles)).
+
+The person, 27 Nov: "It's not about undermining oversight. It's about encouraging independent behavior, because we
+value time that would be wasted waiting more than fixes we need to do later. The oversight is still
+present in the form that every time you ask for forgiveness, you need to mention that in your field
+report, and then we collect it in the retros."
+
 ## The box
 
 - There is no human on the other end. Never call `ask_user` or issue a question, confirmation or
@@ -39,6 +49,10 @@ every package, so work issues and session prompts never repeat it.
   integrator; so does a step only the
   person may approve, which SE runs
   ([Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)).
+
+- [Every turn ends with what the person is needed for](../skills/work-model/SKILL.md#rules-for-all-roles):
+  your turn's last message ends with what the person is needed for (what your field report
+  leaves for them), or `Nothing from you right now.`, for SE to pass on.
 
 ## Environment
 
@@ -95,7 +109,7 @@ every package, so work issues and session prompts never repeat it.
    field report with `field-report --draft <file> --authorized-fix`; the report must state exactly
    `Work issue: none, authorized fix`, be complete, and have `None` under Not delivered.
 
-   Delivery refuses without that report. Partial work needs a work issue. The same guard, public
+   Delivery refuses without that report. The same guard, public
    check, suite and review rules apply.
 
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
@@ -151,7 +165,7 @@ every package, so work issues and session prompts never repeat it.
      function together share one commit, and where one requirement's behaviour cannot be separated
      from another's code, its test may be a test-only commit. The field report names each such
      grouping.
-5. **Deliver, always, even when partial**:
+5. **Deliver**:
    - Complete the field report in `.se/work/field-report.md`. This command writes it from the
      template, between the markers the integration reads; without gh, add `--issue-body <file>`:
 
@@ -201,13 +215,13 @@ every package, so work issues and session prompts never repeat it.
      - Delivering on current main ([Integration branch](../skills/work-model/SKILL.md#integration-branch))
        spares the landing a round: a merge it reports bringing commits gets the focused tests again;
        a conflict stops it, naming the files, to resolve after `work_tickets.py sync`.
-6. A ticket you cannot finish is handled as the work model's
-   [Local tickets and notes](../skills/work-model/SKILL.md#local-tickets-and-notes) says, under
-   "Not delivered". Never claim unfinished work complete.
+6. **Finish the work.** Unsure is no reason to stop: take the good solution and name it under
+   Decisions. Never claim unfinished work complete; a ticket only what is outside your box keeps
+   from done is handled as the work model's
+   [Local tickets and notes](../skills/work-model/SKILL.md#local-tickets-and-notes) says.
 
-   **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working
-   for any reason (blocked, out of ideas, unsure), deliver what you have and name the blocker in the
-   field report's "Not delivered"; an idle session with no field report is a failure.
+   **Never end your turn without delivering.** Your turn ends only after step 7; an idle session
+   with no field report is a failure.
 
    The plugin's Stop hook holds you to it ([docs/fleet.md "Stop hook"](../docs/fleet.md#stop-hook)): it
    refuses your turn's end until an open pull request carries a field report that passes the check

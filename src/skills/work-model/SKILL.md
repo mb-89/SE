@@ -432,8 +432,17 @@ boundary.
 - Workers run focused tests and what their issue's acceptance names, the complete suite only
   where it names the suite; the integrator runs the complete suite, one integration at a time,
   while SE talks with the human.
-- No hard time boxes: workers deliver whole items. A worker never ends its turn without
-  delivering; when it stops, its field report names the blocker.
+- **A session ends with its work complete; a leftover is a failure.** Where a question is
+  trivial, take the good solution, do it, and name it in the field report's Decisions, for the
+  next retro: ask forgiveness, not permission. Every such ask for forgiveness is named there, and
+  the retro collects them.
+
+  No hard time boxes: workers deliver whole items, and a worker never
+  ends its turn without delivering.
+- **Every turn ends with what the person is needed for.** An agent that talks to the person ends
+  each turn with a last line saying what it needs from them: each decision or action with its
+  link, or `Nothing from you right now.` An agent that reports to another agent (a worker, a retro
+  agent, the integrator) ends its final report the same way, and SE passes the needs on.
 - **Disagree and commit**: ambiguity is a decision. Investigate the repository, contracts and
   tests, make the best defensible, reversible decision within scope, record it with its
   confidence for the field report, and continue. This never grants authority to bypass policy,
