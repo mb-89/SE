@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import sys
 from pathlib import Path
 
@@ -165,13 +166,35 @@ def installed_adapter(obs: Path) -> tuple[dict | None, str]:
     return json.loads(said[-1]), ""
 
 
+#: The seconds ``install_adapter`` waits before each retry of an install github.com refused: its
+#: rate limits on listing an owner's repositories lift within a minute.
+INSTALL_WAITS = (20, 60)
+#: An HTTP answer obs warns of when github.com refuses to list its components' repositories.
+REFUSED = re.compile(r"\bHTTP (403|429)\b")
+sleep = time.sleep
+
+
 def install_adapter(obs: Path) -> tuple[int, str]:
     """Run ``ADAPTER_REMEDY`` from ``obs``, which installs ``ADAPTER`` with the components it requires
-    (obs 10.3.2 or later): its exit code and the last line it said."""
-    result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
-                            capture_output=True, text=True, env=child_environment())
-    said = (result.stdout + result.stderr).strip().splitlines()
-    return result.returncode, said[-1] if said else f"exit code {result.returncode}"
+    (obs 10.3.2 or later): its exit code and the last line it said. Where obs warned that github.com
+    refused it (HTTP 403 or 429, a rate limit), the install is tried again after each of
+    ``INSTALL_WAITS``; a lasting refusal's last line names that HTTP answer."""
+    for attempt, wait in enumerate((*INSTALL_WAITS, None), start=1):
+        result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
+                                  capture_output=True, text=True, env=child_environment())
+        said = (result.stdout + result.stderr).strip().splitlines()
+        last = said[-1] if said else f"exit code {result.returncode}"
+        refused = [line.strip() for line in said if REFUSED.search(line)]
+        if result.returncode == 0 or not refused:
+            return result.returncode, last
+        if not REFUSED.search(last):
+            last = f"{last}; github.com refused it: {refused[-1]}"
+        if wait is None:
+            return result.returncode, last
+        print(f"build_docs: `{ADAPTER_REMEDY}` failed, github.com refused it ({refused[-1]}); trying again "
+              f"in {wait} s (attempt {attempt + 1} of {len(INSTALL_WAITS) + 1})", file=sys.stderr)
+        sleep(wait)
+    raise AssertionError("unreachable: the last attempt returns")
 
 
 #: The adapters ``ready_adapter`` found in this process, by obs folder: a build asks obs once.

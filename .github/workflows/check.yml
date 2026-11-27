@@ -180,8 +180,14 @@ jobs:
       # touch.
       # The suite's docs and deck builds run through obs's adapter component obs-html (docs/documentation.md
       # "Documentation"), installed first.
+      # With the runner's token, so github.com lists obs's components within the token's own rate
+      # limit, into the obs folder the suite reads (tests/conftest.py OBS_LOCAL_FOLDER), so the suite's
+      # obs fixture finds it installed and reads no github.com to install it again.
       - name: Install obs's adapter component obs-html
         if: needs.trust.outputs.suite == 'run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OBS_LOCAL_FOLDER: ${{ github.workspace }}/.se/obs-local
         run: uv run python scripts/build_docs.py --install-html
       - name: The complete suite and the suites beside it, within their budgets
         if: needs.trust.outputs.suite == 'run'
