@@ -32,7 +32,7 @@ fields:
   - name: overhaul_questions
     kind: node
     required: true
-    node: overhaul-questions@1.0.0
+    node: overhaul-questions@1.1.0
   - name: findings
     kind: text
     required: true
@@ -48,7 +48,7 @@ example:
     verdicts: "| rule | strays | how |\n|---|---|---|\n| gen-001 | none | Held. |"
     looked_at: "- **outside**: nothing to change."
     questions: "### What came back from real use since the last retro?\n\nNone.\n\n### Which scripts did the AI write that a machine could own?\n\nNone.\n\n### Anything worth porting to other projects, or so bad we remove it?\n\nNone.\n\n### Has the process gone stale?\n\nNone.\n\n### What would have stopped this from being produced at all?\n\nNone.\n\n### What did the shell do that a command could have done? Name it.\n\nNone.\n\n### Did anything local earn promotion upstream?\n\nNone.\n\n### For each failed check, what rule would have caught it?\n\nNone.\n\n### What goes well, and what makes it go well?\n\nNone.\n\n### What goes badly, each with its moment in the log?\n\nNone.\n\n### What do the thoughts say that the actions do not?\n\nNone.\n\n### Start, stop, keep, more, less.\n\nNone.\n\n### Which rule, prompt or tool made each bad output, and what change stops it?\n\nNone.\n\n### What took the longest, and why?\n\nJudging the classes, as the record named no cause.\n\n### What tool did you wish was present: in SE, kern, the project, or anything outside our tooling?\n\nIn SE: a list of the window's causes by class.\n\n### Tooling starfish: what should our tooling start, stop, keep, do more of and do less of? Removals count too.\n\nStart: classes by cause. Stop: nothing. Keep: the record. More: refusals that name their fix. Less: hand steps."
-    overhaul_questions: "### Are the prose and the code still in the voice and style we hold?\n\nNone.\n\n### Is the method still the best we know?\n\nNone.\n\n### Has the guidance drifted from what the machines do?\n\nNone.\n\n### Does every file earn its place?\n\nNone.\n\n### Would a named design pattern improve us?\n\nNone.\n\n### What does the outside world do, and what can we learn from it?\n\nNone."
+    overhaul_questions: "### Are the prose and the code still in the voice and style we hold?\n\nNone.\n\n### Is the method still the best we know?\n\nNone.\n\n### Has the guidance drifted from what the machines do?\n\nNone.\n\n### Does every file earn its place?\n\nNone.\n\n### Would a named design pattern improve us?\n\nNone.\n\n### What does the outside world do, and what can we learn from it?\n\nNone.\n\n### Are there enough doors, and does any code reach around one?\n\nNone.\n\n### Is each door tested once, in its contract, and faked everywhere else?\n\nNone.\n\n### Which tests are superfluous, duplicated or over-broad?\n\nNone.\n\n### Which test files are slowest, and what makes them slow?\n\nNone.\n\n### Does every file over 1,000 lines do one job on one abstraction level?\n\nNone."
     findings: "None."
     went_well: "- The retros held."
     facts: "One rule."

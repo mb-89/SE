@@ -517,7 +517,19 @@ and its neighbours. It lists:
   text (`se.toml` `authored_content`) names after its script;
 - where `overhaul.py coverage` kept a run, the tests that add no line of their own, each with the
   seconds pruning it saves, slowest first: the groups of tests that run exactly the same lines,
-  one kept and the others to prune, and the tests whose lines another single test runs, by file.
+  one kept and the others to prune, and the tests whose lines another single test runs, by file;
+  and the lines 200 tests or more run, by file, where an over-broad battery runs the same code again;
+- every file over 1,000 lines, with the reason `se.toml` `[long_files]` states for it
+  (`hygiene.py`'s check `long-files`) and its commands by component (`components/*/component.toml`);
+- each such file's lines per job: a script's by what each component's commands reach (or each
+  command's, where it has one component), then the lines several jobs share and those no command
+  reaches; a Markdown file's by `## ` section;
+- each door `scripts/doors/*.toml` declares, with its level, its contract tests and its reaches
+  outside (`door_report.py`); the tests' spawn marks by kind (`contract`, `entry`, `shell`, ...);
+  and the ten slowest test files by CI's seconds (`tests/file-seconds.json`);
+- each question of the overhaul's own (`templates/overhaul-questions.md`) with the facts it is
+  answered from, or why judgment alone answers it (`QUESTION_FACTS`); `facts` exits 2 where a
+  question names neither.
 
 `--json` prints the same facts as data.
 

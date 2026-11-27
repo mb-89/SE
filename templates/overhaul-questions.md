@@ -1,9 +1,10 @@
 ---
 # The overhaul's own questions, after the standing questions: each one a section, its heading the
 # question. The overhaul template nests this block; scripts/templates.py's docstring owns this
-# note's format.
+# note's format. Each question names the facts `overhaul.py facts` computes for it, or why
+# judgment alone answers it (scripts/overhaul.py QUESTION_FACTS); `facts` fails where one names neither.
 name: overhaul-questions
-version: 1.0.0
+version: 1.1.0
 kind: block
 reader: fleet
 says: "The questions an overhaul asks beside the standing questions, one section each."
@@ -36,6 +37,26 @@ fields:
     kind: text
     required: true
     none_ok: true
+  - name: doors
+    kind: text
+    required: true
+    none_ok: true
+  - name: door_tests
+    kind: text
+    required: true
+    none_ok: true
+  - name: superfluous_tests
+    kind: text
+    required: true
+    none_ok: true
+  - name: slowest_tests
+    kind: text
+    required: true
+    none_ok: true
+  - name: long_files
+    kind: text
+    required: true
+    none_ok: true
 example:
   fields:
     voice_style: "None."
@@ -44,6 +65,11 @@ example:
     file_earns_place: "None."
     design_pattern: "None."
     outside_world: "None."
+    doors: "None."
+    door_tests: "None."
+    superfluous_tests: "None."
+    slowest_tests: "None."
+    long_files: "None."
 ---
 
 ## Are the prose and the code still in the voice and style we hold?
@@ -69,3 +95,23 @@ example:
 ## What does the outside world do, and what can we learn from it?
 
 <!-- outside_world: What comparable projects and tools do, and what of it we should take. "None" where nothing applies. -->
+
+## Are there enough doors, and does any code reach around one?
+
+<!-- doors: Each outside thing without a door, and each reach around a declared one, with where it belongs. "None" where nothing applies. -->
+
+## Is each door tested once, in its contract, and faked everywhere else?
+
+<!-- door_tests: Each door tested against the real thing outside its contract, or with no contract, and each test that starts a process it could fake. "None" where nothing applies. -->
+
+## Which tests are superfluous, duplicated or over-broad?
+
+<!-- superfluous_tests: Each test that repeats another's lines or runs far more than it asserts, and what to prune, especially in the big battery. "None" where nothing applies. -->
+
+## Which test files are slowest, and what makes them slow?
+
+<!-- slowest_tests: Each of the slowest files, what its time goes to, and how to cut it. "None" where nothing applies. -->
+
+## Does every file over 1,000 lines do one job on one abstraction level?
+
+<!-- long_files: Each file over 1,000 lines, the jobs it does, whether its stated reason still holds, and which part is fundamental and belongs in Go or in a module of its own. "None" where nothing applies. -->

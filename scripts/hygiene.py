@@ -377,9 +377,10 @@ def ported_findings(root: Path) -> list[str]:
     twins = sorted(set(VERB_NAME.findall(verbs.read_text(encoding="utf-8"))) & set(references.command_tree(script)))
     return [f"{PORTED_FROM} {name}: the se binary runs this step in Go ({PORTED_VERBS}); remove its Python "
             f"and call `se {name}` where it is called" for name in twins]
-def long_files(root: Path, limit: int = LONG_LINES) -> dict[str, int]:
-    """Each tracked text file of `root` over `limit` lines with its line count; the outputs
-    `generated.yaml` declares are left out, as their source states the reason."""
+def long_files(root: Path, limit: int | None = None) -> dict[str, int]:
+    """Each tracked text file of `root` over `limit` lines (default LONG_LINES) with its line
+    count; the outputs `generated.yaml` declares are left out, as their source states the reason."""
+    limit = LONG_LINES if limit is None else limit
     try:
         outputs = [generated.glob(output) for generator in generated.load(root) for output in generator.outputs]
     except generated.DeclarationError as error:
@@ -420,9 +421,10 @@ def long_reason(path: str, reasons: dict[str, str]) -> str:
     return next((reason.strip() for key, reason in reasons.items() if fnmatch.fnmatchcase(path, key)), "")
 
 
-def long_findings(root: Path, reasons: dict[str, str], limit: int = LONG_LINES) -> list[str]:
-    """Each tracked text file over `limit` lines without a reason in `reasons`, and each entry of
-    `reasons` that names no such file."""
+def long_findings(root: Path, reasons: dict[str, str], limit: int | None = None) -> list[str]:
+    """Each tracked text file over `limit` lines (default LONG_LINES) without a reason in
+    `reasons`, and each entry of `reasons` that names no such file."""
+    limit = LONG_LINES if limit is None else limit
     long = long_files(root, limit)
     return [
         f"{path}: {count} lines, over {limit}; split it by job, or state in se.toml [{LONG_TABLE}] why it "
