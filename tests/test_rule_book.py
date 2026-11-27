@@ -150,9 +150,8 @@ def test_se_rule_book_passes_and_lists_its_judgment_rules(capsys):
     out = capsys.readouterr().out
     assert code == 0, out
     listed = [line for line in out.splitlines() if line.startswith("by judgment only:")]
-    if listed:  # shown in the run's output, never a warning: a passing suite has none
-        with capsys.disabled():
-            print("\nrules followed by judgment only:\n" + "\n".join(listed))
+    if listed:
+        print("rules followed by judgment only:\n" + "\n".join(listed))
 
 
 def test_the_documentation_shows_the_book_as_one_table_and_a_note_per_rule():

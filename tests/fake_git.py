@@ -440,7 +440,7 @@ class FakeGit:
         if "--show-toplevel" in args:
             if repository.bare:
                 raise Refusal(128, "fatal: this operation must be run in a work tree")
-            return f"{repository.path}\n"
+            return f"{repository.path.as_posix()}\n"
         if "--absolute-git-dir" in args or "--git-dir" in args:
             return f"{repository.git_dir}\n"
         if "--git-path" in args:

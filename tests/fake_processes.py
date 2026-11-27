@@ -92,6 +92,9 @@ class Invocation:
     def arguments(self) -> list[str]:
         """The arguments after the script, or after the program where it runs none."""
         words = self.words
+        hook = se_hook(self)
+        if hook is not None:
+            return words[next(index for index, word in enumerate(words) if Path(word) == hook) + 1:]
         script = self.script
         if script is None:
             return words[1:]
@@ -125,9 +128,16 @@ def program_name(invocation: Invocation) -> str:
         return invocation.script.name
     words = invocation.words
     name = Path(words[0]).name if words else ""
+    return executable_name(name)
+
+
+def executable_name(name: str) -> str:
+    """Match executable suffixes without depending on their case or on the spelling used by a handler."""
     for suffix in (".exe", ".cmd", ".bat"):
-        name = name.removesuffix(suffix)
-    return name
+        if name.lower().endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    return os.path.normcase(name)
 
 
 _lock = threading.RLock()
@@ -344,7 +354,7 @@ class FakeProcesses:
     def handler(self, invocation: Invocation) -> Handler | None:
         name = program_name(invocation)
         for program, handler in self.handlers:
-            if (program == name) if isinstance(program, str) else program(invocation):
+            if (executable_name(program) == name) if isinstance(program, str) else program(invocation):
                 return handler
         if is_se_template(invocation):
             return se_template
