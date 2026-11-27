@@ -1652,6 +1652,27 @@ def test_file_checks_the_template_inputs_recorded_at_collection_not_the_newest_f
     assert any("Added after the answers" in problem for problem in retro.steps_problems(renewed))
 
 
+def test_a_draft_that_records_no_version_is_judged_by_the_template_at_its_start(checkout, monkeypatch):
+    """A draft collected before drafts recorded their inputs, then the standing questions grew: the
+    deck refused it for the new questions. It is judged by the template of its window's end."""
+    engine = retro.templates()
+    old = retro.retro_template()
+    text = judged_draft(checkout)
+    legacy = engine.TEMPLATE_MARKER_PATTERN.sub("", engine.INPUTS_PATTERN.sub("", text))
+    assert not engine.marked_version(old, legacy)
+    latest = dataclasses.replace(old, version="99.0.0", fields=(*old.fields, engine.Field(
+        name="later", kind="text", heading="Added after the start", required=True)))
+    own = engine.own
+    monkeypatch.setattr(engine, "own", lambda name: latest if name == "retro" else own(name))
+    asked = []
+    monkeypatch.setattr(retro, "template_version_at", lambda template, when: asked.append(when) or old.version)
+    monkeypatch.setattr(engine, "historical_inputs",
+                        lambda template, version: old if version == old.version else None)
+    assert not retro.steps_problems(legacy)
+    assert asked and asked[0].startswith("20")
+    assert any("Added after the start" in problem for problem in retro.steps_problems(engine.renew(latest, text)))
+
+
 def test_file_reads_the_draft_at_its_known_path_and_names_collect_where_none_is(
         checkout, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")

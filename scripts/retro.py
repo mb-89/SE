@@ -1654,10 +1654,37 @@ def scored_findings(previous: dict | None, retro: int, window: list[Issue],
     return found
 
 
+STARTED = re.compile(r"^Window: .*? up to (\d{4}-\d\d-\d\dT[\d:]+Z?)", re.MULTILINE)
+
+
+def template_version_at(template, when: str) -> str:
+    """The version `template` had in SE's history at `when`; "" where the history does not tell."""
+    if not template.source_root:
+        return ""
+    door, root = sibling("git_door"), Path(template.source_root)
+    name = f"templates/{template.name}.md"
+    found = door.run("log", "-1", "--first-parent", "--format=%H", f"--before={when}", "--", name, root=root)
+    revision = found.stdout.strip() if found.returncode == 0 else ""
+    shown = door.run("show", f"{revision}:{name}", root=root) if revision else None
+    match = re.search(r"(?m)^version: *(\S+)", shown.stdout) if shown and shown.returncode == 0 else None
+    return match[1] if match else ""
+
+
 def retro_template(text: str = ""):
-    """The retro's document template, TEMPLATE_NAME, as SE's checkout holds it."""
-    template = templates().own(TEMPLATE_NAME)
-    return templates().inputs_for(template, text) if text else template
+    """The retro's document template, TEMPLATE_NAME, as SE's checkout holds it; for a draft `text`,
+    the inputs it was started with (frozen inputs): those it records, else, for a draft collected
+    before drafts recorded them, the template as it stood at its window's end, when it was collected."""
+    engine = templates()
+    template = engine.own(TEMPLATE_NAME)
+    if not text:
+        return template
+    started = STARTED.search(text)
+    if started and not engine.marked_version(template, text) and not any(
+            match[1] == template.name for match in engine.INPUTS_PATTERN.finditer(text)):
+        version = template_version_at(template, started[1])
+        if version and version != template.version:
+            return engine.historical_inputs(template, version) or template
+    return engine.inputs_for(template, text)
 
 
 def step(name: str, body: list[str]) -> list[str]:
@@ -2104,14 +2131,14 @@ def facts_of(text: str, marker: str = BLOCK_MARKER,
 def steps_of(text: str):
     """The draft `text` read as a document of the retro template: its five steps and the answers
     to the standing questions (templates.py `parse`)."""
-    return templates().parse(retro_template(), text[:text.rfind(BLOCK_MARKER)]
+    return templates().parse(retro_template(text), text[:text.rfind(BLOCK_MARKER)]
                              if BLOCK_MARKER in text else text)
 
 
 def steps_problems(text: str) -> list[str]:
     """What keeps the draft `text` from holding every step the retro template requires, the
     steps and each answer to the standing questions among them; none where it does."""
-    found = templates().check(retro_template(), steps_of(text))
+    found = templates().check(retro_template(text), steps_of(text))
     return [finding.fix for finding in found if finding.severity == templates().REFUSE]
 
 
