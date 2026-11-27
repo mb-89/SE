@@ -108,6 +108,9 @@
   - It also fails where README.md is not one page with its one command first (`scripts/readme.py`,
     the guidance note [readme-is-one-page](guidance/readme-is-one-page.md)); the commit hook runs the
     same check, and the `check` job's `showcase` runs that command on a fresh runner.
+  - It also warns at each import of the Python template engine (`templates`, `se_templates`)
+    outside its own files: a script asks the Go engine through `scripts/template_door.py`; the
+    landing that moves the last caller sets its level to `error` (its check `template-engine`).
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:
