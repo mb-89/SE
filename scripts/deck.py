@@ -10,7 +10,9 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       HTML artifact, with se's answers bundle (scripts/deck_answers.js) as its trusted runtime bundle, in
       obs's screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
       asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
-      their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
+      their tasks. Every chapter that asks is a decision note, so no deck brings a prose decision. It
+      fails on a deck where no chapter asks, on a chapter that asks without a `pugh` fence, on a
+      decision (a `pugh` fence) that does
       not ask, outside a record built with the answers, on a decision without `## Current situation`,
       `## The problem` and `## What others do`, in that order, before its fence (the decision skill's note shape), and on
       any obs warning. It writes the obs Document the deck was built from beside it, `<deck>.document.json`
@@ -39,8 +41,9 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       artifact is the decision's record.
 
 The answers payload's fields are owned by obs's src/obs/answers.schema.json. Exit code 0: done;
-1: the build failed, obs warned, no chapter or no decision asks for a bless, or the answers are
-malformed, or a decision does not explain its problem and how others solve it before its options; 2: setup error.
+1: the build failed, obs warned, no chapter or no decision asks for a bless, a chapter that asks is no
+decision note, or the answers are malformed, or a decision does not explain its problem and how others
+solve it before its options; 2: setup error.
 """
 
 from __future__ import annotations
@@ -394,10 +397,17 @@ def _opening(nodes: list[dict]) -> str:
 
 
 def _refusal(chapters: list[dict], recorded: bool, asks: bool = True) -> str | None:
-    """Why the deck's chapters are refused: a decision that asks for no bless, unless the build ``recorded``
-    the answers, a decision that does not explain its problem before its options, a chapter asking for a
-    bless that opens with a stock phrase (STOCK_OPENINGS), or, where it ``asks``, no chapter that asks."""
+    """Why the deck's chapters are refused: a chapter that asks for a bless and is no decision note (no
+    ``pugh`` fence: a prose decision, overhaul #1993 finding 3), a decision that asks for no bless, unless
+    the build ``recorded`` the answers, a decision that does not explain its problem before its options, a
+    chapter asking for a bless that opens with a stock phrase (STOCK_OPENINGS), or, where it ``asks``, no
+    chapter that asks."""
     remedy = "give each decision note `obs: {bless: pending}` in its frontmatter"
+    prose = [chapter["id"] for chapter in chapters if "bless" in chapter and not _holds_pugh(chapter["content"])]
+    if prose:
+        return (f"chapter(s) {', '.join(prose)} ask for a bless without a decision note; write each as one, "
+                f"{_named_sections()} and then its options as a `pugh` fence (the decision skill's note shape, "
+                "src/skills/decision/SKILL.md, and templates/decision.md), or drop its bless to make it a record")
     decisions = [chapter for chapter in chapters if _holds_pugh(chapter["content"])]
     silent = [chapter["id"] for chapter in decisions if not recorded and "bless" not in chapter]
     if silent:

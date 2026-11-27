@@ -34,6 +34,13 @@ NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nToday 
         "\n## The problem\n\nIt is chosen by hand.\n\n## What others do\n\nOthers pick it by a rule.\n")
 
 
+# A decision note as obs's Document holds it: the decision template's sections, then its `pugh` fence.
+DECISION_NODES = [*({"type": "section", "attrs": {"level": 2},
+                     "children": [{"type": "text", "text": heading, "children": []}]}
+                    for heading in ("Current situation", "The problem", "What others do")),
+                  {"type": "pugh", "attrs": {"matrix": {"candidates": []}}, "children": []}]
+
+
 def _folder(tmp_path: Path, notes: dict[str, str], manifest: str | None = None) -> Path:
     folder = tmp_path / "decisions"
     folder.mkdir(parents=True)
@@ -56,7 +63,7 @@ def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys, fake_pro
     monkeypatch.setitem(build_docs._PYTHON, tmp_path, "obs-python")
     fake_processes.on("obs-python", obs_document)
     monkeypatch.setattr(build_docs, "ready_adapter", lambda obs: ({"name": build_docs.ADAPTER}, ""))
-    folder = _folder(tmp_path, {"one": NOTE % ("One", "one")})
+    folder = _folder(tmp_path, {"one": NOTE % ("One", "one") + PUGH})
     assert deck.build(folder, tmp_path / "deck.html") == 1
     err = capsys.readouterr().err
     assert "long paragraph" in err and "deck: 1 obs warning(s)" in err
@@ -65,7 +72,7 @@ def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys, fake_pro
 @pytest.mark.parametrize("host", ["copilot", "claude-code"])
 def test_build_embeds_the_local_host_in_a_standalone_deck(tmp_path, monkeypatch, fake_processes, host):
     document = {"manifest": {"title": "Decisions"},
-                "chapters": [{"id": "pick", "content": [], "bless": {"version": "v1"}}]}
+                "chapters": [{"id": "pick", "content": DECISION_NODES, "bless": {"version": "v1"}}]}
 
     def obs_document(call):
         words = call.words
@@ -82,7 +89,7 @@ def test_build_embeds_the_local_host_in_a_standalone_deck(tmp_path, monkeypatch,
     fake_processes.on("obs-python", obs_document)
     monkeypatch.setattr(build_docs, "ready_adapter", lambda obs: ({"name": build_docs.ADAPTER}, ""))
     destination = tmp_path / "deck.html"
-    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick")})
+    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick") + PUGH})
     assert deck.main(["build", str(folder), "--destination", str(destination), "--host", host]) == 0
     data = destination.read_text(encoding="utf-8").split("Object.freeze(", 1)[1].split(");\n", 1)[0]
     assert json.loads(data)["host"] == host
@@ -107,13 +114,13 @@ PROFILES = {
 # Every deck a test builds with the real obs: its notes and, where it sets one, its manifest.
 DECKS = {
     "only-records": ({"done": RECORD % "Done", "tasks": RECORD % "Tasks"}, None),
-    "decision-without-bless": ({"one": NOTE % ("One", "one"), "silent": RECORD % "Silent" + PUGH}, None),
+    "decision-without-bless": ({"one": NOTE % ("One", "one") + PUGH, "silent": RECORD % "Silent" + PUGH}, None),
     # A record chapter beside the decision: obs alone would open such a deck paged.
     **{f"screens-{profile}": ({"pick": NOTE % ("Pick", "a pick") + SHORT, "done": RECORD % "Done"},
                               manifest + SCREENS) for profile, manifest in PROFILES.items()},
-    "scrolling": ({"one": NOTE % ("One", "one"), "done": RECORD % "Done"},
+    "scrolling": ({"one": NOTE % ("One", "one") + PUGH, "done": RECORD % "Done"},
                   "---\nobsHtml:\n  layout: scrolling\n---\n\n- [[one|One]]\n- [[done|Done]]\n"),
-    "send": ({"cache": NOTE % ("Cache", "a cache"), "queue": NOTE % ("Queue", "a queue")}, None),
+    "send": ({"cache": NOTE % ("Cache", "a cache") + PUGH, "queue": NOTE % ("Queue", "a queue") + PUGH}, None),
     "no-situation": ({"bare": NOTE.replace("## Current situation\n\n", "") % ("Bare", "a bare") + PUGH}, None),
     "no-problem": ({"bare": NOTE.replace("\n## The problem\n\n", "\n") % ("Bare", "a bare") + PUGH}, None),
     "no-others": ({"bare": NOTE.replace("\n## What others do\n\n", "\n") % ("Bare", "a bare") + PUGH}, None),
@@ -202,19 +209,31 @@ def test_a_clean_built_deck_has_no_findings_and_writes_nothing(decks, capsys):
     assert sorted(path.name for path in deck_page.parent.iterdir()) == before
 
 
+@pytest.mark.parametrize("content", [[], DECISION_NODES[:3]], ids=["empty", "sections-without-fence"])
+def test_a_chapter_that_asks_without_a_decision_note_is_refused(content):
+    """Overhaul #1993, finding 3: a deck's decision pages were prose. A chapter that asks the person for a
+    bless is a decision note, its sections and then its `pugh` fence; a record asks nothing and passes."""
+    asking = {"id": "store", "bless": {"state": "pending"}, "content": content}
+    refusal = deck._refusal([asking], recorded=False)
+    assert refusal.startswith("chapter(s) store ask for a bless without a decision note")
+    assert "`## Current situation`, `## The problem` and `## What others do`" in refusal and "`pugh`" in refusal
+    assert deck._refusal([{**asking, "content": DECISION_NODES}, {"id": "done", "content": content}],
+                         recorded=False) is None
+
+
 @pytest.mark.parametrize("opening", ["This is one case of how storage is chosen.", "this is a case of storage."])
 def test_a_chapter_that_asks_and_opens_with_a_stock_phrase_is_refused(opening):
     """SE#1826, requirement 10: a decision opens with its current situation, never a stock phrase."""
     def text(words: str) -> dict:
         return {"type": "text", "text": words, "children": []}
 
-    chapter = {"id": "store", "bless": {"state": "pending"}, "content": [
-        {"type": "section", "attrs": {"level": 2}, "children": [text("Current situation")]},
-        {"type": "paragraph", "children": [text(opening)]}]}
+    def note(words: str) -> list[dict]:
+        return [DECISION_NODES[0], {"type": "paragraph", "children": [text(words)]}, *DECISION_NODES[1:]]
+
+    chapter = {"id": "store", "bless": {"state": "pending"}, "content": note(opening)}
     refusal = deck._refusal([chapter], recorded=False)
     assert refusal.startswith('chapter(s) store open with a stock phrase such as "This is one case of"')
-    plain = {**chapter, "content": [chapter["content"][0], {"type": "paragraph", "children": [
-        text("Storage is chosen by hand. This is one case of many.")]}]}
+    plain = {**chapter, "content": note("Storage is chosen by hand. This is one case of many.")}
     assert deck._refusal([plain], recorded=False) is None
 
 
@@ -595,7 +614,7 @@ def test_the_default_host_is_the_one_the_build_runs_under(environment, host):
 
 
 def test_a_host_the_deck_does_not_know_is_refused_before_obs_runs(tmp_path, capsys):
-    folder = _folder(tmp_path, {"one": NOTE % ("One", "one")})
+    folder = _folder(tmp_path, {"one": NOTE % ("One", "one") + PUGH})
     assert deck.build(folder, tmp_path / "deck.html", host="vscode") == 2
     assert "--host vscode is none of claude-app, claude-code, copilot, local" in capsys.readouterr().err
 
@@ -935,7 +954,7 @@ def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(de
 @pytest.mark.spawns("contract: browser, standalone decks offer host-named answers to copy while offline")
 @pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
 def test_a_built_local_deck_offers_answers_to_copy_without_a_server(page, tmp_path, obs, host, name):
-    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick")})
+    folder = _folder(tmp_path, {"pick": NOTE % ("Pick", "a pick") + PUGH})
     destination = tmp_path / "deck.html"
     assert deck.build(folder, destination, host=host) == 0
     result = page("local", uri=destination.as_uri())
