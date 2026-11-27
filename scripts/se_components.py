@@ -335,29 +335,8 @@ def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
                                                     read_only, writing).items()}
 
 
-#: Held while a script loads, so a call beside it in another thread never reads it half loaded.
-_LOADING = threading.RLock()
-
-
-def script(name: str):
-    """The script `scripts/<name>.py` beside this one, as a module: the one running as __main__
-    where that is it, else loaded once under its own name."""
-    path = Path(__file__).resolve().with_name(f"{name}.py")
-    main_module = sys.modules.get("__main__")
-    if Path(getattr(main_module, "__file__", None) or "").resolve() == path:
-        return main_module
-    with _LOADING:
-        module = sys.modules.get(name)
-        if module is None:
-            spec = importlib.util.spec_from_file_location(name, path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[name] = module
-            try:
-                spec.loader.exec_module(module)
-            except BaseException:
-                sys.modules.pop(name, None)
-                raise
-    return module
+#: The script `scripts/<name>.py` beside this one, as a module (se_script `loader`).
+script = se_script.loader(__file__)
 
 
 def relay_module():
@@ -737,12 +716,17 @@ def attach(name: str, scripts: str | Iterable[str], folder: Path):
     comp = kern.component(name, folder)
     scripts = (scripts,) if isinstance(scripts, str) else tuple(scripts)
 
+    def entered(script_name: str, args: list[str], say):
+        """A call's working directory (its leading CWD argument, else None), its other arguments
+        and the script's module as the call enters it (`Code.enter`)."""
+        cwd = None
+        if args and args[0].startswith(CWD):
+            cwd, args = args[0][len(CWD):], args[1:]
+        return cwd, args, code.enter(script_name, say)
+
     def stepped(script_name: str, words: list[str]):
         def run(args: list[str], inputs, say):
-            cwd = None
-            if args and args[0].startswith(CWD):
-                cwd, args = args[0][len(CWD):], args[1:]
-            module = code.enter(script_name, say)
+            cwd, args, module = entered(script_name, args, say)
             try:
                 step = Stepped(comp, module.main, [*words, *args], cwd, say, " ".join(words),
                                code.leave)
@@ -754,10 +738,7 @@ def attach(name: str, scripts: str | Iterable[str], folder: Path):
 
     def answer(script_name: str, words: list[str]):
         def run(args: list[str], inputs, say):
-            cwd = None
-            if args and args[0].startswith(CWD):
-                cwd, args = args[0][len(CWD):], args[1:]
-            module = code.enter(script_name, say)
+            cwd, args, module = entered(script_name, args, say)
             try:
                 code_, out, err = run_main(module.main, [*words, *args], cwd,
                                            abandon=kern.abandoned())
@@ -901,7 +882,7 @@ class Code:
         changed = {path.parent for path, was in self.files.items() if digest(path) != was}
         changed |= {folder for folder in self.folders if se_version(folder) != self.versions[folder]}
         own = Path(__file__).resolve()
-        with _LOADING:
+        with se_script.LOADING:
             for path in [p for p, was in self.files.items() if digest(p) != was]:
                 with contextlib.suppress(OSError, ValueError):
                     Path(importlib.util.cache_from_source(str(path))).unlink()

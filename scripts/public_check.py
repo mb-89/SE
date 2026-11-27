@@ -593,24 +593,7 @@ def decode(data: bytes) -> str:
 
 
 def git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
-    result = git_door.run(*args, root=root, stdin=stdin, binary=True)
-    if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", "replace").strip()
-        raise SetupError(f"git {args[0]} failed: {detail}")
-    return result.stdout
-
-
-def read_blobs(root: Path, shas: list[str]) -> list[bytes]:
-    if not shas:
-        return []
-    output = git(root, "cat-file", "--batch", stdin="".join(f"{sha}\n" for sha in shas).encode())
-    blobs, position = [], 0
-    for _ in shas:
-        header_end = output.index(b"\n", position)
-        size = int(output[position:header_end].split()[2])
-        blobs.append(output[header_end + 1 : header_end + 1 + size])
-        position = header_end + 1 + size + 1
-    return blobs
+    return git_door.output(*args, root=root, stdin=stdin, error=SetupError)
 
 
 def object_files(root: Path, staged: bool, rev: str | None) -> list[tuple[str, bytes]]:
@@ -630,7 +613,7 @@ def object_files(root: Path, staged: bool, rev: str | None) -> list[tuple[str, b
         if fields[0] == b"160000" or (kinds is not None and fields[1] not in kinds):
             continue  # submodules are checked in their own repository
         items.append((path.decode("utf-8", "replace"), fields[sha_field].decode()))
-    blobs = read_blobs(root, [sha for _, sha in items])
+    blobs = git_door.blobs(root, [sha for _, sha in items], SetupError)
     return [(path, blob) for (path, _), blob in zip(items, blobs)]
 
 

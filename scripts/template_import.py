@@ -55,7 +55,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import re
 import sys
@@ -77,14 +76,7 @@ COMMENTS = re.compile(r"<!--(.*?)-->|%%(.*?)%%", re.DOTALL)
 SECTION_LEVEL = 2
 
 
-def _sibling(name: str):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+_sibling = se_script.loader(__file__)
 
 
 def _error(message: str) -> Exception:

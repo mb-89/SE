@@ -19,6 +19,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import git_door
+
 RECORD = "delivered-tip.json"
 MODES = ("warn", "refuse")
 DEFAULT_MODE = "warn"
@@ -74,18 +76,13 @@ def mode(table: dict[str, object]) -> str:
     return str(value)
 
 
-def same(one: str, other: str) -> bool:
-    """Whether two commit names, either abbreviated, name the same commit."""
-    return bool(one) and bool(other) and (one.startswith(other) or other.startswith(one))
-
-
 def verdict(delivered: dict[str, str] | None, remote_ref: str, commit: str,
             setting: str = DEFAULT_MODE) -> Verdict | None:
     """The guard's word on a push of `commit` to `remote_ref`: None where nothing was delivered,
     the ref is not the delivered branch, or the commit is the delivered tip."""
     if delivered is None or remote_ref != f"refs/heads/{delivered['branch']}":
         return None
-    if same(commit, delivered["tip"]):
+    if git_door.same_commit(commit, delivered["tip"]):
         return None
     where = f"late push: {delivered['branch']} was delivered at {delivered['tip'][:12]} and "
     if setting == "refuse":

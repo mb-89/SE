@@ -254,7 +254,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import importlib
 import json
 import os
 import re
@@ -726,12 +725,7 @@ CHECK_FILES = "se_templates.py check-files"
 CHECK_FILES_LINES = 10
 
 
-def sibling(name: str):
-    """The script `<name>.py` beside this one, imported when a command needs it."""
-    here = str(HERE)
-    if here not in sys.path:
-        sys.path.append(here)
-    return importlib.import_module(name)
+sibling = se_script.loader(__file__)
 
 
 #: se_templates.py's commands as one kern component (docs/start.md "Commands as components"); each command's
@@ -972,17 +966,7 @@ def given_text(options: argparse.Namespace) -> tuple[str | None, dict | None]:
     """The body or the field values `check` was given, by whichever of its four options."""
     templates = sibling("templates")
     try:
-        if options.body is not None:
-            return options.body, None
-        if options.body_file is not None:
-            try:
-                return options.body_file.read_text(encoding="utf-8"), None
-            except OSError as error:
-                raise Usage(f"{COMMAND}: cannot read --body-file {options.body_file} "
-                            f"({error})") from error
-        if options.fields_json is not None:
-            return None, templates.fields_data(options.fields_json, "--fields-json", COMMAND)
-        return None, templates.fields_file(options.fields, COMMAND)
+        return templates.given_text(options, COMMAND)
     except templates.TemplateError as error:
         raise Usage(str(error)) from error
 
@@ -2083,15 +2067,9 @@ def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
     if args.command == "gate":
         return args.run(args)
-    words = [args.command]
-    routed = sibling("se_components").routed(
-        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        args.command in INTERACTIVE_COMMANDS,
-        streamed=args.command == "fill" and getattr(args, "repo", None) is not None)
-    if routed is not None:
-        return routed
     try:
-        return args.run(args)
+        return se_script.dispatch(__file__, args, argv, INTERACTIVE_COMMANDS,
+                                  streamed=args.command == "fill" and getattr(args, "repo", None) is not None)
     except Usage as error:
         print(error)
         return 2

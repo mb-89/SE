@@ -38,7 +38,6 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 import sys
@@ -47,15 +46,7 @@ from pathlib import Path
 import se_script
 
 
-def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once under its own name."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+sibling = se_script.loader(__file__)
 
 
 work_tickets = sibling("work_tickets")
@@ -743,18 +734,8 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = make_parser().parse_args(argv)
-    words = [args.command]
-    routed = sibling("se_components").routed(
-        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        args.command in INTERACTIVE_COMMANDS)
-    if routed is not None:
-        return routed
-    try:
-        return args.run(args)
-    except QueueError as error:
-        print(f"review.py: {error}", file=sys.stderr)
-        return 1
+    return se_script.dispatch(__file__, make_parser().parse_args(argv), argv, INTERACTIVE_COMMANDS,
+                              refused=QueueError)
 
 
 if __name__ == "__main__":

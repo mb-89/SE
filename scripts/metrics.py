@@ -11,7 +11,6 @@ never fails the command.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import sys
@@ -22,6 +21,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import se_script
+
 PATH_DEFAULT = Path("~/.se/metrics.jsonl")
 PATH_ENV = "SE_METRICS"
 TOP = 10  # spenders listed per ranking
@@ -30,15 +31,7 @@ clock: Callable[[], float] = time.monotonic
 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)  # noqa: E731
 
 
-def _sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once under its own name."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+_sibling = se_script.loader(__file__)
 
 
 feedback = _sibling("feedback")

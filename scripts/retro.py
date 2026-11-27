@@ -116,7 +116,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import re
 import subprocess
@@ -129,15 +128,7 @@ from urllib.parse import quote, unquote
 import se_script
 
 
-def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once under its own name."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+sibling = se_script.loader(__file__)
 
 
 work_tickets = sibling("work_tickets")
@@ -928,6 +919,14 @@ def window_pulls(door, since: datetime | None, window: list[Issue], tracker: str
     issue's creation, as a landing merged before the window started counts for an issue closed
     in it (`recent_reads` reads the countdowns' the same way)."""
     waiting = {issue.number: when(issue.created_at) for issue in window}
+    return [pull_of(item) for item in door.pulls_until(landings_read(since, waiting, tracker, branch))]
+
+
+def landings_read(since: datetime | None, waiting: dict[int, datetime | None], tracker: str,
+                  branch: str):
+    """The stop of a read of closed pull requests, newest update first: past `since` once no work
+    issue of `waiting` (number: creation) still lacks its landing on `branch`, each landing read
+    taking its issue out of `waiting`."""
 
     def stop(item: dict) -> bool:
         updated = when(first(item, "updated_at", "updatedAt"))
@@ -939,7 +938,7 @@ def window_pulls(door, since: datetime | None, window: list[Issue], tracker: str
             waiting.pop(reference(found, tracker), None)
         return False
 
-    return [pull_of(item) for item in door.pulls_until(stop)]
+    return stop
 
 
 def last_retro(issues: list[Issue], number: int, retro: int | None) -> Issue | None:
@@ -1191,18 +1190,8 @@ def recent_reads(door, opened: list[Issue], overhauls: bool, tracker: str,
     waiting = {issue.number: when(issue.created_at) for issue in closed.values()
                if WORK_LABEL in issue.labels and not is_retro(issue) and counted_run(issue)
                and (since is None or not issue.closed_at or when(issue.closed_at) > since)}
-
-    def stop_pull(item: dict) -> bool:
-        updated = when(first(item, "updated_at", "updatedAt"))
-        if since and updated and updated < since and all(
-                created and updated < created for created in waiting.values()):
-            return True
-        found = pull_of(item)
-        if found.merged_at and found.base == branch:
-            waiting.pop(reference(found, tracker), None)
-        return False
-
-    return list(closed.values()), [pull_of(item) for item in door.pulls_until(stop_pull)]
+    pulls = door.pulls_until(landings_read(since, waiting, tracker, branch))
+    return list(closed.values()), [pull_of(item) for item in pulls]
 
 
 def countdowns(door, tracker: str, branch: str, root: Path,
@@ -2938,18 +2927,23 @@ def since_of(value: str | None) -> str | None:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def read_door(root: Path, answers: Path | None, tracker: str, remote: str):
+    """The door a command reads GitHub through: the answer files where `answers` names them, else
+    the plan's placeholders where the session hands GitHub off (without gh), else gh."""
+    if answers is not None:
+        return FileDoor(answers, tracker, remote)
+    if work_tickets.hand_off():
+        return FileDoor(Path("<dir>"), tracker, remote)
+    return GhDoor(root, tracker, remote)
+
+
 def run_collect(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
     tracker = work_tickets.resolve_repo(root, args.repo)
     remote = work_tickets.remote_repo(root) or tracker
     branch = work_tickets.integration_branch(root)
     ref = work_tickets.integration_ref(root)
-    if args.answers is not None:
-        door = FileDoor(args.answers, tracker, remote)
-    elif work_tickets.hand_off():
-        door = FileDoor(Path("<dir>"), tracker, remote)
-    else:
-        door = GhDoor(root, tracker, remote)
+    door = read_door(root, args.answers, tracker, remote)
     sessions = None
     if args.sessions is not None:
         try:
@@ -3029,12 +3023,7 @@ def run_due(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
     tracker = work_tickets.resolve_repo(root, args.repo)
     remote = work_tickets.remote_repo(root) or tracker
-    if args.answers is not None:
-        door = FileDoor(args.answers, tracker, remote)
-    elif work_tickets.hand_off():
-        door = FileDoor(Path("<dir>"), tracker, remote)
-    else:
-        door = GhDoor(root, tracker, remote)
+    door = read_door(root, args.answers, tracker, remote)
     found = countdowns(door, tracker, work_tickets.integration_branch(root), root,
                        datetime.now(timezone.utc))
     if found is None:
@@ -3127,13 +3116,7 @@ def make_parser() -> argparse.ArgumentParser:
     deck_command.add_argument("--draft", type=Path, metavar="FILE",
                               help="the draft retro.py collect wrote, its block judged (default: "
                                    "its known path, where collect writes it)")
-    deck_command.add_argument("--destination", type=Path, required=True, metavar="HTML",
-                              help="the deck's HTML file")
-    deck_command.add_argument("--host", choices=sibling("deck").HOSTS,
-                              help="the host the person's answers go back to (deck.py build "
-                                   "--host; default: the one this runs under)")
-    deck_command.add_argument("--answers", type=Path, metavar="FILE",
-                              help="the person's answers (answers.json): build the deck as their record")
+    sibling("deck").report_arguments(deck_command)
     deck_command.add_argument("--worktree", default=".",
                               help="the checkout of the repository (default: .)")
     deck_command.set_defaults(run=run_deck)
@@ -3206,18 +3189,8 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = make_parser().parse_args(argv)
-    words = [args.command]
-    routed = sibling("se_components").routed(
-        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        args.command in INTERACTIVE_COMMANDS)
-    if routed is not None:
-        return routed
-    try:
-        return args.run(args)
-    except QueueError as error:
-        print(f"retro.py: {error}", file=sys.stderr)
-        return 1
+    return se_script.dispatch(__file__, make_parser().parse_args(argv), argv, INTERACTIVE_COMMANDS,
+                              refused=QueueError)
 
 
 if __name__ == "__main__":

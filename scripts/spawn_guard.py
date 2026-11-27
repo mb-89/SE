@@ -267,11 +267,6 @@ def shell_kept(text: str | None) -> bool:
     return shell_contract(text) or bool(script) and shell_door.shell_program(script)
 
 
-def shell_allowed(item: pytest.Item) -> bool:
-    """Whether `item` may start a shell (`shell_kept`), for a suite that gives it the real shell."""
-    return shell_kept(reason(item))
-
-
 def reason(item: pytest.Item) -> str | None:
     """`item`'s spawns mark reason, "" for a mark without one, None where it carries none."""
     marker = item.get_closest_marker(MARK)

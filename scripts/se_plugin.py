@@ -69,21 +69,10 @@ from pathlib import Path, PurePosixPath
 import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
-_lint_spec = importlib.util.spec_from_file_location("agent_lint", Path(__file__).with_name("agent_lint.py"))
-agent_lint = sys.modules.get("agent_lint") or importlib.util.module_from_spec(_lint_spec)
-if "agent_lint" not in sys.modules:
-    sys.modules["agent_lint"] = agent_lint
-    _lint_spec.loader.exec_module(agent_lint)
-_marker_spec = importlib.util.spec_from_file_location("generated", Path(__file__).with_name("generated.py"))
-generated_files = sys.modules.get("generated") or importlib.util.module_from_spec(_marker_spec)
-if "generated" not in sys.modules:
-    sys.modules["generated"] = generated_files
-    _marker_spec.loader.exec_module(generated_files)
-_interfaces_spec = importlib.util.spec_from_file_location("interfaces", Path(__file__).with_name("interfaces.py"))
-interfaces = sys.modules.get("interfaces") or importlib.util.module_from_spec(_interfaces_spec)
-if "interfaces" not in sys.modules:
-    sys.modules["interfaces"] = interfaces
-    _interfaces_spec.loader.exec_module(interfaces)
+_sibling = se_script.loader(__file__)
+agent_lint = _sibling("agent_lint")
+generated_files = _sibling("generated")
+interfaces = _sibling("interfaces")
 SOURCE = PurePosixPath("src")
 GUIDANCE = PurePosixPath("guidance")  # se_guidance.py TREE
 PLUGIN = "se"

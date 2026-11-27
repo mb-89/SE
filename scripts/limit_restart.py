@@ -20,7 +20,6 @@ fleet_findings` is the thin wiring that wraps them.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 import sys
@@ -28,6 +27,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+import se_script
 
 #: The finding's kind, listed after the fleet check's own kinds.
 KIND = "stopped on a limit"
@@ -153,14 +154,7 @@ def text_of(session: Mapping[str, object]) -> str:
 def restarted_comment(session: str) -> str:
     """The comment that says session `session` was resumed, written through its interface template
     (scripts/interfaces.py)."""
-    interfaces = sys.modules.get("interfaces")
-    if interfaces is None:
-        spec = importlib.util.spec_from_file_location(
-            "interfaces", Path(__file__).resolve().with_name("interfaces.py"))
-        interfaces = importlib.util.module_from_spec(spec)
-        sys.modules["interfaces"] = interfaces
-        spec.loader.exec_module(interfaces)
-    return interfaces.write(TEMPLATE, {"session": session})
+    return se_script.loader(__file__)("interfaces").write(TEMPLATE, {"session": session})
 
 
 def restarted(comments: list[object] | None) -> bool:

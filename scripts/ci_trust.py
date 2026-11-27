@@ -74,10 +74,7 @@ class Trust:
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = git_door.run(*arguments, root=root)
-    if result.returncode != 0:
-        raise TrustError(f"git {' '.join(arguments)} failed in {root}: {result.stderr.strip()}")
-    return result.stdout.strip()
+    return git_door.output(*arguments, root=root, error=TrustError, binary=False).strip()
 
 
 def project(root: Path, rev: str | None = None) -> dict:

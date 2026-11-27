@@ -210,15 +210,23 @@ def integration_branch(root: Path) -> str:
     return str(project.get("integration_branch", "main"))
 
 
-def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
-    """The verdict on the pull request of `event`: (exit code, lines to print)."""
+def into_branch(event: dict, branch: str, gate: str) -> tuple[dict, object, str]:
+    """The pull request of `event`, its number, and the line `gate` prints where it targets
+    another branch than `branch` and is not checked ("" where it targets `branch`)."""
     pull = event.get("pull_request")
     if not isinstance(pull, dict):
         raise SetupError("the event carries no pull_request")
     number = pull.get("number")
     base = str((pull.get("base") or {}).get("ref", ""))
-    if base != branch:
-        return 0, [f"pr-issues: pull request #{number} targets {base}, not {branch}: not checked"]
+    skipped = "" if base == branch else f"{gate}: pull request #{number} targets {base}, not {branch}: not checked"
+    return pull, number, skipped
+
+
+def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
+    """The verdict on the pull request of `event`: (exit code, lines to print)."""
+    pull, number, skipped = into_branch(event, branch, "pr-issues")
+    if skipped:
+        return 0, [skipped]
     author = str((pull.get("user") or {}).get("login", ""))
     owner = str(((event.get("repository") or {}).get("owner") or {}).get("login", ""))
     head = str((pull.get("head") or {}).get("ref", ""))
@@ -258,13 +266,9 @@ def kind_check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
     """CI's release-kind gate on the pull request of `event`: (exit code, lines to print)."""
     import work_tickets  # late: only this gate reads a release kind
 
-    pull = event.get("pull_request")
-    if not isinstance(pull, dict):
-        raise SetupError("the event carries no pull_request")
-    number = pull.get("number")
-    base = str((pull.get("base") or {}).get("ref", ""))
-    if base != branch:
-        return 0, [f"release-kind: pull request #{number} targets {base}, not {branch}: not checked"]
+    pull, number, skipped = into_branch(event, branch, "release-kind")
+    if skipped:
+        return 0, [skipped]
     lines: list[str] = []
     body = str(pull.get("body") or "")
     kind = work_tickets.stated_release_kind(body)

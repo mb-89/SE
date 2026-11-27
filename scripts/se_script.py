@@ -10,6 +10,19 @@ script holds only its own part. Standard library only; importing it costs no mor
 - `configure()`: logging on stderr at the level LEVEL_VARIABLE names (DEBUG, INFO, WARNING, ERROR),
   WARNING where it names none or no level, each line `<logger>: <LEVEL>: <message>`; a second call
   changes nothing. A script's own logger is `logging.getLogger(__name__)`.
+- `loader(__file__)`: the script's `sibling(name)`, which answers the script `<name>.py` beside it:
+  the one running as `__main__` where that is it, else loaded once under its own name when a
+  command first needs it; one lock serves every script's, so a thread that asks while another
+  loads a module waits for the whole module.
+- `route(__file__, words, argv, interactive)`: the exit code of the command `words` where kern runs
+  it (se_components `routed`), else None; `interactive` is the script's INTERACTIVE_COMMANDS.
+- `swapped(owner, name, value)`: a context manager that sets `owner.<name>` to `value` for the
+  block and restores it, as each door's `use(backend)` swaps its BACKEND for a test's fake.
+- `dispatch(__file__, args, argv, interactive, refused=<error type>)`: `route` with the parsed
+  command's words, else the command's own `args.run(args)`; an error of the `refused` type is
+  answered as `<script>: <error>` with exit code 1, every other one raised.
+
+These are the helpers every script once copied; `overhaul.py check` refuses a new copy.
 
 The uv entry is the script's first line, `#!/usr/bin/env -S uv run python`, which the
 python-script template holds; SE runs a script as `uv run python <se>/scripts/<name>.py`.
@@ -18,11 +31,16 @@ python-script template holds; SE runs a script as `uv run python <se>/scripts/<n
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import logging
 import os
 import sys
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from types import ModuleType
 
 #: The variable that sets the log level of every SE script, as `configure` reads it.
 LEVEL_VARIABLE = "SE_LOG_LEVEL"
@@ -34,6 +52,8 @@ LOG_HELP = (f"Logging: on stderr at {DEFAULT_LEVEL}; set {LEVEL_VARIABLE} to one
             f"{', '.join(LEVELS)} for more or less.")
 #: The handler `configure` adds, so a second call adds none.
 _HANDLER_NAME = "se_script"
+#: The one lock of every script's `sibling` (`loader`), held by a reload (se_components `Code`) too.
+LOADING = threading.RLock()
 
 
 def parser(**options: object) -> argparse.ArgumentParser:
@@ -78,3 +98,68 @@ def run(main: Callable[[], int | None], environ: dict[str, str] | None = None) -
     code = 0 if code is None else code
     log.debug("exit %s after %.3f s", code, time.monotonic() - started)
     return code
+
+
+def loader(script: str | Path) -> Callable[[str], ModuleType]:
+    """The `sibling(name)` of the script at `script`: the script `<name>.py` beside it, loaded once
+    under its own name (the module docstring)."""
+    folder = Path(script).resolve().parent
+
+    def sibling(name: str) -> ModuleType:
+        path = folder / f"{name}.py"
+        running = sys.modules.get("__main__")
+        if Path(getattr(running, "__file__", None) or "").resolve() == path:
+            return running
+        with LOADING:
+            module = sys.modules.get(name)
+            if module is None:
+                spec = importlib.util.spec_from_file_location(name, path)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[name] = module
+                try:
+                    spec.loader.exec_module(module)
+                except BaseException:
+                    sys.modules.pop(name, None)
+                    raise
+            return module
+
+    return sibling
+
+
+def route(script: str | Path, words: list[str], argv: list[str] | None,
+          interactive: Collection[str] | bool, streamed: bool = False) -> int | None:
+    """The exit code of the command `words` of `script` where kern runs it, having printed its
+    answer; None where the script runs it itself (se_components `routed`). `argv` is main's (None:
+    the process's), `interactive` the script's INTERACTIVE_COMMANDS or a plain answer."""
+    rest = list(sys.argv[1 + len(words):] if argv is None else argv[len(words):])
+    named = interactive if isinstance(interactive, bool) else " ".join(words) in interactive
+    return loader(script)("se_components").routed(Path(script), words, rest, named, streamed)
+
+
+def dispatch(script: str | Path, args: argparse.Namespace, argv: list[str] | None,
+             interactive: Collection[str], streamed: bool = False,
+             refused: type[Exception] | Callable[[], type[Exception]] | None = None) -> int:
+    """Run the parsed command `args.command`: through kern where it runs it (`route`), else by its
+    own `args.run(args)`. An error of the script's `refused` type (or of the type a callable gives,
+    so the script loads it only then) is its answer: `<script>: <error>` on stderr, exit code 1;
+    every other error is raised as it stands."""
+    try:
+        routed = route(script, [args.command], argv, interactive, streamed)
+        return args.run(args) if routed is None else routed
+    except Exception as error:
+        kind = refused if refused is None or isinstance(refused, type) else refused()
+        if kind is None or not isinstance(error, kind):
+            raise
+        print(f"{Path(script).name}: {error}", file=sys.stderr)
+        return 1
+
+
+@contextmanager
+def swapped(owner: object, name: str, value: object) -> Iterator[object]:
+    """`owner.<name>` set to `value` for the block, then restored, whatever the block raised."""
+    previous = getattr(owner, name)
+    setattr(owner, name, value)
+    try:
+        yield value
+    finally:
+        setattr(owner, name, previous)

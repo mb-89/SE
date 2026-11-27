@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
-import importlib.util
 import json
 import os
 import re
@@ -49,15 +48,7 @@ COMPONENTS_TIMEOUT = 60  # seconds the project's component listing may take
 COMPONENTS_HEADER = ("component", "kind", "installed", "newest", "repository")
 
 
-def _load(name: str):
-    """A sibling script, loaded once under its own name."""
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+_load = se_script.loader(__file__)
 
 
 git_door = _load("git_door")
@@ -90,10 +81,6 @@ def git_tags(url: str, timeout: float = 60) -> list[Version]:
         raise RemoteError(f"cannot reach {url}: {detail[-1] if detail else 'git ls-remote failed'}")
     tags = (line.rpartition("refs/tags/v")[2] for line in result.stdout.splitlines() if "refs/tags/v" in line)
     return sorted(v for tag in tags if (v := se_modules.parse_version(tag)) is not None)
-
-
-def _front_names(folder: Path, pattern: str) -> list[str]:
-    return sorted(path.parent.name if path.name == "SKILL.md" else path.stem for path in folder.glob(pattern))
 
 
 @dataclass(frozen=True)

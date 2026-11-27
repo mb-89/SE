@@ -1046,20 +1046,7 @@ PUBLIC_CHECK_OPT_OUT = (
 )
 
 
-_loading = threading.RLock()
-
-
-def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once: a thread that asks while another
-    loads it waits for the whole module (concurrently's reads load their doors' modules too)."""
-    with _loading:
-        module = sys.modules.get(name)
-        if module is None:
-            spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[name] = module
-            spec.loader.exec_module(module)
-        return module
+sibling = se_script.loader(__file__)
 
 
 def finding_ref(value: str):
@@ -1161,17 +1148,22 @@ def status_on_pushed(root: Path, commit: str) -> str:
 
 def run_public_check(root: Path, previous: str) -> None:
     """se's public check on the merged tree and every commit since `previous`; refuse on failure."""
+    public_check_gate(root, ["--rev", "HEAD", "--range", f"{previous}..HEAD"],
+                      "Remove the hits on the branch or add a reasoned allow entry, then integrate again")
+
+
+def public_check_gate(root: Path, arguments: list[str], remedy: str) -> None:
+    """se's public check of `root` with `arguments`; a failure refuses, nothing pushed, naming
+    `remedy`, the check's output and how a project turns the check off."""
     result = process_door.run(
-        [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", "HEAD",
-         "--range", f"{previous}..HEAD"],
+        [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), *arguments],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     if result.returncode != 0:
         detail = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
         raise QueueError(
             f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
-            f"se.toml); nothing was pushed. Remove the hits on the branch or add a reasoned allow "
-            f"entry, then integrate again: {detail}; "
+            f"se.toml); nothing was pushed. {remedy}: {detail}; "
             f"{PUBLIC_CHECK_OPT_OUT}{root / 'se.toml'}"
         )
 
@@ -1756,24 +1748,19 @@ def requirement_items(body: str) -> dict[int, tuple[str, str]]:
     }
 
 
-def same_commit(one: str, other: str) -> bool:
-    """Whether two commit names, either abbreviated, name the same commit."""
-    return bool(one) and bool(other) and (one.startswith(other) or other.startswith(one))
-
-
 def without_open_points(body: str, tip: str | None) -> str:
     """`body` without the open points a review left on commit `tip`: that commit lands without
     them, as work for after it, not as requirements it delivers."""
     if not tip:
         return body
-    return OPEN_POINTS_PATTERN.sub(lambda match: "" if same_commit(match[1], tip) else match[0],
+    return OPEN_POINTS_PATTERN.sub(lambda match: "" if git_door.same_commit(match[1], tip) else match[0],
                                    body)
 
 
 def open_points(body: str, tip: str | None) -> list[str]:
     """The open points a review left on commit `tip`, as their `<n>. <text>` lines."""
     return [line.strip() for match in OPEN_POINTS_PATTERN.finditer(body)
-            if tip and same_commit(match[1], tip)
+            if tip and git_door.same_commit(match[1], tip)
             for line in match[2].splitlines() if REQUIREMENT_PATTERN.fullmatch(line.strip())]
 
 
@@ -2410,10 +2397,6 @@ def issue_template(name: str) -> tuple[dict[str, str], str]:
     return meta, text[match.end():]
 
 
-def template_labels(value: str) -> list[str]:
-    return [label.strip().strip("\"'") for label in value.strip("[]").split(",") if label.strip()]
-
-
 FIELD_REPORT_TEMPLATE_NAME = f"the se checkout's {FIELD_REPORT_TEMPLATE}"
 
 
@@ -3021,14 +3004,21 @@ def git_push(root: Path, arguments: list[str],
     a required check is still running and `wait_check` is given, it waits for that check's run to
     finish instead and retries once."""
     command = f"git push {' '.join(arguments)}"
-    for attempt in range(1, PUSH_ATTEMPTS + 1):
-        print(f"Push attempt {attempt}/{PUSH_ATTEMPTS}: {command}")
+
+    def refused() -> str | None:
+        """One push: None where it went through, else the remote's refusal."""
         pushed = run_git_push(root, arguments)
         if pushed.returncode == 0:
             metrics.door_call()
             print(f"Pushed: {command}")
+            return None
+        return (pushed.stderr + pushed.stdout).strip() or f"exit code {pushed.returncode}"
+
+    for attempt in range(1, PUSH_ATTEMPTS + 1):
+        print(f"Push attempt {attempt}/{PUSH_ATTEMPTS}: {command}")
+        detail = refused()
+        if detail is None:
             return
-        detail = (pushed.stderr + pushed.stdout).strip() or f"exit code {pushed.returncode}"
         refusal, transient = push_refusal(detail)
         metrics.door_call(transient)
         if not transient:
@@ -3041,12 +3031,9 @@ def git_push(root: Path, arguments: list[str],
             print(f"Push refused ({refusal}); waiting for the check to finish, then retrying once")
             wait_check()
             wait_check = None  # the retry below is the one retry; a second refusal is final
-            pushed = run_git_push(root, arguments)
-            if pushed.returncode == 0:
-                metrics.door_call()
-                print(f"Pushed: {command}")
+            detail = refused()
+            if detail is None:
                 return
-            detail = (pushed.stderr + pushed.stdout).strip() or f"exit code {pushed.returncode}"
             refusal, _ = push_refusal(detail)
             raise QueueError(
                 f"{command} refused by the remote ({refusal}) after the check finished: {detail}. "
@@ -3104,19 +3091,9 @@ def push_gate(root: Path, branch: str) -> None:
         f"{pushed.stdout.strip()}..{branch} --not --remotes=origin"
         if pushed.returncode == 0 and pushed.stdout.strip() else f"{branch} --not --remotes=origin"
     )
-    result = process_door.run(
-        [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", branch,
-         "--remote", "origin", "--range", revisions],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-    )
-    if result.returncode != 0:
-        detail = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
-        raise QueueError(
-            f"Public check failed ({PUBLIC_CHECK.name}, required by project.public_check in "
-            f"se.toml); nothing was pushed. Remove the hits from {branch} or add a reasoned allow "
-            f"entry, then run work_tickets.py push again: {detail}; "
-            f"{PUBLIC_CHECK_OPT_OUT}{root / 'se.toml'}"
-        )
+    public_check_gate(root, ["--rev", branch, "--remote", "origin", "--range", revisions],
+                      f"Remove the hits from {branch} or add a reasoned allow entry, then run "
+                      "work_tickets.py push again")
 
 
 RELEASE_KINDS = {
@@ -3389,12 +3366,6 @@ def checked_git(root: Path, *arguments: str, env: dict[str, str] | None = None) 
         detail = (result.stderr or result.stdout).strip() or f"exit code {result.returncode}"
         raise QueueError(f"git {' '.join(arguments)} failed in {root}: {detail}")
     return result.stdout
-
-
-def local_tag(root: Path, tag: str) -> str | None:
-    """The commit the local tag `tag` names, or None without it."""
-    result = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}")
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def remote_tags(root: Path) -> dict[str, str]:
@@ -4329,7 +4300,7 @@ def delivery_problem(root: Path, branch: str) -> str | None:
                                      project_version(root))
     match = BRANCH_TIP_PATTERN.search(report)
     tip = branch_tip(root)
-    if match is None or tip is None or not same_commit(match[1], tip):
+    if match is None or tip is None or not git_door.same_commit(match[1], tip):
         problems.append(f"its Branch tip is not the branch's commit {(tip or '')[:12]}: "
                         "a commit after delivery needs the check and the delivery again")
     if not problems:
@@ -4517,20 +4488,10 @@ def issue_api(root: Path, repo: str, path: str) -> dict[str, object]:
         raise QueueError(f"GitHub returned invalid JSON for {path}") from error
 
 
-def mark_in_progress(root: Path, number: int, repo: str) -> None:
-    run_gh(
-        root,
-        [
-            "issue",
-            "edit",
-            str(number),
-            "--remove-label",
-            "ready",
-            "--add-label",
-            "in-progress",
-            *repo_arguments(repo),
-        ],
-    )
+def mark_in_progress(root: Path, number: int, repo: str, assignee: str | None = None) -> None:
+    """Move issue `number` from ready to in-progress, assigning it to `assignee` where given."""
+    run_gh(root, ["issue", "edit", str(number), *(["--add-assignee", assignee] if assignee else []),
+                  "--remove-label", "ready", "--add-label", "in-progress", *repo_arguments(repo)])
 
 
 def same_repo(found: str, repo: str) -> bool:
@@ -5033,21 +4994,7 @@ def start(
         if not agent:
             raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
         take_claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
-        run_gh(
-            root,
-            [
-                "issue",
-                "edit",
-                str(number),
-                "--add-assignee",
-                agent,
-                "--remove-label",
-                "ready",
-                "--add-label",
-                "in-progress",
-                *repo_arguments(repo),
-            ],
-        )
+        mark_in_progress(root, number, repo, agent)
         beat_action_gh(root, repo)({"issue_number": number}, "set")
         post_started(root, number, repo, str(issue["title"]))
         forget_claim(root, number)
@@ -5573,6 +5520,14 @@ def delivered_count(root: Path, number: int, repo: str, door: object | None,
     return len(delivered_in(root, tool_items(answer, "pull_requests")))
 
 
+def escalated_issues(root: Path, repo: str, labels: list[str]) -> list[dict]:
+    """The open escalations (number, title, url), within the repository labels `labels` give."""
+    return json.loads(run_gh(root, [
+        "issue", "list", "--state", "open", "--label", "escalated",
+        "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
+    ]))
+
+
 def queue(
     root: Path, repo: str, all_repos: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], int | None]:
@@ -5583,10 +5538,7 @@ def queue(
     pause, _, escalations, delivered, ready, slots = concurrently(
         lambda: pause_issues(root, repo),
         lambda: sync(root),
-        lambda: json.loads(run_gh(root, [
-            "issue", "list", "--state", "open", "--label", "escalated",
-            "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
-        ])),
+        lambda: escalated_issues(root, repo, labels),
         lambda: delivered_pull_requests(root, repo),
         lambda: ready_issues(root, repo, all_repos),
         lambda: capacity(root, repo, all_repos),
@@ -6528,6 +6480,25 @@ def template_findings(root: Path, repo: str, chosen, title: str, body: str,
         raise QueueError(str(error)) from error
 
 
+def issue_read(root: Path, repo: str, number: int, issue_file: Path | None, command: str,
+               handing_off: bool) -> dict:
+    """Issue `number` as `command` reads it: from gh, or without gh (`handing_off`) from
+    `issue_file`, the GitHub tools' issue_read answer; refused where neither is there or the
+    issue read is another."""
+    if not handing_off:
+        issue = issue_api(root, repo, f"issues/{number}")
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"{command}: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if int(issue.get("number") or 0) != number:
+        raise QueueError(f"{command}: the issue read is not #{number}: give issue_read's answer of it")
+    return issue
+
+
 def stamp(root: Path, number: int, repo: str | None, template: str | None,
           issue_file: Path | None) -> str:
     """Stamp issue `number`, whose body names no template, with the marker of the template it
@@ -6540,17 +6511,7 @@ def stamp(root: Path, number: int, repo: str | None, template: str | None,
     the GitHub tools read it and the edit is printed as a plan. Gives the line naming the result."""
     repo = resolve_repo(root, repo)
     handing_off = hand_off()
-    if not handing_off:
-        issue = issue_api(root, repo, f"issues/{number}")
-    elif issue_file is not None:
-        issue = issue_answer(issue_file)
-    else:
-        raise QueueError(
-            f"stamp: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
-            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
-            f"({WITHOUT_GH})")
-    if int(issue.get("number") or 0) != number:
-        raise QueueError(f"stamp: the issue read is not #{number}: give issue_read's answer of it")
+    issue = issue_read(root, repo, number, issue_file, "stamp", handing_off)
     templates = sibling("templates")
     title, body = str(issue.get("title") or ""), str(issue.get("body") or "")
     named = templates.TEMPLATE_MARKER_PATTERN.search(body)
@@ -6616,17 +6577,7 @@ def unhold(root: Path, number: int, repo: str | None, issue_file: Path | None) -
     plan. Title and body are never changed. Gives the line naming the result."""
     repo = resolve_repo(root, repo)
     handing_off = hand_off()
-    if not handing_off:
-        issue = issue_api(root, repo, f"issues/{number}")
-    elif issue_file is not None:
-        issue = issue_answer(issue_file)
-    else:
-        raise QueueError(
-            f"unhold: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
-            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
-            f"({WITHOUT_GH})")
-    if int(issue.get("number") or 0) != number:
-        raise QueueError(f"unhold: the issue read is not #{number}: give issue_read's answer of it")
+    issue = issue_read(root, repo, number, issue_file, "unhold", handing_off)
     if str(issue.get("state") or "open").lower() != "open":
         raise QueueError(f"unhold: #{number} is closed: nothing to unhold")
     labels = issue_labels(issue)
@@ -13324,10 +13275,7 @@ def turn_start_parts(root: Path, repo: str, all_repos: bool = False) -> dict[str
     answers = concurrently(*(part(read) for read in (
         lambda: pause_issues(root, repo),
         lambda: sync(root),
-        lambda: json.loads(run_gh(root, [
-            "issue", "list", "--state", "open", "--label", "escalated",
-            "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
-        ])),
+        lambda: escalated_issues(root, repo, labels),
         lambda: delivered_pull_requests(root, repo),
         lambda: ready_and_claimed(root, repo, all_repos),
         lambda: capacity(root, repo, all_repos),
@@ -13903,9 +13851,8 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
     args = make_parser().parse_args(argv)
     words = command_words(args)
-    routed = sibling("se_components").routed(
-        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        " ".join(words) in INTERACTIVE_COMMANDS, " ".join(words) in STREAMED_COMMANDS)
+    routed = se_script.route(__file__, words, argv, INTERACTIVE_COMMANDS,
+                             " ".join(words) in STREAMED_COMMANDS)
     if routed is not None:
         return routed
     code, line = metrics.recorded(f"work_tickets.py {' '.join(words)}",

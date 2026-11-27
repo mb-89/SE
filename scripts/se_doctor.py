@@ -45,7 +45,6 @@ What it reuses rather than computes again: se_start's plugin registry and skills
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -65,15 +64,7 @@ import process_door
 import se_script
 
 
-def _load(name: str):
-    """A sibling script, loaded once under its own name."""
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+_load = se_script.loader(__file__)
 
 
 git_door = _load("git_door")
