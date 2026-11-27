@@ -3323,6 +3323,39 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     assert not worker.exists()
 
 
+def test_integrate_lands_origins_head_over_a_local_branch_left_at_the_claim(main_checkout, monkeypatch):
+    """A cloud landing (SE#1997): `start` made the local work branch at the claim commit, the
+    worker pushed its commits to origin's; integrate merges origin's head, no manual step."""
+    git_ok("-C", str(main_checkout), "branch", "feature/claimed")  # start's branch, at the claim
+    origin = git_run(main_checkout, "remote", "get-url", "origin").stdout.strip()
+    worker = fake_git.clone(origin, main_checkout.parent / "cloud-worker")
+    git_ok("-C", str(worker), "switch", "-q", "-c", "feature/claimed")
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "-c", "user.name=w", "-c", "user.email=w@example.invalid",
+           "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/claimed")
+    head = git_run(worker, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    report = {"body": reported_at(head)}
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    monkeypatch.setattr(
+        work_tickets, "run_gh",
+        lambda root, args: json.dumps({"headRefName": "feature/claimed", "headRefOid": head,
+                                       "body": report["body"],
+                                       "url": "https://git.example/owner/repo/pull/7"})
+        if args[:2] == ["pr", "view"] else "")
+    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: "")
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "passed"))
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+    assert commit and squashed_onto_origin(main_checkout, commit)
+    assert (main_checkout / "worker.txt").read_text(encoding="utf-8") == "worker\n"
+
+
 @pytest.mark.parametrize("failed_step", ["Complete suite", "Output regeneration", "Project check"])
 def test_integrate_failure_restores_pre_merge_main_and_escalates(
         main_checkout, monkeypatch, failed_step):
@@ -4054,6 +4087,58 @@ def test_a_refused_fast_forward_names_the_rule_change_and_never_squash_merges(
     assert origin_main(main_checkout) == before
     assert not any(call[0] == "squash" for call in github.calls)
     assert any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
+
+
+def test_a_fast_forward_refused_while_check_runs_waits_for_it_and_pushes_again(
+        main_checkout, monkeypatch, github, capsys):
+    """GH013 "Required status check is in progress" (a second `check` run on the landing
+    commit, SE#1998): integrate waits for the check and pushes once more; no message names the
+    ruleset."""
+    fast_forward_landings(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    push = work_tickets.run_git_push
+    refused: list[str] = []
+
+    def running(root, arguments):
+        if arguments[-1].endswith(":refs/heads/main") and not refused:
+            refused.append(arguments[-1])
+            return subprocess.CompletedProcess(arguments, 1, "", (
+                "remote: error: GH013: Repository rule violations found for refs/heads/main.\n"
+                "remote: - Required status check \"check\" is in progress.\n"))
+        return push(root, arguments)
+    monkeypatch.setattr(work_tickets, "run_git_push", running)
+    waited: list[str] = []
+    wait_for_check = work_tickets.wait_for_check
+    monkeypatch.setattr(work_tickets, "wait_for_check",
+                        lambda door, sha, url: waited.append(sha) or wait_for_check(door, sha, url))
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    landed = origin_main(main_checkout)
+    assert refused and landed.startswith(commit)
+    assert waited[-1] == landed  # the wait after the refusal, on the landing commit
+    out = capsys.readouterr().out
+    assert "Push refused (check in progress); waiting for the check to finish" in out
+    assert "ruleset" not in out.lower() and "Require a pull request" not in out
+
+
+def test_a_push_refused_while_check_runs_is_waited_on_never_answered_with_a_rule_change(
+        tmp_path, monkeypatch):
+    """Without a door to wait on, the push retries as for a transient refusal; when it gives
+    up, the remedy is to integrate again once the check finished, not a ruleset change."""
+    answer = subprocess.CompletedProcess([], 1, "", (
+        "remote: error: GH013: Repository rule violations found for refs/heads/main.\n"
+        "remote: - Changes must be made through a pull request.\n"
+        "remote: - Required status check \"check\" is in progress.\n"))
+    assert work_tickets.push_refusal(answer.stderr) == ("check in progress", True)
+    monkeypatch.setattr(work_tickets, "remote_head", lambda root, target: "b" * 40)
+    monkeypatch.setattr(work_tickets, "run_git_push", lambda root, arguments: answer)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.fast_forward(tmp_path, "main", "b" * 40, "c" * 40)
+    message = str(refused.value)
+    assert "while a required check still ran on it" in message and "integrate again" in message
+    assert "removes the rule" not in message and "Rulesets" not in message
 
 
 def test_an_unknown_landing_setting_is_refused_before_anything_is_merged(main_checkout, monkeypatch,
@@ -6781,6 +6866,8 @@ class LabelledGh:
         if command == ["label", "list"]:
             return json.dumps([{"name": name} for name in sorted(self.labels)])
         if command == ["label", "create"]:
+            if arguments[2].casefold() in {name.casefold() for name in self.labels}:
+                raise work_tickets.QueueError("gh: HTTP 422: Validation Failed (already_exists)")
             self.labels.add(arguments[2])
             return ""
         if command == ["issue", "create"]:
@@ -6932,6 +7019,24 @@ def test_filing_checks_the_body_with_the_one_reference_function(worktree, gh, mo
     body.write_text("A body.\n", encoding="utf-8")
     assert run(worktree, "backlog", "file", "--title", "idea", "--body-file", str(body)) == 1
     assert seen == [f"{work_tickets.FLEET_MARKER}\n{TICKET_MARKER}\nA body.\n"]
+
+
+def test_a_label_that_differs_only_in_case_is_the_existing_one(worktree, monkeypatch, capsys):
+    """GitHub compares label names without case: with `repo:se` present, filing with
+    `--repo owner/SE` creates no label and files the issue with `repo:se`."""
+    github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
+                             "url": "https://git.example/owner/se/issues/1"}})
+    github.labels = {"work", "ready", "repo:se"}
+    monkeypatch.setattr(work_tickets, "run_gh", github)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    body = worktree / "work.md"
+    body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
+
+    assert run(worktree, "file", "--title", "case-blind-labels", "--body-file", str(body),
+               "--repo", "git.example/owner/SE") == 0
+    assert github.labels == {"work", "ready", "repo:se"}
+    assert github.issues[2]["labels"] == ["work", "ready", "repo:se"]
+    assert "Filed work issue" in capsys.readouterr().out
 
 
 def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeypatch, capsys):
@@ -7271,9 +7376,9 @@ def test_the_cloud_hand_off_prints_the_search_and_the_condition(worktree, monkey
     assert plan[0] == "GitHub plan: backlog file voice-input"
     assert plan[-2] == "Run the GitHub plan above to file the backlog issue once"
     steps = [line.split(" ", 2)[1] for line in plan if re.match(r"\d+\. ", line)]
-    assert steps == ["list_issues", "add_issue_comment", "list_issues", "list_branches",
+    assert steps == ["list_issues", "add_issue_comment", "search_issues", "list_branches",
                      "issue_write", "list_issues", "add_issue_comment", "issue_write"]
-    assert '"state": "CLOSED"' in out
+    assert '"query": "repo:owner/repo is:issue in:title \\"voice-input\\""' in out
     assert "Where one is `voice-input`, stop: the name is used, nothing is filed" in out
     assert '"state": "OPEN"' in out
     assert ("a twin is one whose title without a trailing -yyyymmdd is `voice-input` and whose "
@@ -7303,7 +7408,7 @@ def test_the_cloud_hand_off_prints_the_search_and_the_condition(worktree, monkey
     assert [line.split(" ", 2)[1] for line in out.split("\n") if re.match(r"\d+\. ", line)] == [
         "list_issues",
         "list_issues", "add_issue_comment", "add_issue_comment", "issue_write",
-        "list_issues", "list_branches", "issue_write",
+        "search_issues", "list_branches", "issue_write",
         "list_issues", "add_issue_comment", "issue_write"]
     assert "the line `Routed from: Proposal: one`" in out and "other than #1" in out
     assert "lower number than #1," in out and "Only where step 4 found a lower twin" not in out
@@ -7696,9 +7801,9 @@ def test_file_dedupes_and_files_through_kerns_relay_as_one_call(worktree, monkey
 
     def session(tool: str, input_: dict, note: str, wait: str) -> object:
         asked.append((tool, input_))
-        if tool == "list_issues" and input_["state"] == "CLOSED":
-            return {"issues": [{"number": 2, "title": "frob-done"}],
-                    "pageInfo": {"hasNextPage": False}}
+        if tool == "search_issues":
+            return {"total_count": 1, "items": [{"number": 2, "title": "frob-done",
+                                                 "state": "closed"}]}
         if tool == "list_branches":
             return [{"name": "main"}, {"name": "frob-wip"}]
         if tool == "list_issues" and "after" not in input_:
@@ -7717,10 +7822,11 @@ def test_file_dedupes_and_files_through_kerns_relay_as_one_call(worktree, monkey
                    "--repo", "git.example/owner/repo") == 0
 
     assert [(tool, input_.get("after")) for tool, input_ in asked] == [
-        ("list_issues", None), ("list_issues", "c1"), ("list_issues", None),
+        ("list_issues", None), ("list_issues", "c1"), ("search_issues", None),
         ("list_branches", None), ("issue_write", None),
         ("list_issues", None), ("list_issues", "c1")]
-    assert asked[2][1]["state"] == "CLOSED" and asked[3][1]["page"] == 1
+    assert asked[2][1]["query"] == 'repo:owner/repo is:issue in:title "feat/frob-20261113"'
+    assert asked[3][1]["page"] == 1
     created = asked[4][1]
     assert (created["owner"], created["repo"], created["title"]) == ("owner", "repo", "feat/frob-20261113")
     assert "work" in created["labels"] and "ready" in created["labels"]
@@ -7736,6 +7842,68 @@ def test_file_dedupes_and_files_through_kerns_relay_as_one_call(worktree, monkey
                        "--repo", "git.example/owner/repo") == 1
         assert f"file: the name `{name}` is used already by {clash}" in capsys.readouterr().err
         assert "issue_write" not in [tool for tool, _ in asked]
+
+
+def test_file_checks_a_title_with_one_search_whatever_the_issue_count(worktree, monkeypatch, capsys):
+    """Through kern's relay, a repository of 2,000 closed issues: the title check is one
+    search_issues read, never a page of closed issues; the search's word match is compared
+    exactly, so a title that only holds the name is no clash."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    body = worktree / "body.md"
+    body.write_text("## Goal\n\nG.\n\n## Requirements\n\n1. One.\n\n## Acceptance\n\n- It.\n",
+                    encoding="utf-8")
+    closed = [{"number": n, "title": f"done-{n}", "state": "closed"} for n in range(1, 2001)]
+    closed[1499]["title"] = "frob-it-again"
+    asked: list[tuple[str, dict]] = []
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        if tool == "search_issues":
+            words = re.search(r'"(.+)"', input_["query"])[1].split("-")
+            return {"items": [issue for issue in closed
+                              if all(word in issue["title"].split("-") for word in words)]}
+        if tool == "list_issues" and input_["state"] == "CLOSED":
+            pytest.fail("the title check paged the closed issues")
+        if tool == "list_issues":
+            return {"issues": [], "pageInfo": {"hasNextPage": False}}
+        if tool == "list_branches":
+            return [{"name": "main"}]
+        if tool == "issue_write":
+            return {"url": "https://git.example/owner/repo/issues/2001"}
+        raise AssertionError(f"file asked an unexpected step: {tool} {input_}")
+
+    for name, code in (("frob-it", 0), ("frob-it-again", 1)):
+        asked.clear()
+        with work_tickets.sibling("se_relay").stepping(session):
+            assert run(worktree, "file", "--title", name, "--body-file", str(body),
+                       "--repo", "git.example/owner/repo") == code
+        title_reads = [tool for tool, input_ in asked
+                       if tool == "search_issues" or input_.get("state") == "CLOSED"]
+        assert title_reads == ["search_issues"]
+    assert "the name `frob-it-again` is used already by #1500 (closed)" in capsys.readouterr().err
+
+
+def test_the_relay_doors_branch_check_asks_git_once(tmp_path, monkeypatch):
+    """Through kern's relay, whether a name is a branch is one `git ls-remote` of the remote that
+    hosts it, never a page of list_branches; only where git cannot read it are the pages read."""
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    checkout = fake_git.clone(origin, tmp_path / "checkout")
+    git_ok("-C", str(checkout), "-c", "user.name=a", "-c", "user.email=a@example.invalid",
+           "commit", "-q", "--allow-empty", "-m", "start")
+    git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:refs/heads/frob-wip")
+    monkeypatch.setattr(work_tickets, "issue_remote", lambda root, repo: "origin")
+    asked: list[str] = []
+
+    def step(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append(tool)
+        return [{"name": "main"}, {"name": "listed-only"}]
+
+    door = work_tickets.RelayDoor(checkout, "git.example/owner/repo", step)
+    assert door.branch("frob-wip") and not door.branch("frob")
+    assert asked == []
+    monkeypatch.setattr(work_tickets, "issue_remote", lambda root, repo: "no-such-remote")
+    assert door.branch("listed-only") and asked == ["list_branches"]
 
 
 def test_fleet_check_reads_through_kerns_relay_as_one_call(worktree, monkeypatch, capsys):
