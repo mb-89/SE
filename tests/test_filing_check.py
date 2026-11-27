@@ -100,7 +100,7 @@ def test_twenty_that_come_back_file_the_retro_first_and_refuse_the_filing(tmp_pa
     assert str(refused.value) == (
         "work_tickets.py file: a retro is due (20 came back since the last retro (due at 20)), "
         "filed first: Filed work issue https://github.com/owner/repo/issues/91; file files no "
-        "other issue until every finding has an outcome and the retro is done; running work goes "
+        "other issue until every finding has an outcome and the run is done; running work goes "
         "on (docs/fleet.md \"Retro due\")")
     assert issubclass(work_tickets.ReviewDueError, work_tickets.QueueError)
 
@@ -233,3 +233,80 @@ def test_running_work_is_not_stopped_only_filing_runs_the_check():
         and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                 and call.func.id == "filing_check" for call in ast.walk(node)))
     assert callers == ["backlog_file", "file_work_issue"]
+
+
+# One open run of each kind that holds filing (retro.py RUN_KINDS), as the filing check reads it.
+OPEN_RUNS = {"retro": issue(40, "retro-due-20261120", created="2026-11-20T00:00:00Z",
+                            labels=("retro",)),
+             "overhaul": issue(40, "overhaul-20261120", created="2026-11-20T00:00:00Z",
+                               labels=("discovery",))}
+
+
+def test_every_run_kind_that_holds_filing_is_one_the_table_names():
+    """The class, not its instances (SE#2006): the filing check holds filing for each kind of
+    RUN_KINDS and for no other, so a kind added there files its own findings the same way."""
+    assert set(retro.RUN_KINDS) == set(OPEN_RUNS) == {"retro", "overhaul"}
+    for name, kind in retro.RUN_KINDS.items():
+        assert retro.run_kind_of(retro.issue_of(OPEN_RUNS[name])) is kind
+        assert kind.reference.search(f"Takes {name} #40 finding 2.").groups() == ("40", "2")
+
+
+@pytest.mark.parametrize("kind", sorted(retro.RUN_KINDS))
+def test_every_run_kind_files_its_own_findings_once_its_report_is_in(tmp_path, filed, kind):
+    """No run deadlocks the filing it holds (SE#2006, overhaul #1993 finding 4): while it runs,
+    every filing is refused, its findings too; once its report is in, `file --finding <run>:<k>`
+    passes for its findings alone and every other filing is still refused."""
+    run = OPEN_RUNS[kind]
+    with pytest.raises(work_tickets.ReviewDueError, match=rf"the {kind} #40 is open"):
+        check(tmp_path, Door(opened=[run]))
+    with pytest.raises(work_tickets.ReviewDueError, match="is running, not in report state"):
+        check(tmp_path, Door(opened=[run]), finding=retro.FindingRef("40:1"))
+    door = Door(opened=[run], comments={40: [{"body": retro.report_state_comment("report", 2)}]})
+    assert check_kind(tmp_path, door, retro.FindingRef("40:2")) == kind
+    with pytest.raises(work_tickets.ReviewDueError, match=rf"{kind} #40 is in report state; file "
+                                                          r"only its findings with `work_tickets.py "
+                                                          r"file --finding 40:<k>`"):
+        check(tmp_path, door)
+    assert filed == []
+
+
+@pytest.mark.parametrize("kind", sorted(retro.RUN_KINDS))
+def test_every_run_kinds_report_opens_its_findings_and_its_last_outcome_closes_it(kind,
+                                                                                  monkeypatch):
+    """Each kind's report posts its report state, so it stays open for its findings (one with
+    none closes at once), and the outcome of its last finding closes it."""
+    steps = retro.file_steps(REPO, 40, ["the report"], 2, what=kind).steps
+    assert [step.tool for step in steps] == ["add_issue_comment", "add_issue_comment"]
+    assert steps[1].arguments["body"].startswith(retro.report_state_comment("report", 2))
+    assert [step.tool for step in retro.file_steps(REPO, 40, ["r"], 0, what=kind).steps][-1] == \
+        "issue_write"
+
+    class RunDoor(retro.GhDoor):
+        missing: list = []
+
+        def __init__(self):
+            self.given = [{"body": retro.report_state_comment("report", 2)}]
+            self.closed = False
+
+        def comments(self, number):
+            return self.given
+
+        def issue(self, number):
+            if number == 40:
+                return OPEN_RUNS[kind]
+            return {"number": 99, "state": "open", "labels": [{"name": "work"}],
+                    "body": f"{kind} #40 finding 2"}
+
+    door = RunDoor()
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(retro, "issue_actions", lambda root, tracker, _: {
+        "comment_issue": lambda arguments, _: door.given.append({"body": arguments["body"]}),
+        "close_issue": lambda arguments, _: setattr(door, "closed", True)})
+    retro.record_outcome(Path("."), REPO, retro.FindingRef("40:1"), "merged", "2", door)
+    assert door.closed is False
+    retro.record_outcome(Path("."), REPO, retro.FindingRef("40:2"), "issue", "99", door)
+    assert door.closed is True and retro.filing_state(door.given).phase == "done"
+
+
+def check_kind(tmp_path: Path, door: Door, finding) -> str | None:
+    return work_tickets.filing_check(tmp_path, REPO, "file", door, NOW, finding)

@@ -20,10 +20,13 @@ QUESTION_FIELDS). It ends in a JSON block under BLOCK_MARKER whose judgment the 
 `overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, a question left open among
 it (`question_problems`), writing nothing; it files no issue (wrk-007). It posts the report, a
 document of the overhaul template (`report`): the verdicts, what was looked at, the answers to both
-question blocks, each finding with its kind (`work`, which SE bundles, or `decision`, for the
+question blocks, each finding with its kind (`work`, which SE files, or `decision`, for the
 owner's decision list; a rule change is always a decision), then the facts and the block, which
 `judgment_problems` checks through the adapter template `templates/overhaul-judgment.md`
-(JUDGMENT_TEMPLATE), as the overhaul issue's closing comment, and closes the issue.
+(JUDGMENT_TEMPLATE), as a comment on the overhaul issue, then its report state, as a retro's
+(retro.py RUN_KINDS): SE files each finding with `work_tickets.py file --finding <overhaul>:<k>` or
+records it with `retro.py outcome`, and the last outcome closes the issue; a report with no finding
+closes it at once.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -1078,7 +1081,7 @@ def judged(text: str, number: int) -> dict:
 
 
 def report(text: str, block: dict, number: int) -> str:
-    """The overhaul's report, its closing comment, a document of the overhaul template: the
+    """The overhaul's report, a comment on its issue, a document of the overhaul template: the
     verdicts, what was looked at, the draft's answers to the standing questions and to the
     overhaul's own, each finding with its kind and what follows, what went well, the facts, then
     the block the next overhaul reads."""
@@ -1095,7 +1098,7 @@ def report(text: str, block: dict, number: int) -> str:
     findings = [] if block["findings"] else ["None."]  # then what follows
     for item in block["findings"]:
         kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
-                if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
+                if item["kind"] == DECISION else f"{WORK}, for SE to file")
         change = "; a rule change" if item["rule_change"] else ""
         findings += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}{change}; rule "
                      f"{item['rule'].strip()}; place `{item['place'].strip()}`)",
@@ -1110,12 +1113,13 @@ def report(text: str, block: dict, number: int) -> str:
         + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
         flags=re.MULTILINE | re.DOTALL)
     reference = sibling("retro").finding_reference("overhaul", number)
-    follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
-               f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-               f"needs, each naming `{reference}` for every finding it takes, "
-               f"so the next overhaul scores it; the {DECISION} findings "
-               f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
-               "on the owner's decision list.")
+    follows = (f"This overhaul filed no issue. SE files the {WORK} findings "
+               f"({', '.join(map(str, work)) or 'none'}) with `work_tickets.py file --finding "
+               f"{number}:<k>`, each work issue naming `{reference}`, so the next overhaul scores "
+               f"it, and records a finding another one takes as merged into it; the {DECISION} "
+               f"findings ({', '.join(map(str, decisions)) or 'none'}), every rule change among "
+               "them, go on the owner's decision list, then are filed or declined the same way. "
+               "The last outcome closes the overhaul.")
     fields = {
         "verdicts": "\n".join(verdicts),
         "looked_at": "\n".join(f"- **{part}**: {one_line(block['looked_at'][part])}"
@@ -1191,20 +1195,23 @@ def run_file(args: argparse.Namespace) -> int:
     tracker = work_tickets.resolve_repo(root, args.repo)
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
+    findings = block["findings"]
     steps = retro.file_steps(tracker, args.overhaul, [report(text, block, args.overhaul)],
-                             findings=0, what="overhaul")
+                             findings=len(findings), what="overhaul")
+    status = (" and closed it, as it has no finding" if not findings
+              else f"; it stays open until each of its {len(findings)} findings has an outcome")
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
     else:
         work_tickets.run_plan(steps, work_tickets.tracker_actions(root, tracker))
-        print(f"Posted the report of overhaul #{args.overhaul} as its closing comment and closed it")
-    findings = block["findings"]
+        print(f"Posted the report of overhaul #{args.overhaul}{status}")
     kinds = [item["kind"] for item in findings]
     print(f"Overhaul #{args.overhaul}: {kinds.count(WORK)} {WORK} and {kinds.count(DECISION)} "
           f"{DECISION} finding(s), {sum(item['rule_change'] for item in findings)} of them rule "
-          f"changes; no issue filed: SE bundles the {WORK} findings into work issues and puts the "
-          f"{DECISION} findings on the owner's decision list")
+          f"changes; no issue filed: SE files each with `work_tickets.py file --finding "
+          f"{args.overhaul}:<k>` or records it declined or merged with `retro.py outcome`, and the "
+          "last outcome closes the overhaul")
     return 0
 
 
@@ -1251,7 +1258,8 @@ def run_facts(args: argparse.Namespace) -> int:
 COMPONENTS = (sibling("se_components").Group(
     "overhaul", "Overhaul",
     "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, "
-    "from the judged draft, file checks the judged draft and closes the issue with its report, and "
+    "from the judged draft, file checks the judged draft and posts its report, which opens the "
+    "filing of its findings, and "
     "facts lists a checkout's pruning facts.",
     ("new", "read", "deck", "file", "facts")),)
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
@@ -1315,13 +1323,14 @@ def make_parser() -> argparse.ArgumentParser:
                               help="the person's answers (answers.json): build the deck as their record")
     deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
-        "file", help="check a judged overhaul draft and close the overhaul issue with its report",
+        "file", help="check a judged overhaul draft and post its report on the overhaul issue",
         description="Check the judgment in the draft's block, refusing an incomplete one and "
                     "writing nothing; post the report (the verdicts, what was looked at, each "
                     f"finding with its kind, {WORK} or {DECISION}, a rule change always a "
-                    f"{DECISION}, then the facts and the block) as the overhaul issue's closing "
-                    "comment and close it. It files no issue: SE reads the report and files the "
-                    "work.")
+                    f"{DECISION}, then the facts and the block) on the overhaul issue, then its "
+                    "report state. It files no issue: SE files each finding with work_tickets.py "
+                    "file --finding <overhaul>:<k> or records it with retro.py outcome; the last "
+                    "outcome closes the overhaul, and a report with no finding closes it at once.")
     file_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
     file_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
                               help="the draft overhaul.py read wrote, its block judged")

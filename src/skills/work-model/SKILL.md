@@ -98,8 +98,9 @@ delivery path below. The same rules apply to local sessions and cloud agents.
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
   any new issue: `work_tickets.py file` files a due one first.
 
-  A running retro refuses filing; in report state, only its findings may be filed; it is done once
-  every finding has an outcome. An open overhaul refuses all filing; running work goes on.
+  A running retro or overhaul refuses filing; in report state, only its findings may be filed; it
+  is done once every finding has an outcome ([docs/fleet.md "Retro due"](../../../docs/fleet.md#retro-due));
+  running work goes on.
 
   Each runs in a session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE

@@ -52,7 +52,7 @@ None.
    `uv run python <se>/scripts/retro.py file <this issue> --draft <draft>` to post the report with
    a link to the document.
 7. **Outcomes**: SE records each accepted `work` finding with
-   `work_tickets.py file --finding <retro>:<finding>` and each declined or merged finding with
+   `work_tickets.py file --finding <this issue>:<finding>` and each declined or merged finding with
    `retro.py outcome`.
 8. **Close**: the retro closes only after every finding has an outcome.
 

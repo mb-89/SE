@@ -117,14 +117,16 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
 - **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
   anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
   `discovery`, not `ready`), and the filing asked for is refused, naming it.
-- **Blocking.** While a retro is running, filing is refused with its number. Once its report is in,
-  `file --finding <retro>:<finding>` may file only that finding's work issue; every other filing is
-  refused.
-
-  A finding may instead be recorded as declined or merged into another finding with `retro.py
-  outcome`. The retro is done and closes when every finding has an outcome. An open overhaul still
-  refuses every filing. Running work goes on, and issues keep coming back; they count towards the
-  next run.
+- **Blocking.** Every run kind that holds filing, a retro and an overhaul alike, files its own
+  findings, so no run can deadlock the filing it holds: `scripts/retro.py` `RUN_KINDS` is their one
+  table, which the filing check and `retro.py outcome` read.
+  - While a run is running, filing is refused with its number.
+  - Once its report is in, `file --finding <run>:<finding>` may file only that finding's work issue,
+    naming `<kind> #<run> finding <finding>`; every other filing is refused.
+  - A finding may instead be recorded as declined or merged into another finding with `retro.py
+    outcome`. The run is done and closes when every finding has an outcome; a report with no
+    finding closes it at once.
+  - Running work goes on, and issues keep coming back; they count towards the next run.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
   due included, and a first retro, where none has closed, the whole history from the project's
   first issue; its counters reset when it starts (its issue's creation), so a late retro never

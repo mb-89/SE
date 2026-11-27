@@ -20,11 +20,11 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
 
 ## The box
 
-- While a retro is running, SE files no issue. After the report is in, it may file only a finding
-  with `work_tickets.py file --finding <retro>:<finding>`, or record a declined or merged finding
-  with `retro.py outcome`. The retro closes when every finding has an outcome. An open overhaul
-  continues to hold all filing back. Running work goes on, and what comes back meanwhile counts
-  towards the next run.
+- While a run, a retro or an overhaul, is running, SE files no issue. After its report is in, it may
+  file only a finding with `work_tickets.py file --finding <run>:<finding>`, or record a declined or
+  merged finding with `retro.py outcome`. The run closes when every finding has an outcome
+  ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)). Running work goes on, and what comes
+  back meanwhile counts towards the next run.
 - You file no issue
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
   the report moves the retro to report state; SE records each finding's outcome and files accepted
@@ -69,10 +69,10 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
    still open (a comment, no verdict) is answered and asked again in a new deck.
 6. **Land and report.** Build the deck once more with `--answers <answers.json>`, the record of
    its answers. Land the judged draft on the integration branch as the run's doc, then
-   `retro.py file <issue> --draft <draft>` posts the report. The retro stays open for its finding
-   outcomes; SE files each accepted work finding with `work_tickets.py file --finding` and records
-   declined or merged outcomes with `retro.py outcome`. The last outcome marks it done and closes
-   it. An overhaul still closes with its report.
+   `retro.py file <issue> --draft <draft>` (`overhaul.py file` for an overhaul) posts the report.
+   The run stays open for its finding outcomes; SE files each accepted work finding with
+   `work_tickets.py file --finding` and records declined or merged outcomes with `retro.py
+   outcome`. The last outcome marks it done and closes it.
 7. **Hand back.** Send SE's session one message, the one
    [templates/run-closed.md](../templates/run-closed.md) writes.
    SE files the work findings as work issues, each naming every finding it takes as the message

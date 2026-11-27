@@ -1,5 +1,5 @@
 ---
-# A retro's report, its closing comment, and the draft it is filed from: the five steps, the
+# A retro's report, a comment on its issue, and the draft it is filed from: the five steps, the
 # standing questions nested in step 3. retro.py lays the draft out from this note and checks it
 # before it files the report; its judged block is the adapter templates/retro-judgment.md. The
 # person's decision of 22 Nov (SE#1678). scripts/templates.py's docstring owns this note's format.

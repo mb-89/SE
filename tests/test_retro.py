@@ -1367,10 +1367,10 @@ def test_filing_state_is_done_only_after_every_outcome_is_recorded():
         retro.filing_state([{"body": retro.report_state_comment("done", 2)}])
 
 
-def test_finding_argument_is_a_positive_retro_and_finding_pair():
-    assert (retro.FindingRef("30:2").retro, retro.FindingRef("30:2").finding) == (30, 2)
+def test_finding_argument_is_a_positive_run_and_finding_pair():
+    assert (retro.FindingRef("30:2").run, retro.FindingRef("30:2").finding) == (30, 2)
     for value in ("0:1", "3:0", "3:1:2", "x:1"):
-        with pytest.raises(ValueError, match="must be <retro>:<finding>"):
+        with pytest.raises(ValueError, match="must be <run>:<finding>"):
             retro.FindingRef(value)
 
 

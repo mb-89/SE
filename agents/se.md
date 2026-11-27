@@ -133,10 +133,11 @@ its tools.
   - It falls due by what comes back ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)): your next
     `work_tickets.py file` files it first and refuses the issue you meant, naming it. While a
     retro is running, file no issue; after its report, file only its findings with
-    `work_tickets.py file --finding <retro>:<finding>`.
+    `work_tickets.py file --finding <run>:<finding>`.
 
     Record declined or merged outcomes with `retro.py outcome`; the retro closes when all findings
-    have an outcome. An open overhaul still blocks all filing; running work goes on.
+    have an outcome. An overhaul files its findings the same way and closes on its last outcome
+    ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)); running work goes on.
   - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
     name> --number <issue>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
     session.
