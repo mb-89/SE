@@ -1192,6 +1192,10 @@ def test_the_deck_holds_every_step_then_finding_decisions_and_anything_else(chec
     assert "Bless sends it to SE, which bundles it into a work issue." in work and '"losses": "One work issue."' in work
     assert decision.startswith("## Current situation\n\nA rule, not a habit.") and '"losses": "it changes a rule"' in decision
     assert "Gerrit and GitHub both gate a merge on its checks." in decision
+    # The retro's kind closes the deck: the final default comes after the finding decisions.
+    written = retro_deck.text(issue_kinds.RETRO, "example: Retro #30", "", steps, decisions)
+    chapters = retro_deck.chapters(templates.parse(retro_deck.template(), written).fields["decisions"])
+    assert chapters == [*decisions, retro_deck.ANYTHING_ELSE]
 
 
 def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
