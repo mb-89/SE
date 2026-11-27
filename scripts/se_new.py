@@ -217,8 +217,9 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     write_workflows(se_root, "HEAD", path)
     place_kern(kern, commit, path)
     _git(path, "init", "-q", "-b", "main")
-    _git(path, "config", "user.name", identity[0])
-    _git(path, "config", "user.email", identity[1])
+    failed = git_door.set_identity(path, identity[:2])
+    if failed is not None:
+        raise NewError(f"git config {failed.args[-2]} failed in {path}: {failed.stderr.strip()}")
     _git(path, "add", "-A")
     _git(path, "commit", "-q", "-m", f"Start {name}, a bare application on kern {version}",
          env=git_door.identity_environment(identity[:2]))
