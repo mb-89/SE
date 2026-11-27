@@ -174,6 +174,10 @@ its tools.
     rename the earlier sessions of SE's work to the scheme, as [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says.
   - Apply the work model's [immediate cleanup rule](../skills/work-model/SKILL.md#visible-sessions)
     to reviewer and retro sessions; the integrator owns cleanup of the workers it lands.
+  - Archive each session you started once its work has landed or it is drained, as the work
+    model's [Done work leaves nothing behind](../skills/work-model/SKILL.md#done-work-leaves-nothing-behind)
+    says; the start report's `Leftovers:` line names what is left, which you present to the person
+    as one decision: the branches to delete in one `ref-maintenance` run.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
   [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, then answer with a
   comment on the escalated issue or a request to the session that escalated.

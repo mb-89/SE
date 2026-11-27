@@ -191,10 +191,15 @@ order never drives a merge or a start.
      led by `**Piece <n>, …**`, `integrate` leaves it open and comments those pieces, and
      `pr-body` names it with `Refs`. The complete piece closes it.
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
-   retained worktree explicitly. Follow the work model's
+   retained worktree explicitly.
+
+   Follow the work model's
    [immediate cleanup rule](../skills/work-model/SKILL.md#visible-sessions), including archiving
-   the accepted worker's session and removing its local and remote branch. Where the host refuses
-   deleting an already automatically deleted head branch, read back its absence rather than retry.
+   the accepted worker's session right after the landing and removing its local and remote branch
+   ([Done work leaves nothing behind](../skills/work-model/SKILL.md#done-work-leaves-nothing-behind)).
+
+   Where the host refuses deleting an already automatically deleted head branch, read back its
+   absence rather than retry; the `branch-cleanup` workflow deletes it when its pull request closes.
 7. **Start what is unblocked**, after each landing, before the next delivered pull request.
 
    A landing in the cloud starts nothing on its own: `integrate`'s close-out claims no issue
