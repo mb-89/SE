@@ -458,8 +458,19 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
     claude = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se")))
     copilot = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se"), "copilot"))
     context = claude["hookSpecificOutput"]["additionalContext"]
-    assert copilot == {"additionalContext": context.replace(", already shown to the person", "", 1)}
-    assert "SE's start report. As SE, open your first message" in copilot["additionalContext"]
+    assert copilot == {"additionalContext": context}
+
+
+@pytest.mark.parametrize("host", ["claude", "copilot"])
+def test_the_hand_over_asks_the_first_message_to_open_with_the_live_report_and_never_says_it_was_shown(host):
+    """In a Claude Code cloud session hook output reaches only the model: the hand-over never claims
+    the person saw the report, and asks for it live after every start, restart and compaction."""
+    data = json.loads(se_start.hook_output(["SE 1.2.0 started"], [], Path("/opt/se"), host))
+    context = _context(data)
+    assert "already shown" not in context and "shown to the person" not in context
+    assert ("open your first message after every start, restart and compaction with the live report: "
+            "run `uv run python /opt/se/scripts/se_start.py status --greeting`") in context
+    assert "never this copy or a report of an earlier start" in context
 
 
 def _agent_root(tmp_path: Path) -> Path:

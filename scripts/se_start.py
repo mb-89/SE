@@ -2137,10 +2137,24 @@ def shown_notes(notes: list[str]) -> list[str]:
     return [note for note in notes if note.startswith(STOP)]
 
 
+def report_request(se_root: Path) -> str:
+    """What the hand-over asks of the session: the person sees no hook output on some hosts (a
+    Claude Code cloud session), so on every start, restart and compaction, which each run the hook,
+    the session opens its first message with the report it runs live, never this copy or an earlier
+    one (docs/boot.md "The start report")."""
+    return ("SE's start report as this start wrote it; the person may not see it here. As SE, open your "
+            "first message after every start, restart and compaction with the live report: run "
+            f"`uv run python {se_root.as_posix()}/scripts/se_start.py status --greeting` and show its lines "
+            f"above `{FOR_SESSION}` as it prints them, never this copy or a report of an earlier start, "
+            "and add nothing to it. Act on what the start found for the session, and tell the person "
+            "only what needs their decision.")
+
+
 def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude",
                 environment: Mapping[str, str] | None = None, session: list[str] | None = None) -> str:
     """The SessionStart hook output of `host` (scripts/hosts.sh): the start report handed to the
-    session, which opens its first message with it, what the start found for the session alone,
+    session with the request to open its first message with the live report (`report_request`),
+    what the start found for the session alone,
     and SE's root for the session. Claude Code also shows the person the report, a stop above it
     (systemMessage); Copilot's sessionStart reads only `additionalContext`. Where
     `SE_DEFAULT_AGENT` counts, the hand-over ends with the agent the session acts as
@@ -2149,10 +2163,7 @@ def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "
     shown_lines = shown_notes(notes) + lines
     found = ([note] if note else []) + [n for n in notes if n not in shown_lines] + list(session or [])
     text = "\n".join(shown_lines)
-    shown = "" if host == "copilot" else ", already shown to the person"
-    context = (f"{handed(shown_lines, found)}\n\nSE's start report{shown}. As SE, open your first "
-               "message with it as it is and add nothing to it; act on what the start found for the "
-               "session, and tell the person only what needs their decision.\n\n"
+    context = (f"{handed(shown_lines, found)}\n\n{report_request(se_root)}\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
     if sentence:
