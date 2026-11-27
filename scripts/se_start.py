@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping
+import process_door
 import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
@@ -915,8 +916,8 @@ def kern_status(binary: Path, root: Path) -> dict | None:
     """`kern status --json` of the core in the checkout at root, waiting `KERN_WAIT` for one still
     starting: its state and health, or None where the binary does not answer."""
     try:
-        result = subprocess.run([str(binary), "status", "--root", str(root), "--wait", f"{KERN_WAIT}s", "--json"],
-                                capture_output=True, text=True, timeout=KERN_WAIT + 5)
+        result = process_door.run([str(binary), "status", "--root", str(root), "--wait", f"{KERN_WAIT}s", "--json"],
+                                  capture_output=True, text=True, timeout=KERN_WAIT + 5)
         return json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -1199,15 +1200,15 @@ def detached_options(os_name: str) -> dict:
 
 
 def _spawn_detached(argv: list[str]) -> None:
-    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True, **detached_options(os.name))
+    process_door.start(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, close_fds=True, **detached_options(os.name))
 
 
 def _claude(args: list[str]) -> subprocess.CompletedProcess:
     """Claude Code's command line; a machine without it answers as a failed command."""
     try:
-        return subprocess.run(["claude", *args], capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", stdin=subprocess.DEVNULL, timeout=600)
+        return process_door.run(["claude", *args], capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", stdin=subprocess.DEVNULL, timeout=600)
     except (OSError, subprocess.SubprocessError) as error:
         return subprocess.CompletedProcess(["claude", *args], 127, "", str(error))
 

@@ -113,6 +113,12 @@
     twin.
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
+  - It also fails on a reach outside a declared door (`scripts/door_report.py`, whose docstring owns
+    what a reach and a level are; the declarations are `scripts/doors/*.toml`); the commit hook
+    runs the same check (`se.toml` `[commit_checks]`).
+    - A door at `error` refuses each reach; one at `warn` prints one warning line while its
+      reaches move behind it, and is refused once none is left, naming the step to `error`.
+    - No door keeps a baseline.
 - Dangling references:
   - A section reference, `<page>.md "<section>"` or `README "<section>"`, in any tracked text file
     whose page holds no such heading (the check `sections`).

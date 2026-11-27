@@ -34,6 +34,10 @@ each named with its check.
   subcommand of `scripts/se_start.py`: a step moves to Go whole, its Python and its callers with it,
   with no parallel fallback (docs/start.md "Kern"). It has no baseline: it fails from the first
   twin.
+- doors: every reach outside a door the checkout declares (its `scripts/doors/*.toml`) is refused at
+  its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
+  `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
+  commit hook runs the same check (se.toml `[commit_checks]`).
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -47,6 +51,7 @@ import re
 import sys
 from pathlib import Path
 
+import door_report
 import generated
 import git_door
 import process_door
@@ -361,6 +366,26 @@ def ported_findings(root: Path) -> list[str]:
     twins = sorted(set(VERB_NAME.findall(verbs.read_text(encoding="utf-8"))) & set(references.command_tree(script)))
     return [f"{PORTED_FROM} {name}: the se binary runs this step in Go ({PORTED_VERBS}); remove its Python "
             f"and call `se {name}` where it is called" for name in twins]
+def doors_skip(root: Path) -> str:
+    """Why the door check cannot run on `root`, or "" where it can."""
+    folder = root / "scripts" / "doors"
+    return "" if any(folder.glob("*.toml")) else "the checkout declares no door in scripts/doors"
+
+
+def door_findings(root: Path) -> list[str]:
+    """What the door check refuses in `root`, by its own declarations; its warnings are printed."""
+    if doors_skip(root):
+        return []
+    try:
+        declarations = door_report.load_all(root / "scripts" / "doors")
+    except door_report.DeclarationError as error:
+        raise HygieneError(f"doors: {error}") from error
+    texts, unread = door_report.read(root)
+    lines, refused = door_report.check(texts, unread, declarations)
+    for line in lines:
+        if line.startswith("door_report: warning: "):
+            print(f"hygiene: doors: {line.removeprefix('door_report: ')}")
+    return refused
 
 
 def checks(root: Path) -> dict[str, list[str]]:
@@ -378,6 +403,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "sections": section_findings(root, SECTIONS_SKIPPED),
         "readme": readme_findings(root),
         "ported": ported_findings(root),
+        "doors": door_findings(root),
     }
 
 
@@ -395,6 +421,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if skipped := home_skip(root):
         print(f"hygiene: neutral-home: skipped: {skipped}")
+    if skipped := doors_skip(root):
+        print(f"hygiene: doors: skipped: {skipped}")
     for name, findings in found.items():
         for finding in findings:
             print(f"hygiene: {name}: {finding}")
