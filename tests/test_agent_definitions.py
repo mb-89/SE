@@ -1338,3 +1338,16 @@ def test_the_se_agent_opens_every_first_message_after_a_start_with_the_live_repo
     assert "Run `uv run python <se>/scripts/se_start.py status --greeting` first" in se
     assert ("Show never a report you did not just produce, neither the copy the start hook handed you nor one "
             "from an earlier start") in se
+
+
+@pytest.mark.parametrize("agent", sorted(path.stem for path in AGENTS.glob("*.md")))
+def test_every_agent_ends_its_turn_with_what_the_person_is_needed_for(agent):
+    """SE#2006: the work model states the rule once, and every agent definition carries it, the
+    agents that report to another agent among them, so SE passes their needs on."""
+    rules = normalized(WORK_MODEL)
+    assert "**Every turn ends with what the person is needed for.**" in rules
+    assert "`Nothing from you right now.`" in rules
+    text = normalized(AGENTS / f"{agent}.md")
+    assert ("[Every turn ends with what the person is needed for]"
+            "(../skills/work-model/SKILL.md#rules-for-all-roles)") in text
+    assert "`Nothing from you right now.`" in text

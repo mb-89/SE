@@ -123,6 +123,19 @@ The same tree may be held by more than one remote or checkout
   like source, and no text is normalized, whitespace included. Exit code 1 with any such path, 0
   without (`tests/test_parity.py`).
 
+## Bug fixes ride along
+
+A bug fix gets no issue of its own: SE adds it as a comment on the earliest next related issue,
+naming the fix and its test, and that issue's worker fixes it on its branch and names it in the
+field report's Delivered table. SE files a bug issue only when no issue is running.
+
+The person, 27 Nov: "In the future, I don't want you to file any more issues for bug fixes. I just want to add bug
+fixes as a comment to one of the next issues. And really only if no issue is running, then you file
+an issue for a bug fix."
+
+The same holds for the fix a partial landing leaves: it rides as a comment on a named next issue
+([integrator](../src/agents/integrator.md)).
+
 ## Retro due
 
 ```toml
@@ -133,27 +146,38 @@ days = 7            # or this many days after the last retro started, with anyth
 ```
 
 A retro falls due by what comes back to the project, never by what is opened: filing 20 issues in
-one session makes none due. Each work issue that landed since the newest retro started adds 1, each
-work issue labelled `escalated` (an escalation, a refused landing) updated since then adds
-`failure_weight`. At `due_after`, or `days` days after that start with anything counted, one is due.
+one session makes none due.
+
+Each work issue that landed since the newest run (a retro or an
+overhaul) started adds 1, a partial landing among them; each other work issue labelled `escalated`
+(an escalation, a refused landing) updated since then adds `failure_weight`. At `due_after`, or
+`days` days after that start with anything counted, one is due.
 
 - **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
   anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
   `discovery`, not `ready`), and the filing asked for is refused, naming it.
+- **Blocking.** Every run kind that holds filing, a retro and an overhaul alike, files its own
+  findings, so no run can deadlock the filing it holds: `scripts/retro.py` `RUN_KINDS` is their one
+  table, which the filing check and `retro.py outcome` read.
+  - While a run is running, filing is refused with its number.
+  - Once its report is in, `file --finding <run>:<finding>` may file only that finding's work issue,
+    naming `<kind> #<run> finding <finding>`; every other filing is refused. A finding may instead
+    be recorded as declined or merged into another finding with `retro.py outcome`.
+  - Running work goes on, and issues keep coming back; they count towards the next run.
 - **Blessing opens the gate.** The person checks the prefilled report and blesses it;
   `retro.py bless <issue>` records that approval, immediately releases this retro's gate, posts
   the report and closes the issue, without a landing or another session. Network calls share one
   minute; retrying the same command resumes partial writes without duplicate comments.
 
-  Finding outcomes remain independently tracked with `file --finding <retro>:<finding>` and
-  `retro.py outcome`; they do not hold the gate. The older `retro.py file` path still leaves a
-  report-state retro open until its outcomes are recorded. An open overhaul still
-  refuses every filing. Running work goes on, and issues keep coming back; they count towards the
-  next run.
+  An overhaul's report is its blessing: `overhaul.py file` posts it, the gate open, and the
+  overhaul's last finding outcome closes it. A blessed run's findings stay fileable with `file
+  --finding <run>:<finding>` and `retro.py outcome`, open or closed; they do not hold the gate. The older `retro.py file` path
+  still leaves a report-state retro open until its outcomes are recorded.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
   due included, and a first retro, where none has closed, the whole history from the project's
   first issue; its counters reset when it starts (its issue's creation), so a late retro never
-  makes the next one due at once.
+  makes the next one due at once. An overhaul's start resets them too, as it reads the retros
+  before it.
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
   session; SE presents the completed report deck to the person.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;

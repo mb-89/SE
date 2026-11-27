@@ -5311,14 +5311,16 @@ def test_pr_body_names_a_partial_without_planned_pieces_with_refs():
     assert body.startswith(f"Refs {URL}\n")
 
 
-def test_integrate_read_back_keeps_a_partial_without_pieces_open_and_hands_the_rest_to_se(
+def test_integrate_read_back_closes_a_partial_whose_every_piece_left_has_its_home(
         main_checkout, monkeypatch, github, capsys):
-    """A partial naming no planned piece lands: the close-out keeps the issue open, takes `ready`
-    off, labels it `escalated` and names what the delivery left, for SE; a hand-off file written
-    before `left` existed still closes the issue."""
+    """A partial naming no planned piece lands only with a home for each piece it left (SE#2006):
+    the close-out takes `ready` off and closes the issue, labelling nothing `escalated`, and the
+    comment names the pieces as a failure the next retro counts; no issue closes half done and
+    none stays open for a remainder."""
     head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
     (main_checkout.parent / "saved" / "pr.md").write_text(
-        partial_without_pieces(reported_at(head), "- **R8, the off switch:** kern cannot yet."),
+        partial_without_pieces(reported_at(head),
+                               "- **R8, the off switch:** kern cannot yet; filed as #12."),
         encoding="utf-8")
     assert run(main_checkout, *arguments) == 0
     handoff = main_checkout / ".se" / "handoff" / "feature-worker.json"
@@ -5330,21 +5332,13 @@ def test_integrate_read_back_keeps_a_partial_without_pieces_open_and_hands_the_r
     assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
 
     out = capsys.readouterr().out
-    assert '"state_reason": "completed"' not in out
-    assert "<the issue's labels without in-progress>" in out
-    assert out.index("<the issue's labels without ready>") < out.index(
-        "<the issue's labels with escalated>")
-    assert "Stays open for what this partial delivery left, which SE re-scopes: R8, the off switch" in out
-    assert ("escalated #5: stays open for what its partial delivery left; re-scope the issue or "
-            "take it to the owner: R8, the off switch") in out
-    assert github.calls == []
-
-    del state["left"]  # a hand-off written before the change
-    handoff.write_text(json.dumps(state), encoding="utf-8")
-    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
-    out = capsys.readouterr().out
     assert '"state": "closed", "state_reason": "completed"' in out
-    assert "escalated" not in out
+    assert "<the issue's labels without in-progress>" in out
+    assert out.index("<the issue's labels without ready>") < out.index('"state_reason": "completed"')
+    assert "<the issue's labels with escalated>" not in out
+    assert ("A partial delivery, a failure the next retro counts; each piece it left has its home "
+            "under the field report's Not delivered: R8, the off switch") in out
+    assert github.calls == []
 
 
 def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_pushes_main(
@@ -7580,7 +7574,11 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     assert "Close #5 once its post-merge acceptance is seen" in output
 
 
-def test_integrate_keeps_a_partial_without_pieces_open_through_gh(main_checkout, monkeypatch, capsys):
+def test_integrate_refuses_a_partial_whose_piece_left_has_no_home_and_closes_one_with_homes(
+        main_checkout, monkeypatch, capsys):
+    """SE#2006: a partial piece left with no home (a new work issue, a comment on a next issue, or
+    `se-person` with its issue) is refused before the merge and escalated, nothing merged; once
+    each piece names its home, the landing closes the issue."""
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
     (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
@@ -7609,18 +7607,45 @@ def test_integrate_keeps_a_partial_without_pieces_open_through_gh(main_checkout,
     monkeypatch.setattr(work_tickets, "run_gh", gh_call)
     monkeypatch.setattr(work_tickets, "run_gh_with_body",
                         lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+    before = origin_main(main_checkout)
 
-    work_tickets.integrate(main_checkout, 7, None, None)
+    with pytest.raises(work_tickets.QueueError, match=r"gives no home to: Requirement 2: blocked "
+                                                      r"by the host\.\. A landing closes"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert origin_main(main_checkout) == before
     assert [call for call in calls if call[:2] == ["issue", "close"]] == []
+    assert ["5", "--add-label", "escalated"] in [call[2:5] for call in calls
+                                                 if call[:2] == ["issue", "edit"]]
+    assert len(bodies) == 1 and bodies[0].startswith("Integration stopped: pull request #7 is a "
+                                                     "partial delivery")
+    calls.clear()
+    bodies.clear()
+
+    line = ("Requirement 2: blocked by the host, flagged se-person on "
+            "https://git.example/owner/repo/issues/9")
+    report["body"] = partial_without_pieces(reported_at(head), "- " + line)
+    work_tickets.integrate(main_checkout, 7, None, None)
+    assert [call[:3] for call in calls if call[:2] == ["issue", "close"]] == [["issue", "close", "5"]]
     edits = [call[2:5] for call in calls if call[:2] == ["issue", "edit"]]
-    assert ["5", "--remove-label", "ready"] in edits and ["5", "--add-label", "escalated"] in edits
-    line = "Requirement 2: blocked by the host."
-    assert len(bodies) == 1 and (
-        "Stays open for what this partial delivery left, which SE re-scopes: " + line) in bodies[0]
-    output = capsys.readouterr().out
-    assert "Issue #5: OPEN on GitHub after the merge" in output
-    assert ("escalated #5: stays open for what its partial delivery left; re-scope the issue or "
-            "take it to the owner: " + line) in output
+    assert ["5", "--remove-label", "ready"] in edits and ["5", "--add-label", "escalated"] not in edits
+    assert len(bodies) == 1 and line in bodies[0]
+    assert "Issue #5: CLOSED on GitHub after the merge" in capsys.readouterr().out
+
+
+def test_each_piece_a_partial_leaves_names_one_of_three_homes():
+    """A fix rides as a comment on a named next issue, a feature as a new work issue, and what
+    needs the person as `se-person` on its issue; the work issue itself is no home."""
+    def unhomed(left: str) -> list[str]:
+        return work_tickets.unhomed_pieces(partial_without_pieces(COMPLETE_REPORT, left), 5)
+
+    assert unhomed("- **R1:** the fix rides on https://git.example/o/r/issues/8#issuecomment-41.\n"
+                   "- **R2:** the feature is #12.\n- **R3:** se-person on #13.") == []
+    assert unhomed("- **R1:** left.\n- **R2:** stays on #5.\n- **R3:** see\n  #14 below.") == [
+        "R1", "R2"]
+    assert unhomed("None") == ["nothing named under Not delivered"]
+    assert work_tickets.unhomed_pieces(COMPLETE_REPORT, 5) == []
+    assert work_tickets.unhomed_pieces(planned_split(COMPLETE_REPORT), 5) == []
+    assert work_tickets.piece_home("se-person, https://git.example/o/r/issues/13", 5) == "person"
 
 
 def test_integrate_leaves_an_issue_with_open_points_of_the_landed_head_open(
@@ -9360,6 +9385,7 @@ def test_the_branch_tip_and_branch_are_read_from_the_worktree_whatever_git_dir_n
         return subprocess.CompletedProcess(arguments, 0, "abc1234\n", "")
 
     monkeypatch.setattr(work_tickets, "run_git", git)
+    monkeypatch.setattr(work_tickets, "_TEMPLATE_AT", {})
     assert work_tickets.branch_tip(tmp_path / "worker") == "abc1234"
     work_tickets.current_branch(tmp_path / "worker")
     assert len(seen) == 2
@@ -9650,3 +9676,53 @@ def test_the_close_out_through_gh_removes_the_beat_line(worktree, monkeypatch):
                                  "comment_pull": lambda arguments, _: None,
                                  "close_pull": lambda arguments, _: None})
     assert gh.written == [beat_body(None)]
+
+
+NEW_QUESTIONS = ("longest", "wished_tool", "tooling_starfish")
+
+
+def without_new_questions(text: str) -> str:
+    """`text`, the standing questions' note or a report's Retro, as it stood before SE#2046 added
+    the three tooling questions: their fields, examples and sections left out."""
+    for name in NEW_QUESTIONS:
+        text = re.sub(rf"  - name: {name}\n(?:    .*\n)*", "", text)
+        text = re.sub(rf"    {name}: .*\n", "", text)
+        text = re.sub(rf"##+ [^\n]*\n\n<!-- {name}:.*?(?=\n##|\n<!-- se:field-report:end|\Z)", "",
+                      text, flags=re.DOTALL)
+    return text
+
+
+def test_a_report_is_judged_by_the_template_at_its_tested_against_commit(tmp_path, monkeypatch):
+    """SE#2006: a landing that changes the field-report template fails no report already queued.
+    A report answering the standing questions as they stood at its Tested against commit passes
+    there; the same report naming a commit se does not hold is judged by today's template."""
+    old_note = without_new_questions(
+        (PROJECT / "templates" / "standing-questions.md").read_text(encoding="utf-8"))
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    (folder / "standing-questions.md").write_text(old_note, encoding="utf-8")
+    templates = work_tickets.sibling("templates")
+    old = templates.load(folder=folder)["standing-questions"]
+    assert [field.name for field in old.fields][-1] == "bad_output_cause"
+    template = (PROJECT / work_tickets.FIELD_REPORT_TEMPLATE).read_text(encoding="utf-8")
+
+    def git(root, *arguments, env=None):
+        known = arguments[-1].startswith("abc1234:")
+        out = template if arguments[0] == "show" and known else ""
+        return subprocess.CompletedProcess(arguments, 0 if known else 128, out, "")
+
+    monkeypatch.setattr(work_tickets, "run_git", git)
+    monkeypatch.setattr(work_tickets, "_TEMPLATE_AT", {})
+    monkeypatch.setattr(templates, "own_at", lambda name, commit: old if commit == "abc1234" else None)
+    report = COMPLETE_REPORT
+    for item in work_tickets.standing_questions().fields:
+        if item.name in NEW_QUESTIONS:
+            report = re.sub(rf"### {re.escape(item.heading)}\n\n.*?\n(?=\n###|\n<!--|\Z)", "",
+                            report, flags=re.DOTALL)
+    assert "### What took the longest" not in report and "**Tested against `main`:** `abc1234`" in report
+    assert work_tickets.frozen_at(report) == "abc1234"
+    assert work_tickets.field_report_problems(report, None) == []
+    later = report.replace("`abc1234`", "`def5678`", 1)
+    assert work_tickets.frozen_at(later) is None
+    assert any("What took the longest" in problem
+               for problem in work_tickets.field_report_problems(later, None))
