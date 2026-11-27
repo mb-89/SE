@@ -129,6 +129,7 @@
   `UV_SYSTEM_CERTS=1` in that shell.
   - Each test runs in an empty home of its own (`own_home`, no global or system git config, obs's
     components in `.se/obs-local`); the machine's tool caches stay (`machine_caches`).
+    On Windows the home starts with empty local and roaming app-data folders for child processes.
 
 ## Neutral home
 
