@@ -65,10 +65,10 @@ def test_an_unmarked_issue_warns_from_day_one_and_errors_at_the_error_level(caps
 
 
 def test_each_run_kind_names_its_deck_cover_closing_question_and_filing_rule():
-    rows = {name: (kind.document_type, kind.anything_else, kind.outcomes)
+    rows = {name: (kind.document_type, kind.anything_else, kind.report_blesses)
             for name, kind in issue_kinds.KINDS.items()}
-    assert rows == {"work": (None, False, False), "retro": ("Retro report", True, True),
-                    "overhaul": ("Overhaul report", False, False)}
+    assert rows == {"work": (None, False, False), "retro": ("Retro report", True, False),
+                    "overhaul": ("Overhaul report", False, True)}
 
 
 def test_intake_refuses_a_retro_issue_before_writing_a_ticket(tmp_path):

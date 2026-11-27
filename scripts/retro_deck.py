@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deck  # noqa: E402
 import issue_kinds  # noqa: E402
 import review  # noqa: E402
+import template_door  # noqa: E402
 import templates  # noqa: E402
 
 TEMPLATE_NAME = "retro-deck"
@@ -178,8 +179,8 @@ def _part(heading: str, body: str) -> str:
 def text(kind: issue_kinds.Kind, title: str, subtitle: str, steps: list[tuple[str, str]],
          decisions: list[tuple[str, str]]) -> str:
     """The deck of a run of `kind` as the retro-deck template writes it: the title page's lines, every
-    step, then the decisions and the closing one `kind` asks for ("None." where there are none);
-    DeckError names what breaks the template."""
+    step, then the decisions and the closing one `kind` asks for ("None." where there are none),
+    filled by the Go engine (`template_door`); DeckError names what breaks the template."""
     if kind.document_type is None:
         raise DeckError(f"{kind.noun} has no deck: only a run (a retro, an overhaul) writes one")
     decisions = [*decisions, *([ANYTHING_ELSE] if kind.anything_else else [])]
@@ -193,12 +194,10 @@ def text(kind: issue_kinds.Kind, title: str, subtitle: str, steps: list[tuple[st
     fields = {"title": " ".join(title.split()), "subtitle": " ".join(subtitle.split()),
               "steps": "\n\n".join(_part(*step) for step in steps),
               "decisions": "\n\n".join(_part(*item) for item in decisions) or NONE}
-    written = templates.render(template(), fields)
-    refused = [finding.fix for finding in templates.check(template(), templates.parse(template(), written))
-               if finding.severity == templates.REFUSE]
-    if refused:
-        raise DeckError("the deck breaks the retro-deck template (templates/retro-deck.md): " + "; ".join(refused))
-    return written
+    try:
+        return template_door.fill(TEMPLATE_NAME, fields)
+    except template_door.TemplateDoorError as error:
+        raise DeckError(f"the deck breaks the retro-deck template (templates/retro-deck.md): {error}") from None
 
 
 def _yaml(value: str) -> str:

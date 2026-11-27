@@ -35,6 +35,10 @@ import test_work_ticket_issues as issue_tests
 import work_tickets
 from manual import page
 
+# The field-report check reads its template at the report's Tested against commit through git's
+# door (SE#2006); the fake answers it, as no test here reaches real git.
+pytestmark = pytest.mark.usefixtures("fake_git_door")
+
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "work.md"
 
@@ -2026,7 +2030,7 @@ def retro_steps(catalog, monkeypatch) -> list[Case]:
     for text, template, marker, findings in (
             (retro_report(), "retro", retro.REPORT_MARKER, 2),
             (overhaul_report(), "overhaul", overhaul.REPORT_MARKER, 0)):
-        plan = retro.file_steps(REPO, 30, [text], findings, kind=retro.sibling("issue_kinds").KINDS[template])
+        plan = retro.file_steps(REPO, 30, [text], findings, what=template)
         for step in plan.steps:
             body = step.arguments.get("body")
             selected = template if isinstance(body, str) and body.startswith(marker) else FREE

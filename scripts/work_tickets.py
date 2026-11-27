@@ -90,6 +90,8 @@ PROTECTED_QUESTION = "\uE002"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
+# The integration-branch commit a field report was tested against, where its inputs are frozen.
+TESTED_AGAINST_PATTERN = re.compile(r"\*\*Tested against `[^`\n]+`:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 #: The field report's Branch, the pull request's head branch: `**Branch:** `<branch>``.
 REPORT_BRANCH_PATTERN = re.compile(r"\*\*Branch:\*\*[ \t]*`([^`\n]+)`")
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
@@ -1063,7 +1065,7 @@ def sibling(name: str):
 
 
 def finding_ref(value: str):
-    """Parse a retro finding lazily, after the command modules have finished importing."""
+    """Parse a run's finding lazily, after the command modules have finished importing."""
     return sibling("retro").FindingRef(value)
 
 
@@ -2428,31 +2430,61 @@ QUESTIONS_PLACEHOLDER = "<!-- se:standing-questions -->"
 QUESTIONS_SECTION = "Retro"
 
 
-def standing_questions():
-    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`)."""
-    return sibling("templates").own(STANDING_QUESTIONS)
+def standing_questions(at: str | None = None):
+    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`); with
+    `at`, as they stood at that commit of the se checkout (`frozen_at`), else as they stand now."""
+    templates = sibling("templates")
+    found = templates.own_at(STANDING_QUESTIONS, at) if at else None
+    return found if found is not None else templates.own(STANDING_QUESTIONS)
 
 
-def field_report_template() -> str:
+def frozen_at(body: str) -> str | None:
+    """The commit a field report `body` names as **Tested against**, where the se checkout this
+    script runs from holds its field-report template there (`template_at`): a piece of work's
+    inputs are frozen at its start, so its report is judged by the template it was started from
+    (SE#2006) and no queued delivery fails for a template that changed after it. None otherwise (no
+    such line, a commit of another repository, or one se does not hold), for the template as it
+    stands."""
+    found = TESTED_AGAINST_PATTERN.search(body)
+    return found[1] if found is not None and template_at(found[1]) is not None else None
+
+
+_TEMPLATE_AT: dict[str, str | None] = {}
+
+
+def template_at(commit: str) -> str | None:
+    """The pull request template at `commit` of the se checkout, None where it holds none there."""
+    if commit not in _TEMPLATE_AT:
+        shown = run_git(Path(__file__).resolve().parents[1], "show",
+                        f"{commit}:{FIELD_REPORT_TEMPLATE}")
+        text = shown.stdout if shown.returncode == 0 else ""
+        _TEMPLATE_AT[commit] = text if REPORT_BEGIN in text and REPORT_END in text else None
+    return _TEMPLATE_AT[commit]
+
+
+def field_report_template(at: str | None = None) -> str:
     """The pull request template, the field report's one template, markers included, its
-    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section."""
-    path = Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
-    questions = sibling("templates").sections(standing_questions(), 3).rstrip("\n")
+    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section; with `at`, both
+    as they stood at that commit of the se checkout (`frozen_at`)."""
+    text = template_at(at) if at else None
+    if text is None:
+        try:
+            text = (Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE).read_text(
+                encoding="utf-8")
+        except OSError as error:
+            raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
+    questions = sibling("templates").sections(standing_questions(at), 3).rstrip("\n")
     return text.replace(QUESTIONS_PLACEHOLDER, questions, 1)
 
 
-def question_problems(lines: list[str] | None) -> list[str]:
+def question_problems(lines: list[str] | None, at: str | None = None) -> list[str]:
     """What keeps the field report's QUESTIONS_SECTION, its `lines`, from answering every standing
     question, each refusal of the block's own check; none where the section is missing, which the
     structure check names."""
     if lines is None:
         return []
     templates = sibling("templates")
-    block = standing_questions()
+    block = standing_questions(at)
     return [f'section "## {QUESTIONS_SECTION}": {finding.fix.replace("`## ", "`### ")} (one '
             f'"### <question>" per standing question, {block.path or STANDING_QUESTIONS}; '
             '"None" answers one that does not apply)'
@@ -3812,8 +3844,8 @@ def partial_left(report: str) -> list[str]:
     """What a partial field report naming no planned piece left undone: one item per top-level
     bullet of its "Not delivered" (its bold lead without a trailing `:` or `.`, else its first
     line), else that section's first paragraph on one line, else `NOTHING_LEFT_NAMED`; none for
-    a complete report or a planned split (`planned_pieces`). Its issue stays open at the landing,
-    as a partial is not done and only SE drops or moves what it left."""
+    a complete report or a planned split (`planned_pieces`). Each must name its home
+    (`unhomed_pieces`) before the landing, which then closes the issue."""
     result = FIELD_REPORT_RESULT_PATTERN.search(report)
     if result is None or result.group(1) != "partial" or planned_pieces(report):
         return []
@@ -3832,6 +3864,50 @@ def partial_left(report: str) -> list[str]:
     if not paragraph or paragraph.rstrip(".").casefold() == "none":
         return [NOTHING_LEFT_NAMED]
     return [paragraph]
+
+
+# The homes a partial landing's remainder must name, one per piece left (SE#2006): a comment on a
+# named next issue for a fix, `se-person` with the issue it flags for what needs the person, or a
+# new work issue for a feature. No issue closes half done, and none stays open for a remainder.
+COMMENT_HOME = re.compile(r"/issues/\d+#issuecomment-\d+")
+ISSUE_HOME = re.compile(r"(?:^|[\s(])#(\d+)\b|/issues/(\d+)\b")
+PARTIAL_HOMES = ("a new work issue for a feature (`#<n>`)",
+                 "a comment on a named next issue for a fix (its `#issuecomment-` link)",
+                 "`se-person` with the issue it flags, for what needs the person")
+
+
+def left_pieces(report: str) -> list[tuple[str, str]]:
+    """The pieces a partial field report naming no planned piece left (`partial_left`), each with
+    its whole text: its top-level bullet of "Not delivered" and the lines under it, else the
+    section's first paragraph."""
+    names = partial_left(report)
+    if not names or names == [NOTHING_LEFT_NAMED]:
+        return [(name, "") for name in names]
+    left = section(markdown_sections(report), "not delivered")
+    texts: list[str] = []
+    for line in left.splitlines():
+        if TOP_BULLET_PATTERN.fullmatch(line.rstrip()):
+            texts.append(line)
+        elif texts:
+            texts[-1] += "\n" + line
+    return list(zip(names, texts or [left]))
+
+
+def piece_home(text: str, work_number: int | None) -> str | None:
+    """The home a piece left names (PARTIAL_HOMES): `comment`, `person` or `issue`; None for
+    none. The work issue itself is no home."""
+    if COMMENT_HOME.search(text):
+        return "comment"
+    issues = [int(match[1] or match[2]) for match in ISSUE_HOME.finditer(text)]
+    issues = [number for number in issues if number != work_number]
+    if not issues:
+        return None
+    return "person" if PERSON_LABEL in text else "issue"
+
+
+def unhomed_pieces(report: str, work_number: int | None) -> list[str]:
+    """The pieces a partial delivery left with no home (`piece_home`), which `integrate` refuses."""
+    return [name for name, text in left_pieces(report) if piece_home(text, work_number) is None]
 
 
 def pull_request_body(issue: dict[str, object] | None, report: str) -> str:
@@ -5721,7 +5797,9 @@ def field_report_problems(body: str, issue_body: str | None,
     the work issue's body, the evidence gate. A section whose template text
     allows "None" may say only that.
     """
-    template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
+    at = frozen_at(body)
+    template = report_in(field_report_template(at) if at else field_report_template(),
+                         FIELD_REPORT_TEMPLATE_NAME)
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
     try:
         issue_number = field_report_issue(body)
@@ -5758,7 +5836,7 @@ def field_report_problems(body: str, issue_body: str | None,
         template_header = next((line.strip() for line in expected if line.strip().startswith("|")), None)
         if template_header is not None:
             problems.extend(table_problems(where, template_header, text))
-    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold())))
+    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold()), at))
     header = "\n".join(report[""])
     problems.extend(
         f'header (above the first section): unfilled placeholder {placeholder}; '
@@ -6877,19 +6955,22 @@ def file_work_issue(
     repo = resolve_repo(root, repo)
     refuse_unchecked_filing(repo, "file", body)
     retro = sibling("retro")
-    if finding is not None:
-        if hold:
-            raise QueueError("file --finding cannot use --hold: a held issue is not a finding outcome")
-        match = retro.FINDING_REFERENCE.search(body)
-        if match is None or (int(match[1]), int(match[2])) != (finding.retro, finding.finding):
-            raise QueueError(f"file --finding {finding}: the work issue body must name exactly "
-                             f"`retro #{finding.retro} finding {finding.finding}`")
+    if finding is not None and hold:
+        raise QueueError("file --finding cannot use --hold: a held issue is not a finding outcome")
     refuse_dangling(repo, "file", body)
     prechecked = template_check(root, repo, "file", title.strip(), body, "work", hold=hold,
                                 given=given)
     check_door = filing_door(root, repo) if finding is not None else None
+    kind = None
     if gate or finding is not None:
-        filing_check(root, repo, "file", door=check_door, finding=finding)
+        kind = filing_check(root, repo, "file", door=check_door, finding=finding)
+    if finding is not None:
+        kinds = [retro.RUN_KINDS[kind]] if kind else list(retro.RUN_KINDS.values())
+        if not any((int(match[1]), int(match[2])) == (finding.run, finding.finding)
+                   for run in kinds for match in run.reference.finditer(body)):
+            raise QueueError(f"file --finding {finding}: the work issue body must name exactly "
+                             f"`{kind or '<retro|overhaul>'} #{finding.run} finding "
+                             f"{finding.finding}`")
     first = [label for label in labels if not blockers or label != "ready"]
     if hand_off() and blockers:
         raise QueueError(
@@ -6917,8 +6998,8 @@ def file_work_issue(
 
 
 class ReviewDueError(QueueError):
-    """A retro or an overhaul is due or open: only report-state retro findings may be filed
-    until every finding has an outcome (docs/fleet.md "Retro due")."""
+    """A retro or an overhaul is due or open: only the findings of a run in report state may be
+    filed until every finding has an outcome (docs/fleet.md "Retro due")."""
 
 
 REVIEW_HELP = 'docs/fleet.md "Retro due"'
@@ -6935,17 +7016,19 @@ def filing_door(root: Path, repo: str):
 
 
 def filing_check(root: Path, repo: str, command: str, door=None,
-                 now: datetime | None = None, finding=None) -> None:
+                 now: datetime | None = None, finding=None) -> str | None:
     """The filing check (docs/fleet.md "Retro due"), which every issue SE files passes first: while a
-    retro or an overhaul is open, refuse, naming it; where one is due, file it first (the retro
-    first where both are, as an overhaul reads the closed retros) and refuse, naming it. Running
-    work goes on: only filing is held. Where `command` only prints its plan (no gh, no relay),
+    run (retro.py RUN_KINDS: a retro or an overhaul) is open, refuse, naming it, unless it is the
+    one open run, its report is in and `finding` is one of its findings without an outcome; where
+    one is due, file it first (the retro first where both are, as an overhaul reads the closed
+    retros) and refuse, naming it. Running work goes on: only filing is held. Gives the run kind
+    of `finding` where it was checked. Where `command` only prints its plan (no gh, no relay),
     print the check's command first, for the session to run before the plan."""
     door = door if door is not None else filing_door(root, repo)
     if door is None:
         if finding is not None:
-            print(f"Before filing finding {finding}, read retro #{finding.retro}'s issue and its "
-                  f"comments through GitHub tools. It must have a "
+            print(f"Before filing finding {finding}, read run #{finding.run}'s issue (a retro or "
+                  f"an overhaul) and its comments through GitHub tools. It must have a "
                   "`<!-- se:retro-state report findings=<count> -->` marker "
                   "with this finding in range and no outcome marker for it; after the work issue "
                   f"is created, run `retro.py outcome {finding} --issue <number>`.")
@@ -6953,81 +7036,76 @@ def filing_check(root: Path, repo: str, command: str, door=None,
             print(f"Before filing: run `uv run python {SE_ROOT.as_posix()}/scripts/retro.py due "
                   f"--worktree {root.as_posix()}` and its plan; while it names a retro or an "
                   f"overhaul due or open, file nothing else ({REVIEW_HELP})")
-        return
+        return None
     retro = sibling("retro")
     found = retro.countdowns(door, repo, integration_branch(root), root,
                              now or datetime.now(timezone.utc))
     if found is None:
         raise QueueError(f"work_tickets.py {command}: the filing check could not read GitHub; "
                          f"run `retro.py due --worktree {root.as_posix()}` ({REVIEW_HELP})")
-    held = (f"{command} files no other issue until every finding has an outcome and the retro is "
+    held = (f"{command} files no other issue until every finding has an outcome and the run is "
             f"done; running work goes on ({REVIEW_HELP})")
+    # A blessed run (a retro its blessing closed, an overhaul its report closed) holds nothing:
+    # its findings stay fileable, open or closed. Every other open run holds the filing.
+    opened = [(kind, number, retro.filing_state(door.comments(number)))
+              for kind in retro.RUN_KINDS for number in found[kind].open]
+    if getattr(door, "missing", []):
+        raise QueueError(f"work_tickets.py {command}: the open runs' comments are missing; read "
+                         "them before filing")
+    holding = [(kind, number, state) for kind, number, state in opened
+               if state.marker_phase != "blessed"]
+    names = ", ".join(f"{kind} #{number}" for kind, number, _ in holding) or "none"
     if finding is not None:
         if command != "file":
             raise ReviewDueError(f"work_tickets.py {command}: --finding is supported only by file")
-        if found["overhaul"].open:
-            names = ", ".join(f"#{number}" for number in found["overhaul"].open)
-            raise ReviewDueError(f"work_tickets.py file --finding: the overhaul {names} is open; "
-                                 f"file nothing until it is closed ({REVIEW_HELP})")
-        state = retro.filing_state(door.comments(finding.retro))
-        blessed = state.marker_phase == "blessed"
-        if blessed:
-            target = door.issue(finding.retro)
-            if not target or not retro.is_retro(retro.issue_of(target)):
-                raise ReviewDueError(f"work_tickets.py file --finding {finding}: "
-                                     f"#{finding.retro} is not a retro issue")
-        elif len(found["retro"].open) != 1 or found["retro"].open[0] != finding.retro:
-            names = ", ".join(f"#{number}" for number in found["retro"].open) or "none"
-            raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
-                                 f"#{finding.retro} is not the only open retro ({names})")
+        state = retro.filing_state(door.comments(finding.run))
         if getattr(door, "missing", []):
-            raise QueueError(f"work_tickets.py file --finding {finding}: the retro's comments "
-                             "are missing; read them before filing")
+            raise QueueError(f"work_tickets.py file --finding {finding}: run #{finding.run}'s "
+                             "comments are missing; read them before filing")
+        target = door.issue(finding.run)
+        run = retro.run_kind_of(retro.issue_of(target)) if target else None
+        if run is None:
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: #{finding.run} is no "
+                                 f"run of {' or '.join(retro.RUN_KINDS)}")
+        kind = run.name
+        if state.marker_phase != "blessed" and [number for _, number, _ in holding] != [finding.run]:
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: {kind} "
+                                 f"#{finding.run} is not the only open run ({names})")
         if state.phase not in ("report", "blessed") or state.findings is None:
-            raise ReviewDueError(f"work_tickets.py file --finding {finding}: retro "
-                                 f"#{finding.retro} is {state.phase}, not in report state")
+            raise ReviewDueError(f"work_tickets.py file --finding {finding}: {kind} "
+                                 f"#{finding.run} is {state.phase}, not in report state")
         if finding.finding > state.findings:
             raise ReviewDueError(f"work_tickets.py file --finding {finding}: finding "
                                  f"{finding.finding} is not in the report (1..{state.findings})")
         if finding.finding in state.outcomes:
-            kind, value = state.outcomes[finding.finding]
+            outcome, value = state.outcomes[finding.finding]
             raise ReviewDueError(f"work_tickets.py file --finding {finding}: already recorded as "
-                                 f"{kind} {value!r}")
-        return
-    for kind in ("retro", "overhaul"):
-        if found[kind].open:
-            names = ", ".join(f"#{number}" for number in found[kind].open)
+                                 f"{outcome} {value!r}")
+        return kind
+    if holding:
+        if len(holding) == 1:
+            kind, number, state = holding[0]
+            if state.phase == "report":
+                raise ReviewDueError(f"work_tickets.py {command}: {names} is in report "
+                                     f"state; file only its findings with `work_tickets.py file "
+                                     f"--finding {number}:<k>`, or record declined/merged "
+                                     f"outcomes with `retro.py outcome`; {held}")
             if kind == "retro":
-                states = [retro.filing_state(door.comments(number)) for number in found[kind].open]
-                if getattr(door, "missing", []):
-                    raise QueueError(f"work_tickets.py {command}: comments for retro {names} are "
-                                     "missing; read them before filing")
-                waiting = [(number, state) for number, state in zip(found[kind].open, states)
-                           if state.marker_phase != "blessed"]
-                if not waiting:
-                    continue
-                names = ", ".join(f"#{number}" for number, _ in waiting)
-                states = [state for _, state in waiting]
-                if len(states) == 1 and states[0].phase == "report":
-                    raise ReviewDueError(f"work_tickets.py {command}: retro {names} is in report "
-                                         f"state; file only its findings with `work_tickets.py file "
-                                         f"--finding {names.removeprefix('#')}:<k>`, or record "
-                                         f"declined/merged outcomes with `retro.py outcome`; {held}")
-                number = waiting[0][0]
-                if len(states) == 1:
-                    raise ReviewDueError(
-                        f"work_tickets.py {command}: the retro {names} is open and its report is "
-                        f"not in; post it with `uv run python {SE_ROOT.as_posix()}/scripts/retro.py "
-                        f"file {number} --worktree {root.as_posix()}` (it reads the draft at "
-                        f"{retro.draft_path(repo, number)}, which `retro.py collect {number}` "
-                        f"writes), then file its findings with `--finding {number}:<k>`; {held}")
-            raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
+                raise ReviewDueError(
+                    f"work_tickets.py {command}: the retro #{number} is open and its report is "
+                    f"not in; post it with `uv run python {SE_ROOT.as_posix()}/scripts/retro.py "
+                    f"file {number} --worktree {root.as_posix()}` (it reads the draft at "
+                    f"{retro.draft_path(repo, number)}, which `retro.py collect {number}` "
+                    f"writes), then file its findings with `--finding {number}:<k>`; {held}")
+        raise ReviewDueError(f"work_tickets.py {command}: the {names} "
+                             f"{'is' if len(holding) == 1 else 'are'} open; {held}")
     for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
         if found[kind].due:
             line = file_new(root, repo)
             article = "an" if kind == "overhaul" else "a"
             raise ReviewDueError(f"work_tickets.py {command}: {article} {kind} is due "
                                  f"({found[kind].reason}), filed first: {line.strip()}; {held}")
+    return None
 
 
 def today_stamp() -> str:
@@ -9610,9 +9688,10 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
                   comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
     take it out of progress with its beat line, and close it unless something keeps it open:
-    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left; or
-    `left`, what a partial delivery naming no planned piece left (`partial_left`), which also takes
-    any `ready` off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
+    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left.
+    `left`, what a partial delivery naming no planned piece left (`partial_left`), each piece with
+    its home (`unhomed_pieces` refused before the merge), keeps nothing open: the comment names
+    them, and `ready` comes off before the close."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
     if work_number is None:
@@ -9622,8 +9701,7 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
             Step("close_pull", "update_pull_request",
                  {**pulls, "pullNumber": pull_number, "state": "closed"}),
         ), "the authorized fix has no work issue to close")
-    escalate = (label_step(tracker, work_number, "ready", add=False),
-                label_step(tracker, work_number, "escalated", add=True)) if left else ()
+    unready = (label_step(tracker, work_number, "ready", add=False),) if left else ()
     return Plan(f"close out #{work_number}", (
         Step("comment_pull", "add_issue_comment",
              {**pulls, "issue_number": pull_number, "body": landed}),
@@ -9633,8 +9711,8 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
         beat_step(tracker, work_number, write=False),
-        *escalate,
-        *(() if pending or left else (Step("close_issue", "issue_write", {
+        *unready,
+        *(() if pending else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
             "state_reason": "completed"}),)),
     ))
@@ -9815,6 +9893,16 @@ def integrate(
         raise QueueError(f"Pull request #{pull_number} has no head branch")
     feedback.phase(f"guard {branch} against its field report")
     guard(root, branch, report)
+    unhomed = unhomed_pieces(report, work_number)
+    if unhomed:
+        reason = (f"pull request #{pull_number} is a partial delivery whose Not delivered gives "
+                  f"no home to: {'; '.join(unhomed)}. A landing closes its work issue, so each "
+                  f"piece left names one of: {'; '.join(PARTIAL_HOMES)}; nothing was merged. SE "
+                  "gives each its home, names it in that piece of the description, and the "
+                  "integrator integrates again")
+        if work_number is not None:
+            integration_escalation(root, work_number, tracker, reason)
+        raise QueueError(reason)
 
     feedback.phase(f"sync {target}")
     sync(root)
@@ -10327,8 +10415,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         waits += ("Stays open for the planned pieces left, as the field report names them: "
                   + "; ".join(pieces) + "\n")
     if left:
-        waits += ("Stays open for what this partial delivery left, which SE re-scopes: "
-                  + "; ".join(left) + "\n")
+        waits += ("A partial delivery, a failure the next retro counts; each piece it left has "
+                  "its home under the field report's Not delivered: " + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, str(state.get("release_kind") or "patch"), list(state.get("component_tags") or []))} "
@@ -10378,9 +10466,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     if left:
-        print(interface_message("escalation", issue=str(work_number),
-                                question="stays open for what its partial delivery left; re-scope the "
-                                         f"issue or take it to the owner: {'; '.join(left)}"))
+        print(f"#{work_number} landed partial, a failure the next retro counts; each piece left has "
+              f"its home under the field report's Not delivered: {'; '.join(left)}")
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -11850,8 +11937,8 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
                   "labelled off-template and not ready (docs/templating.md \"Templates\")"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
-         arg("--finding", type=finding_ref, metavar="RETRO:FINDING",
-             help="file only this finding of a retro in report state"),
+         arg("--finding", type=finding_ref, metavar="RUN:FINDING",
+             help="file only this finding of a run, a retro or an overhaul, in report state"),
          arg("--label", action="append", default=[], metavar="LABEL",
              help="a further label, such as discovery, repeatable"),
          REPO)

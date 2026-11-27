@@ -20,8 +20,9 @@ kind is refused before anything is written, naming the command that takes it.
 - KINDS is the table: per run kind (retro, overhaul) also the deck's cover (`document_type`),
   whether its deck closes with the field-feedback question "Anything else?" (`anything_else`: a
   retro asks for field feedback, an overhaul is about drift, the person's rule of 27 Nov) and its
-  filing rule (`outcomes`: a retro stays open for one outcome per finding, an overhaul closes on its
-  report). retro_deck.py and retro.py's `file_steps` read them here, never a run's name.
+  filing rule (`report_blesses`: an overhaul's report is its blessing and opens filing at once, a
+  retro's waits for `retro.py bless`). retro_deck.py and retro.py's `file_steps` read them here,
+  never a run's name; retro.py RUN_KINDS names which issues are runs and their finding references.
 
 Everything here is pure.
 """
@@ -51,15 +52,15 @@ class Kind:
     title: re.Pattern | None = None
     document_type: str | None = None
     anything_else: bool = False
-    outcomes: bool = False
+    report_blesses: bool = False
 
 
 WORK = Kind("work", "a work issue", ("work", "ready"), "work_tickets.py intake --issue {number}")
 RETRO = Kind("retro", "a retro issue", ("retro",), "retro.py collect {number}",
-             title=re.compile(r"docs/retro-"), document_type="Retro report", anything_else=True,
-             outcomes=True)
+             title=re.compile(r"docs/retro-"), document_type="Retro report", anything_else=True)
 OVERHAUL = Kind("overhaul", "an overhaul issue", ("discovery",), "overhaul.py read {number}",
-                title=re.compile(r"(?:docs/)?overhaul-\d{8}$"), document_type="Overhaul report")
+                title=re.compile(r"(?:docs/)?overhaul-\d{8}$"), document_type="Overhaul report",
+                report_blesses=True)
 KINDS = {kind.name: kind for kind in (WORK, RETRO, OVERHAUL)}
 
 
