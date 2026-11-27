@@ -67,6 +67,7 @@ def runner_variables(environment: Mapping[str, str]) -> list[str]:
 # read here, once, before any home moves, into the variables that name them, so an obs build or a
 # `go run` in a test neither downloads nor builds everything again; one already set keeps its value.
 HOME_VARIABLES = ("HOME", "USERPROFILE")
+WINDOWS_HOME_VARIABLES = ("APPDATA", "LOCALAPPDATA")
 XDG_VARIABLES = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
 GIT_CONFIG_VARIABLES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
 
@@ -100,7 +101,8 @@ for _name, _place in machine_caches(os.environ).items():
 
 # The machine's home as the session found it, for the suite's setup that fetches and builds its
 # modules through the machine's git, uv and gh (the obs fixture), and for nothing else.
-MACHINE_HOME = {name: os.environ.get(name) for name in (*HOME_VARIABLES, *XDG_VARIABLES, *GIT_CONFIG_VARIABLES)}
+MACHINE_HOME = {name: os.environ.get(name) for name in
+                (*HOME_VARIABLES, *WINDOWS_HOME_VARIABLES, *XDG_VARIABLES, *GIT_CONFIG_VARIABLES)}
 
 # obs's machine folder, where its components are installed (obs's `local_folder`, which reads this
 # variable): the suite's own, in the checkout beside its obs module, never the developer's
@@ -110,11 +112,16 @@ os.environ["OBS_LOCAL_FOLDER"] = str(ROOT / ".se" / "obs-local")
 
 
 def use_home(patch: pytest.MonkeyPatch, home: Path) -> None:
-    """Point `patch`'s environment at `home`, an empty folder: HOME and USERPROFILE name it, the XDG
-    folders are unset, so each tool finds its own under it, and git reads no global configuration
-    beyond `home`'s nor the system's."""
+    """Point `patch`'s environment at `home`, with isolated tool settings and no system git config."""
     for name in HOME_VARIABLES:
         patch.setenv(name, str(home))
+    if os.name == "nt":
+        local = home / "AppData" / "Local"
+        roaming = home / "AppData" / "Roaming"
+        local.mkdir(parents=True, exist_ok=True)
+        roaming.mkdir(parents=True, exist_ok=True)
+        patch.setenv("LOCALAPPDATA", str(local))
+        patch.setenv("APPDATA", str(roaming))
     for name in XDG_VARIABLES:
         patch.delenv(name, raising=False)
     patch.delenv("GIT_CONFIG_GLOBAL", raising=False)
@@ -141,8 +148,7 @@ def suite_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 @pytest.fixture(autouse=True)
 def own_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-    """This test's home, a fresh empty folder beside its tmp_path (not in it, as many a test reads
-    all of tmp_path): what it writes under ~ is its own. A test that sets HOME itself wins."""
+    """This test's fresh home beside its tmp_path; Windows starts with empty app-data folders."""
     with pytest.MonkeyPatch.context() as patch:
         home = tmp_path_factory.mktemp("home")
         use_home(patch, home)
@@ -229,7 +235,7 @@ def shell_backend(item: pytest.Item) -> shell_door.Backend:
     `fake_shell` fixture)."""
     if spawn_guard.allowed(item):
         return shell_door.RealShell()
-    return fake_programs.FakeProcesses(scripts=False, hooks=False)
+    return fake_programs.FakeProcesses(scripts=False, hooks=True)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -327,8 +333,8 @@ def fake_processes() -> fake_programs.FakeProcesses:
 def fake_shell() -> fake_programs.FakeProcesses:
     """The shell door's fake of this test (tests/fake_processes.py), for its handlers: each shell
     the code under test starts (`sh RUNME.sh`, a command line) answered by `fake_shell.on(...)`; a
-    shell no handler answers fails the test, naming it. The shell door's contract (`contract:
-    shell`) runs the real shell and cannot take it."""
+    shell no handler answers fails the test, naming it. SE's hooks run by their in-process logic.
+    The shell door's contract (`contract: shell`) runs the real shell and cannot take it."""
     backend = shell_door.BACKEND
     if not isinstance(backend, fake_programs.FakeProcesses):
         pytest.fail("fake_shell: this test runs the real shell (a spawns mark); drop the mark to take the fake",
