@@ -38,6 +38,10 @@ each named with its check.
   its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
   `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
   commit hook runs the same check (se.toml `[commit_checks]`).
+- rule-of-five: each surface a person sees holds at most five visible files and five visible
+  folders (rule book doc-006, `scripts/rule_of_five.py`, which owns the surfaces and the level); at
+  `warn` it prints one warning line per crowded surface and passes; the commit hook runs the same
+  check (se.toml `[commit_checks]`).
 - template-engine: SE's template engine is the Go one (`components/template`), which a script asks
   through `scripts/template_door.py`; an import of the Python engine (`templates`, `se_templates`)
   in scripts, tests and the components, outside the engine's own files, is a finding, with no
@@ -64,6 +68,7 @@ import git_door
 import process_door
 import readme
 import references
+import rule_of_five
 import se_home
 import se_script
 
@@ -404,6 +409,16 @@ def door_findings(root: Path) -> list[str]:
     return refused
 
 
+def five_findings(root: Path) -> list[str]:
+    """What the rule of five refuses in `root` at its level; its warnings are printed."""
+    try:
+        found = rule_of_five.settings(root)
+    except rule_of_five.SettingError as error:
+        raise HygieneError(f"rule-of-five: {error}") from error
+    warnings, refused = rule_of_five.check(root, found)
+    for line in warnings:
+        print(f"hygiene: rule-of-five: {line}")
+    return refused
 def template_engine_lines(path: Path) -> list[int]:
     """The lines of the Python file `path` that import the Python template engine (TEMPLATE_MODULES)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
@@ -446,6 +461,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "readme": readme_findings(root),
         "ported": ported_findings(root),
         "doors": door_findings(root),
+        "rule-of-five": five_findings(root),
         "template-engine": template_engine_findings(root),
     }
 
