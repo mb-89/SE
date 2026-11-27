@@ -329,8 +329,8 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 
 - `work_tickets.py suite` (which `integrate` runs) records its verdict on the tree of the commit
   it ran on, where the checkout holds exactly that commit; `public_check.py --rev <commit>` records
-  its verdict on that commit's tree. A failure, or a suite its
-  [budget](../../docs/tests.md#test-budget) refuses, records a failure.
+  its verdict on that commit's tree. A failure records a failure; a suite over its
+  [budget](../../docs/tests.md#test-budget) passes, its time recorded.
 - `integrate` refuses to push a landing branch without both passing verdicts on its tree, and
   reads the squash commit back only with that tree; `work_tickets.py push` and se's pre-push hook
   (`work_tickets.py verified`) refuse a push of the integration branch itself the same way, naming

@@ -471,8 +471,8 @@ sleeping: a test waits on an event, and a deadline stays only as the bound of a 
 
 ### tst-003 Measured performance, no blind waits
 
-Durations are measured against declared budgets, and anything a person waits on gives feedback
-within one second.
+Durations are measured against declared budgets and recorded, never refused, and anything a person
+waits on gives feedback within one second.
 
 - **Why:** what is not measured grows unnoticed, and a person who waits blind cannot tell slow from
   stuck.
@@ -482,8 +482,12 @@ within one second.
   feedback.
 - **Implementations:**
   - se: the suite's budget in `se.toml` `[tests]` ([Test budget](../../../docs/tests.md#test-budget)),
-    enforced by `integrate`, and `work_tickets.py suite --compare`; feedback within a second, by
-    judgment.
+    measured by `integrate`, CI's `check` and `work_tickets.py suite --compare`. A run over it, a
+    suite beside over its own and a test's own measurement over its budget pass and are recorded
+    (the metrics line); the overhaul's facts collect them and turn the slowest into work.
+  - se: failures and warnings still refuse. No test asserts a duration
+    (`tests/test_no_clock_assertions.py`); the per-test time bound is a hang guard. Feedback within
+    a second, by judgment.
   - Go line (frozen): `spec/budgets.yaml`, interactive and batch command classes, and answers from
     the daemon's snapshot.
 - **Related:** tst-002

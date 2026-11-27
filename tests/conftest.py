@@ -451,6 +451,19 @@ REPORTS_VARIABLE = "SE_TEST_REPORTS"
 setup_seconds: dict[tuple[str, str], tuple[float, float]] = {}  # (test, worker): setup time, start
 
 
+@pytest.fixture
+def measure(record_property):
+    """Record a test's own time measurement against its budget, never assert it (rule tst-003,
+    docs/tests.md "Test budget"): `measure(seconds, budget)` writes the test case's
+    `measured_seconds` and `budget_seconds` properties into se.xml, and `work_tickets.py suite`
+    prints and notes each over its budget for the overhaul's facts. It returns `seconds`."""
+    def record(seconds: float, budget: float) -> float:
+        record_property("measured_seconds", f"{seconds:.3f}")
+        record_property("budget_seconds", f"{budget:g}")
+        return seconds
+    return record
+
+
 # The suite builds the plugin layout from src/ before its tests (AGENTS.md "Agents and skills"), so
 # no run tests stale generated files and nobody has to remember `se_plugin.py build`; on the
 # controller only, before pytest-xdist starts its workers.

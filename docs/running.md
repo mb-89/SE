@@ -14,7 +14,8 @@ GitHub's limits can be named instead of guessed. `scripts/metrics.py` owns the l
   where it was read ([Test budget](tests.md#test-budget)); `integrate` always reads it, so its line holds
   both times.
 - What a command notes itself: the suite's `suite_seconds` and its `suite_limit_seconds` (`[tests]`
-  `limit_seconds`) from `suite` and `integrate`, the `issue` `integrate` landed, and
+  `limit_seconds`) from `suite` and `integrate`, with `measured_over`, each test's own
+  measurement over its budget (`<test>: [seconds, budget]`), the `issue` `integrate` landed, and
   `budget_seconds` from an interactive command, its budget from
   [Feedback budgets](#feedback-budgets).
 
@@ -40,7 +41,9 @@ Overruns: 1
 ```
 
 The lines are per machine; the retro reads the report of the machine its integrations ran on
-([retro.md](../.github/ISSUE_TEMPLATE/retro.md)).
+([retro.md](../.github/ISSUE_TEMPLATE/retro.md)). An overrun refuses nothing: the overhaul's facts
+(`overhaul.py facts`) list the machine's overruns and turn the slowest into work
+([Test budget](tests.md#test-budget)).
 
 ## Feedback budgets
 

@@ -51,11 +51,8 @@ def test_a_test_with_its_own_mark_keeps_it_and_one_beside_the_suite_gets_none():
     assert beside.bound is None
 
 
-def test_the_bound_is_three_times_the_slowest_test_in_whole_tens():
-    for slowest, bound in ((time_bound.LINUX_SLOWEST_SECONDS, time_bound.LINUX_BOUND),
-                           (time_bound.WINDOWS_SLOWEST_SECONDS, time_bound.WINDOWS_BOUND),
-                           (time_bound.SLOWEST_SECONDS, time_bound.BOUND)):
-        assert bound == -(-3 * slowest // 10) * 10
+def test_the_bound_is_a_hang_guard_far_above_the_slowest_test_measured():
+    assert time_bound.BOUND >= 10 * 45.36  # the slowest test measured, on Windows (tests/time_bound.py)
 
 
 PLANTED = """\

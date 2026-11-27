@@ -1,4 +1,4 @@
-"""The time bound: a test that runs far longer than the slowest test fails, naming itself, its bound and the remedy.
+"""The time bound, a hang guard: a test that runs far longer than any real test fails, naming itself, its bound and the remedy.
 
 Reader: whoever writes a slow test, measures the bound again, or changes the wiring in tests/conftest.py.
 
@@ -18,35 +18,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-import sys
 
 import pytest
 
 OWNER = "tests/time_bound.py"
 
-# BOUND is 3 times the slowest test of the complete suite (setup, call and teardown, as pytest's
-# JUnit report times a test), rounded up to whole tens of seconds. Measured with
-# `work_tickets.py suite --slowest 10`, twice, on 17 Nov 2026 at suite-time-setup-runs on main
-# 603916c, on a 4-CPU Linux container (Intel Xeon at 2.10 GHz): the slower of the two runs' slowest was
-# tests/test_start_refresh.py::test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins,
-# 7.88 s, which gives 30 s (3 x 7.88 = 23.64). Measure again the same way where a test rightly
-# takes longer.
-LINUX_SLOWEST_SECONDS = 7.88
-LINUX_BOUND = 30
-# Windows starts a process many times slower (uv, Git's bash and each MSYS tool it runs) and scans
-# each freshly written file on its first open, so its bound is derived the same way from the same
-# test measured on Windows: on 23 Nov 2026 on windows-suite, alone on a 28-CPU Windows 11 laptop
-# (Git for Windows' bash, uv with Python 3.12), setup and call took 45.36 s (6.88 + 38.48), which
-# gives 140 s (3 x 45.36 = 136.08).
-WINDOWS_SLOWEST_SECONDS = 45.36
-WINDOWS_BOUND = 140
-WINDOWS = sys.platform == "win32"
-SLOWEST_SECONDS = WINDOWS_SLOWEST_SECONDS if WINDOWS else LINUX_SLOWEST_SECONDS
-BOUND = WINDOWS_BOUND if WINDOWS else LINUX_BOUND
-#: How many times slower this platform runs the suite than the Linux host its bound was measured
-#: on: a test that holds a time of its own (tests/test_discovery_budget.py, the facts budget of
-#: tests/test_overhaul.py) scales it by this.
-SCALE = SLOWEST_SECONDS / LINUX_SLOWEST_SECONDS
+# BOUND is a hang guard, not a time budget (rule tst-003, docs/tests.md "Test budget"): no test's time
+# refuses work, and the slowest tests are recorded for the overhaul instead. It is set far above any
+# real test on every platform: the slowest test measured on 23 Nov 2026 took 7.88 s on a 4-CPU Linux
+# container and 45.36 s on a 28-CPU Windows 11 laptop (setup and call), so 600 s stops only a test
+# that waits for something that never comes.
+BOUND = 600
 
 
 def beside(item: pytest.Item) -> bool:
@@ -83,7 +65,7 @@ def explain(item: pytest.Item, report: pytest.TestReport) -> None:
     report.sections.append((OWNER, (
         f"{OWNER}: {item.nodeid} ran past its time bound of {seconds} s and failed; the bound is set "
         f"and measured in {OWNER}. Remedy: run the test alone to find what it waits for; where it "
-        f"rightly takes longer, measure the bound again as the comment beside BOUND in {OWNER} says.")))
+        f"rightly takes longer, raise the guard as the comment beside BOUND in {OWNER} says.")))
 
 
 def crashed(crashitem: str, report: pytest.TestReport, sched) -> None:

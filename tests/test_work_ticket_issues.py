@@ -5702,17 +5702,17 @@ def fake_suite(worktree: Path, monkeypatch, seconds: float) -> None:
     monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
 
 
-def test_suite_passing_over_the_limit_says_passed_and_refuses_with_its_own_exit_code(
+def test_suite_passing_over_the_limit_passes_records_it_and_names_the_slowest(
         worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 130.0)
-    monkeypatch.setattr(work_tickets, "ci_suite_time", lambda root: (None, "not on GitHub"))
+    monkeypatch.setattr(work_tickets, "ci_suite_time", lambda root: pytest.fail("CI was read"))
 
-    assert run(worktree, "suite") == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE != 1
-    error = capsys.readouterr().err
-    assert "Complete suite passed (3 passed) but took 130.0 s here (" in error
-    assert "over its limit of 120 s" in error
-    assert "Remedy: make the slowest tests above faster" in error
-    assert error.index("test_sleepy") < error.index("test_fixture") < error.index("test_quick")
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert ("Slow, recorded: the complete suite took 130.0 s, over its limit of 120 s") in captured.out
+    out = captured.out
+    assert out.index("test_sleepy") < out.index("test_fixture") < out.index("test_quick")
+    assert "warning: the complete suite" not in captured.err
 
 
 FAILING_SUITE = FAKE_SUITE.replace('print("3 passed")', 'print("1 failed, 2 passed")\nsys.exit(1)')
@@ -5731,14 +5731,13 @@ def test_suite_failing_says_failed_with_its_counts_and_exits_1(
     assert "over its limit" not in error
 
 
-def test_suite_between_target_and_limit_warns_and_names_the_slowest(worktree, monkeypatch, capsys):
+def test_suite_between_target_and_limit_records_it_and_names_the_slowest(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 90.0)
 
     assert run(worktree, "suite") == 0
     captured = capsys.readouterr()
-    assert "warning: the complete suite took 90.0 s, over its target of 60 s" in captured.err
+    assert "Slow, recorded: the complete suite took 90.0 s, over its target of 60 s" in captured.out
     assert "3.10s call tests/test_slow.py::test_sleepy" in captured.out
-    assert "Suite: 3 passed; 90.0 s (target 60 s, limit 120 s)" in captured.out
 
 
 def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
@@ -5873,6 +5872,39 @@ def test_suite_lists_slow_setups_and_a_setup_paid_on_several_workers(worktree, m
         "    slow setup 2.5 s tests.test_ui::test_d (tests.test_ui, worker gw1)\n"
         "    setup browser paid on 2 workers (gw0, gw1): 12.5 s; group its tests on one worker\n"
     )
+
+
+MEASURING_SUITE = """\
+import os, pathlib
+reports = pathlib.Path(os.environ["SE_TEST_REPORTS"])
+def case(name, measured, budget):
+    return (f'<testcase classname="tests.test_list" name="{name}" time="1.0"><properties>'
+            f'<property name="measured_seconds" value="{measured}"/>'
+            f'<property name="budget_seconds" value="{budget}"/></properties></testcase>')
+(reports / "se.xml").write_text('<testsuites><testsuite name="pytest" time="2.0">'
+    + case("test_slow_listing", 2.5, 1) + case("test_fast_listing", 0.2, 1)
+    + '</testsuite></testsuites>', encoding="utf-8")
+print("2 passed")
+"""
+
+
+def test_a_tests_own_measurement_over_its_budget_is_recorded_not_refused(
+        worktree, monkeypatch, capsys):
+    """A timing test records its time (tests/conftest.py `measure`); the suite passes and names
+    each measurement over its budget, and the metrics line notes it for the overhaul's facts."""
+    fake_suite(worktree, monkeypatch, 5.0)
+    (worktree / "suite.py").write_text(MEASURING_SUITE, encoding="utf-8")
+    noted: dict = {}
+    monkeypatch.setattr(work_tickets.metrics, "note", lambda **values: noted.update(values))
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    assert ("Slow, recorded: tests.test_list::test_slow_listing measured 2.50 s, over its budget "
+            "of 1 s (its own measurement); not refused") in out
+    assert "test_fast_listing measured" not in out
+    assert noted["measured_over"] == {"tests.test_list::test_slow_listing": [2.5, 1.0]}
+    assert work_tickets.metrics.overruns({"measured_over": noted["measured_over"]}) == [
+        "test tests.test_list::test_slow_listing measured 2.50 s over its budget 1 s"]
 
 
 TIER_FUNCTION = """\
@@ -6142,18 +6174,16 @@ def test_a_failing_suite_beside_refuses_with_its_output_after_a_passing_suite(
 
 
 @pytest.mark.parametrize("reference", [False, True])
-def test_a_suite_beside_over_its_limit_is_refused_on_the_reference_run_alone(
+def test_a_suite_beside_over_its_limit_is_recorded_and_never_refused(
         worktree, monkeypatch, capsys, reference):
     beside_suite(worktree, monkeypatch, [5.0, 70.0])
     monkeypatch.setattr(work_tickets, "suite_is_reference", lambda: reference)
 
-    assert run(worktree, "suite") == (work_tickets.SUITE_OVER_LIMIT_EXIT_CODE if reference else 0)
-    error = capsys.readouterr().err
-    if reference:
-        assert "kern passed but took 70.0 s on CI, the budget's reference, over its limit of 60 s" in error
-    else:
-        assert "warning: kern took 70.0 s here (" in error
-        assert "CI's check, the reference, refuses it there" in error
+    assert run(worktree, "suite") == 0
+    captured = capsys.readouterr()
+    assert ("Slow, recorded: kern took 70.0 s, over its limit of 60 s (limit_seconds of "
+            "[tests.beside.kern] in se.toml); not refused") in captured.out
+    assert "warning: kern" not in captured.err
 
 
 def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monkeypatch, capsys,

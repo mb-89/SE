@@ -7200,7 +7200,6 @@ class SuiteBudget:
     limit_seconds: float
     setup: list[str] | None = None
     tier: str | None = None  # `<module>:<function>`, the project's tier function
-    over_limit: str = "fail"  # "warn": an overrun only warns (docs/tests.md "Test budget")
     beside: tuple["BesideSuite", ...] = ()  # `[tests.beside.<name>]`, run after the suite
     # `[tests] shards`: CI runs the suite in this many shards side by side, and the target and the
     # limit are each shard's; a whole-suite run is judged against `shards` times each.
@@ -7266,12 +7265,6 @@ NO_SLOWEST_TESTS = (
     "(the suite command's report directory) to name them"
 )
 clock = time.monotonic
-# Apart from 1 (failed tests and every other refusal), so a caller can tell a slow suite from a red one.
-SUITE_OVER_LIMIT_EXIT_CODE = 3
-
-
-class SuiteOverLimitError(QueueError):
-    """The complete suite passed but ran over its limit; exits with SUITE_OVER_LIMIT_EXIT_CODE."""
 
 
 def suite_budget(root: Path) -> SuiteBudget:
@@ -7297,12 +7290,6 @@ def suite_budget(root: Path) -> SuiteBudget:
             'a module importable from the project root, for example tier = "tests.tiers:tier"; '
             "fix it or remove it"
         )
-    over_limit = tests.get("over_limit", "fail")
-    if over_limit not in OVER_LIMIT_CHOICES:
-        raise QueueError(
-            f'{where}: over_limit must be "fail" (the default) or "warn", what a run over '
-            "limit_seconds does; fix it or remove it"
-        )
     shards = tests.get("shards", 1)
     if isinstance(shards, bool) or not isinstance(shards, int) or shards < 1:
         raise QueueError(
@@ -7311,7 +7298,7 @@ def suite_budget(root: Path) -> SuiteBudget:
         )
     values = budget_seconds(tests, where)
     return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier,
-                       over_limit, beside_suites(root, tests.get("beside", {})), shards)
+                       beside_suites(root, tests.get("beside", {})), shards)
 
 
 def budget_seconds(table: dict, where: str) -> dict[str, float]:
@@ -7376,7 +7363,6 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
     return tuple(suites)
 
 
-OVER_LIMIT_CHOICES = ("fail", "warn")
 TIER_SETTING = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
 
 
@@ -7490,6 +7476,9 @@ class SuitePart:
     workers: int  # its `workers` testsuite property (pytest: record_testsuite_property), else 1
     cases: list[tuple[float, str]]  # (seconds, test) of every test case
     setups: tuple[SuiteSetup, ...] = ()  # the test cases that report a setup time
+    # (test, seconds, budget) of each test case that records its own measurement: its
+    # `measured_seconds` and `budget_seconds` properties (tests/conftest.py `measure`)
+    measured: tuple[tuple[str, float, float], ...] = ()
 
     def line(self) -> str:
         """`<part>: <wall> s wall; <sum> s test time / <n> workers = <per worker> s; slowest <s> s`:
@@ -7536,7 +7525,7 @@ def read_part(report: Path) -> SuitePart:
     workers = [
         int(prop.get("value") or 0) for prop in root.iter("property") if prop.get("name") == "workers"
     ]
-    cases, setups = [], []
+    cases, setups, measured = [], [], []
     for case in root.iter("testcase"):
         test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
         cases.append((float(case.get("time") or 0), test))
@@ -7546,7 +7535,10 @@ def read_part(report: Path) -> SuitePart:
                 float(properties["setup_time"]), test,
                 properties.get("fixture") or case.get("classname") or test, properties.get("worker"),
             ))
-    return SuitePart(report.stem, wall, max([1, *workers]), cases, tuple(setups))
+        if properties.get("measured_seconds") and properties.get("budget_seconds"):
+            measured.append((test, float(properties["measured_seconds"]),
+                             float(properties["budget_seconds"])))
+    return SuitePart(report.stem, wall, max([1, *workers]), cases, tuple(setups), tuple(measured))
 
 
 def report_parts(reports: Path) -> list[SuitePart]:
@@ -7848,7 +7840,6 @@ CI_SUITE_TITLE = "se suite time"
 CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
 CI_SUITE_COMMITS = 8  # first-parent commits of the integration branch searched for CI's time
 CI_SUITE_RUNS = 5  # CI's time is the median of this many runs, so one slow runner does not count
-CI_MARGIN = 0.9  # CI within 10% of the limit: a local overrun refuses
 CI_READ_SECONDS = 10
 
 
@@ -8006,9 +7997,8 @@ def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str
     """CI's suite time of a sharded suite: the slowest shard's, as the shards run side by side.
     Prints each shard, then holds the run to the budget as the reference run: refuses a missing
     shard, and a failed one without printing a time, as a failed run's time is no suite time; prints
-    the notice ci_suite_time reads, and refuses a time over the limit with SuiteOverLimitError
-    unless `[tests]` over_limit is "warn". Its warnings are `::warning` annotations on stdout, in
-    order with what it printed before them."""
+    the notice ci_suite_time reads. A time over the target or the limit is recorded, never refused
+    (slow_line): a `::notice` annotation on stdout, in order with what it printed before it."""
     budget = suite_budget(root)
     shards = shard_times(directory)
     if not shards:
@@ -8033,37 +8023,42 @@ def suite_time_of_shards(root: Path, directory: Path, expect: int | None) -> str
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit)
     timing = (f"{seconds:.1f} s, the slowest of {len(shards)} shards (shard {slowest.name}) "
               f"(target {budget.target_seconds:g} s, limit {limit:g} s)")
-    if seconds > limit and budget.over_limit == "warn":
-        print(workflow_annotation("warning", over_limit_warning(seconds, limit)), flush=True)
-    elif seconds > limit:
-        raise SuiteOverLimitError(
-            f"Sharded suite passed but took {timing} on CI, the budget's reference, over its "
-            "limit ([tests] limit_seconds in se.toml). Remedy: make the slowest shard's tests "
-            "faster or split them across the shards more evenly."
-        )
-    elif seconds > budget.target_seconds:
-        print(workflow_annotation(
-            "warning", f"the sharded suite took {seconds:.1f} s, over its target of "
-                       f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml)"),
-              flush=True)
+    slow = slow_line("the sharded suite", seconds,
+                     (budget.target_seconds, "[tests] target_seconds in se.toml"),
+                     (limit, "[tests] limit_seconds in se.toml"))
+    if slow:
+        print(workflow_annotation("notice", slow), flush=True)
     return timing
 
 
-def host_load() -> str:
-    """The host's load averages over its CPUs, for a warning about a slow run."""
-    cpus = os.cpu_count() or 1
-    try:
-        one, five, fifteen = os.getloadavg()
-    except (AttributeError, OSError):  # Windows has no load average
-        return f"{cpus} CPUs, load average unknown"
-    return f"load {one:.1f}/{five:.1f}/{fifteen:.1f} (1/5/15 min) on {cpus} CPUs"
+def slow_line(what: str, seconds: float, target: tuple[float, str], limit: tuple[float, str]
+              ) -> str:
+    """The record of a passing run over its target or its limit, or "" under both. No time
+    budget refuses and none warns (docs/tests.md "Test budget"): the time is noted in the metrics
+    line, and the overhaul's facts collect it and turn the slowest into work. `target` and
+    `limit` are each (seconds, where the setting is)."""
+    if seconds <= target[0]:
+        return ""
+    (budget, where), name = (limit, "limit") if seconds > limit[0] else (target, "target")
+    return (f"Slow, recorded: {what} took {seconds:.1f} s, over its {name} of {budget:g} s "
+            f"({where}); not refused, the overhaul's facts collect it")
 
 
-def over_limit_warning(seconds: float, limit: float) -> str:
-    """The warning of an overrun where the project declares warn-only (`[tests] over_limit`)."""
-    return (f"warning: the complete suite took {seconds:.1f} s, over its limit of {limit:g} s; "
-            '[tests] over_limit = "warn" in se.toml, so the overrun is not refused; make the '
-            "slowest tests faster")
+def slow_lines(budget: "SuiteBudget", seconds: float, beside: list["BesideRun"],
+               measured: list[tuple[str, float, float]]) -> list[str]:
+    """The recorded lines of a passing run (slow_line): the whole suite, each suite beside, and
+    each test whose own measurement (a JUnit `measured_seconds` property) is over its budget."""
+    lines = [slow_line("the complete suite", seconds,
+                       (budget.whole_target, budget.limit_source("target_seconds")),
+                       (budget.whole_limit, budget.limit_source()))]
+    lines += [slow_line(run.suite.name, run.seconds,
+                        (run.suite.target_seconds, f"target_seconds of {run.suite.where()}"),
+                        (run.suite.limit_seconds, f"limit_seconds of {run.suite.where()}"))
+              for run in beside]
+    lines += [f"Slow, recorded: {test} measured {spent:.2f} s, over its budget of {allowed:g} s "
+              "(its own measurement); not refused, the overhaul's facts collect it"
+              for test, spent, allowed in measured if spent > allowed]
+    return [line for line in lines if line]
 
 
 #: Why a landing through kern's relay reads no CI suite time: it reads GitHub's check-run
@@ -8082,21 +8077,21 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
     (SuitePart.line) with its slow setups under it (SuitePart.setup_lines), its `slowest_count` slowest tests
     and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
-    warns above the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
+    records a time over the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
     its seconds per file there (with_file_seconds), and its `file seconds:` lines follow the Parts.
     With `keep_reports` the run's JUnit reports are copied there (time_suite), also from a failed
-    or over-limit run, and the line `Test reports kept in <DIR>: ...` is printed right after the
+    run, and the line `Test reports kept in <DIR>: ...` is printed right after the
     timed run; without it nothing is copied and nothing more is printed.
 
-    The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
-    refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
-    warns with the host's load and refuses only where CI's suite time on the integration
-    branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
-    limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
+    The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time;
+    any other run where `read_ci` prints CI's suite time on the integration branch (ci_suite_time)
+    and notes it. No time refuses or warns: the suite, each suite beside and each test's own
+    measurement over its target or limit is one recorded line (slow_lines) and the metrics line
+    notes it, for the overhaul's facts (docs/tests.md "Test budget").
     `ci_skipped` (a landing through kern's relay, CI_SKIPPED_ON_RELAY) reads no CI time and says
     so once: the time is unknown, as where it cannot be read.
     Then runs each `[tests.beside.<name>]` suite (time_beside), prints and returns its time beside
-    the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
+    the suite's, and refuses a failed one.
     A suite beside with `paths` runs only where the change touches one, or where `full`; a skip
     is one line in the output and the result (beside_to_skip).
     A suite beside that passed without running a test, as its output reads (suite_runs.py), is
@@ -8124,29 +8119,23 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
     reference = suite_is_reference()
-    over = seconds > limit
     ci, unknown = (None, "")
-    if not reference and (over or read_ci) and ci_skipped:
+    if not reference and read_ci and ci_skipped:
         unknown = ci_skipped
-        print(f"CI's suite time on {integration_branch(root)}: {ci_skipped}")
-    elif not reference and (over or read_ci):
+    elif not reference and read_ci:
         feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
+    measured = [entry for part in parts for entry in part.measured]
+    measured_over = {test: [seconds_, budget_] for test, seconds_, budget_ in measured
+                     if seconds_ > budget_}
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit,
                  **({"ci_suite_seconds": ci.seconds} if ci else {}),
                  **({"beside_seconds": {run.suite.name: round(run.seconds, 3) for run in beside},
                      "beside_limit_seconds": {run.suite.name: run.suite.limit_seconds
-                                              for run in beside}} if beside else {}))
-    close = ci is None or ci.seconds >= CI_MARGIN * budget.limit_seconds
-    enforced = budget.over_limit == "fail"
-    refused = over and enforced and (reference or close)
-    # A suite beside is small and has no CI reading of its own: over its limit, only the
-    # reference run (CI) refuses it; elsewhere it warns.
-    beside_over = [run for run in beside if run.seconds > run.suite.limit_seconds]
-    beside_refused = [run for run in beside_over if enforced and reference]
+                                              for run in beside}} if beside else {}),
+                 **({"measured_over": measured_over} if measured_over else {}))
     beside_failed = [run for run in beside if run.refusal()]
-    record_suite_verdict(root, commit, result.returncode == 0 and not refused and not beside_failed
-                         and not beside_refused, seconds)
+    record_suite_verdict(root, commit, result.returncode == 0 and not beside_failed, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
     if beside_failed and reference:
@@ -8162,43 +8151,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         f", {budget.shards} shards of {budget.limit_seconds:g} s)" if budget.shards > 1 else ")")
     if reference:
         print(suite_notice(seconds, limit))
-    ci_text = (ci_suite_text(ci, integration_branch(root)) if ci
-               else f"CI's suite time is unknown: {unknown}")
-    # CI's time is its slowest shard's, so it is held to the limit per shard
-    ci_limit = ("the limit" if budget.shards == 1
-                else f"the limit per shard, {budget.limit_seconds:g} s")
-    for run in beside_refused:
-        raise SuiteOverLimitError(
-            f"{run.suite.name} passed but took {run.seconds:.1f} s on CI, the budget's reference, "
-            f"over its limit of {run.suite.limit_seconds:g} s (limit_seconds of "
-            f"{run.suite.where()}). Remedy: make its slowest tests faster, or its build smaller."
-        )
-    if refused and reference:
-        raise SuiteOverLimitError(
-            f"Complete suite passed ({summary}) but took {seconds:.1f} s on CI, the budget's "
-            f"reference, over its limit of {limit:g} s ({budget.limit_source()}). Slowest "
-            f"tests:\n{listing}\n"
-            "Remedy: make the slowest tests above faster (the work model's test rules)."
-        )
-    if refused:
-        why = (f"{ci_text}, within 10% of {ci_limit}, so the suite is near its budget on the "
-               "reference too" if ci else f"{ci_text}, so this run decides")
-        raise SuiteOverLimitError(
-            f"Complete suite passed ({summary}) but took {seconds:.1f} s here ({host_load()}), "
-            f"over its limit of {limit:g} s ({budget.limit_source()}); "
-            f"{why}. Slowest tests:\n{listing}\n"
-            "Remedy: make the slowest tests above faster (the work model's test rules)."
-        )
-    if over and not enforced:
-        print(over_limit_warning(seconds, limit), file=sys.stderr)
-    elif over:
-        print(
-            f"warning: the complete suite took {seconds:.1f} s here ({host_load()}), over its "
-            f"limit of {limit:g} s ({budget.limit_source()}); {ci_text}, under 90% of "
-            f"{ci_limit}, so this host is slow and the run is not refused: CI's {CHECK_NAME} on "
-            "the landing pull request judges the budget",
-            file=sys.stderr,
-        )
+    if read_ci and not reference:
+        print(ci_suite_text(ci, integration_branch(root)) if ci
+              else f"CI's suite time on {integration_branch(root)}: {unknown}")
     own_lines = "\n".join(  # stdout only; the durations are listed below, as the slowest tests
         line for line in result.stdout.strip().splitlines()
         if not DURATION_LINE.match(line) and not any(noise.match(line) for noise in TAIL_NOISE)
@@ -8228,24 +8183,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     print(f"Slowest tests:\n{listing}")
     if tier_of and parts:
         print("Slowest per tier:\n" + "\n".join(f"  {line}" for line in tier_lines(parts, tier_of)))
-    if target < seconds <= limit:
-        print(
-            f"warning: the complete suite took {seconds:.1f} s, over its target of "
-            f"{target:g} s ({budget.limit_source('target_seconds')}); make the slowest "
-            "tests above faster",
-            file=sys.stderr,
-        )
-    for run in beside:
-        if run in beside_over:
-            print(f"warning: {run.suite.name} took {run.seconds:.1f} s here ({host_load()}), over "
-                  f"its limit of {run.suite.limit_seconds:g} s (limit_seconds of "
-                  f"{run.suite.where()}); " + (f"CI's {CHECK_NAME}, the reference, refuses it "
-                  "there" if enforced else '[tests] over_limit = "warn", so it is not refused'),
-                  file=sys.stderr)
-        elif run.seconds > run.suite.target_seconds:
-            print(f"warning: {run.suite.name} took {run.seconds:.1f} s, over its target of "
-                  f"{run.suite.target_seconds:g} s (target_seconds of {run.suite.where()})",
-                  file=sys.stderr)
+    for line in slow_lines(budget, seconds, beside, measured):
+        print(line)
     return "; ".join([f"{summary}; {timing}",
                       *(f"{run.suite.name} passed in {run.timing()}" for run in beside),
                       *skipped.values()])
@@ -11923,9 +11862,9 @@ def stated_component_kinds(root: Path) -> None:
           f"{os.environ[variable] or 'none stated'} ({report})")
 
 
-@command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
-                  "does; exit code 1 when tests fail, 3 when they pass over the limit and the "
-                  "budget refuses them (docs/tests.md \"Test budget\")",
+@command("suite", "run se.toml's complete suite and measure it against its [tests] time budget, "
+                  "as integrate does; exit code 1 when tests fail; a time over the budget is "
+                  "recorded, never refused (docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
              help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
@@ -12278,9 +12217,9 @@ def run_suite_shard(root: Path, args: argparse.Namespace) -> int:
 
 @command("suite-time", "in CI's check job, judge a sharded suite: its time is its slowest "
                        "shard's, from the records suite-shard wrote; prints it as the notice CI's "
-                       "suite time is read from, and no time when a shard failed; refusals and "
-                       "warnings are workflow annotations; exit code 1 when a shard failed or is "
-                       "missing, 3 when the time is over the limit and the budget refuses it "
+                       "suite time is read from, and no time when a shard failed; refusals are "
+                       "error annotations and a time over the target or limit a notice, never "
+                       "refused; exit code 1 when a shard failed or is missing "
                        "(docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--shards", required=True, type=Path, metavar="DIR",
@@ -12291,9 +12230,6 @@ def run_suite_time(root: Path, args: argparse.Namespace) -> int:
     # Its refusals are `::error` annotations on stdout, after the shards it listed.
     try:
         timing = suite_time_of_shards(root, args.shards, args.expect)
-    except SuiteOverLimitError as error:
-        print(workflow_annotation("error", str(error)), flush=True)
-        return SUITE_OVER_LIMIT_EXIT_CODE
     except QueueError as error:
         print(workflow_annotation("error", str(error)), flush=True)
         return 1
@@ -13810,9 +13746,6 @@ def run_command(args: argparse.Namespace) -> int:
     except MissingGhError as error:
         print(f"error: work_tickets.py {args.command} {error}", file=sys.stderr)
         return 1
-    except SuiteOverLimitError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return SUITE_OVER_LIMIT_EXIT_CODE
     except (QueueError, OSError, ValueError, KeyError, sibling("se_relay").RelayError) as error:
         print(f"error: {said(error)}", file=sys.stderr)
         return 1
