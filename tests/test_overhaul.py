@@ -705,9 +705,10 @@ def test_file_marks_rule_changes_for_the_person_posts_the_report_and_files_nothi
 
     assert overhaul.main(["file", str(THIS), "--draft", str(draft), "--repo", REPO,
                           "--worktree", str(checkout)]) == 0
-    # The report, then its blessed state, and the close: the report is the overhaul's blessing,
-    # the gate open, its three findings filed after it with `file --finding 50:<k>` (SE#2006).
-    assert [name for name, _ in tracker.calls] == ["comment_issue", "comment_issue", "close_issue"]
+    # The report, then its blessed state: the report is the overhaul's blessing, the gate open,
+    # its three findings filed with `file --finding 50:<k>` until the last outcome closes it
+    # (SE#2006).
+    assert [name for name, _ in tracker.calls] == ["comment_issue", "comment_issue"]
     assert all(arguments["issue_number"] == THIS for _, arguments in tracker.calls)
     assert tracker.calls[1][1]["body"].startswith(retro.report_state_comment("blessed", 3))
     comment = tracker.calls[0][1]["body"]
@@ -786,8 +787,7 @@ def test_file_without_gh_prints_the_report_and_its_state(checkout, tmp_path, mon
     assert "GitHub plan: the report of overhaul #50" in out
     assert '1. add_issue_comment {"body": "<!-- se:overhaul-report -->' in out
     assert '2. add_issue_comment {"body": "<!-- se:retro-state blessed findings=3 -->' in out
-    assert ('3. issue_write {"issue_number": 50, "method": "update", "owner": "owner", '
-            '"repo": "repo", "state": "closed", "state_reason": "completed"}') in out
+    assert "issue_write {" not in out
 
 
 def test_new_files_the_overhaul_issue_through_file_labelled_discovery(checkout, monkeypatch,

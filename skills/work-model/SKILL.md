@@ -113,8 +113,8 @@ delivery path below. The same rules apply to local sessions and cloud agents.
   any new issue: `work_tickets.py file` files a due one first.
 
   An unblessed running retro or overhaul refuses filing; the older report-state path allows only
-  its findings. A blessed run never holds filing back, an overhaul's report being its blessing,
-  and its findings stay fileable ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due));
+  its findings. A blessed run never holds filing back, an overhaul's report being its blessing
+  and its last outcome closing it, and its findings stay fileable ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due));
   running work goes on.
 
   Each runs in a session of SE's [retro agent](../../agents/retro.md), which

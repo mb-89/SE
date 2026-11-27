@@ -300,13 +300,12 @@ def test_a_blessed_run_of_every_kind_holds_nothing_and_its_findings_stay_fileabl
 @pytest.mark.parametrize("kind", sorted(retro.RUN_KINDS))
 def test_every_run_kinds_report_opens_its_findings(kind, monkeypatch):
     """A retro's report puts it in report state, open for its findings until its blessing or its
-    last outcome; an overhaul's report is its blessing and closes it, the gate open; a report with
-    no finding closes either at once. An outcome on a blessed run records it and closes nothing."""
+    last outcome; an overhaul's report is its blessing, the gate open; a report with no finding
+    closes either at once. The last outcome closes the run still open, a blessed overhaul too."""
     steps = retro.file_steps(REPO, 40, ["the report"], 2, what=kind).steps
     phase = "blessed" if kind == "overhaul" else "report"
     assert steps[1].arguments["body"].startswith(retro.report_state_comment(phase, 2))
-    assert [step.tool for step in steps][-1] == ("issue_write" if kind == "overhaul"
-                                                 else "add_issue_comment")
+    assert [step.tool for step in steps] == ["add_issue_comment", "add_issue_comment"]
     assert [step.tool for step in retro.file_steps(REPO, 40, ["r"], 0, what=kind).steps][-1] == \
         "issue_write"
 
@@ -334,7 +333,7 @@ def test_every_run_kinds_report_opens_its_findings(kind, monkeypatch):
     retro.record_outcome(Path("."), REPO, retro.FindingRef("40:1"), "merged", "2", door)
     assert door.closed is False
     retro.record_outcome(Path("."), REPO, retro.FindingRef("40:2"), "issue", "99", door)
-    assert door.closed is (kind == "retro")
+    assert door.closed is True
     assert retro.filing_state(door.given).outcomes == {1: ("merged", "2"), 2: ("issue", "99")}
 
 

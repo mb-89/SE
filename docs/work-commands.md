@@ -137,14 +137,15 @@ finding's disposition, and due says whether a retro or an overhaul is due or ope
 #### Overhaul
 
 `components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
-report, a deck, from the judged draft, file checks the judged draft, posts its report and closes the
-issue, its findings fileable, and facts lists a checkout's pruning facts.
+report, a deck, from the judged draft, file checks the judged draft and posts its report, which
+blesses the overhaul until its last finding outcome closes it, and facts lists a checkout's pruning
+facts.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
-| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
+| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and post its report on the overhaul issue |
 | `overhaul.py new` | `overhaul.py new [--worktree WORKTREE] [--repo REPO]` | file the overhaul issue through work_tickets.py file |
 | `overhaul.py read` | `overhaul.py read [--out FILE] [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO] overhaul` | write an overhaul's draft |
 
@@ -490,10 +491,11 @@ without a why, nothing that went well, a question of either block left unanswere
 It files no issue
 ([wrk-007](../src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
 it posts the report, opening with `<!-- se:overhaul-report -->`, on the overhaul issue, then its
-blessed state, and closes the issue: the report is its blessing, the filing gate open.
+blessed state: the report is its blessing, the filing gate open.
 
 SE files each finding with `work_tickets.py file`'s `--finding` or records it with
-`retro.py outcome`, as a blessed retro's ([docs/fleet.md "Retro due"](fleet.md#retro-due)).
+`retro.py outcome`, and the last outcome closes the issue; a report with no finding closes it at
+once ([docs/fleet.md "Retro due"](fleet.md#retro-due)).
 
 The report is a document of the overhaul template
 ([templates/overhaul.md](../templates/overhaul.md)); its judged block stays `overhaul.py`'s to check. Without gh it prints the comments as a plan. Each

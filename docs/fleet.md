@@ -146,9 +146,9 @@ overhaul) started adds 1, a partial landing among them; each other work issue la
   the report and closes the issue, without a landing or another session. Network calls share one
   minute; retrying the same command resumes partial writes without duplicate comments.
 
-  An overhaul's report is its blessing: `overhaul.py file` posts it and closes the overhaul, the
-  gate open. A blessed run's findings stay fileable with `file --finding <run>:<finding>` and
-  `retro.py outcome`, open or closed; they do not hold the gate. The older `retro.py file` path
+  An overhaul's report is its blessing: `overhaul.py file` posts it, the gate open, and the
+  overhaul's last finding outcome closes it. A blessed run's findings stay fileable with `file
+  --finding <run>:<finding>` and `retro.py outcome`, open or closed; they do not hold the gate. The older `retro.py file` path
   still leaves a report-state retro open until its outcomes are recorded.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
   due included, and a first retro, where none has closed, the whole history from the project's

@@ -142,8 +142,8 @@ its tools.
     `work_tickets.py file --finding <run>:<finding>`.
 
     Record declined or merged outcomes with `retro.py outcome`; the retro closes when all findings
-    have an outcome, or at its blessing. An overhaul closes with its report, its blessing, and its
-    findings are filed the same way ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due));
+    have an outcome, or at its blessing. An overhaul's report is its blessing; its findings are filed
+    the same way and its last outcome closes it ([docs/fleet.md "Retro due"](../../docs/fleet.md#retro-due));
     running work goes on.
   - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
     name> --number <issue>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your

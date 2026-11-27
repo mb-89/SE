@@ -2599,9 +2599,9 @@ def file_steps(tracker: str, number: int, comments: list[str], findings: int,
                what: str = "retro") -> Plan:
     """The writes for the report of run `number` of kind `what` (RUN_KINDS): its parts, then its
     state, which opens `file --finding` for its findings. A retro's report is in report state until
-    its blessing (`bless`) or its last outcome; an overhaul's report is its blessing, so it closes
-    with it, the filing gate open and its findings filed as a blessed retro's are; a report with no
-    finding is done at once and closes the run."""
+    its blessing (`bless`) or its last outcome; an overhaul's report is its blessing, so it holds
+    no filing from then on, and it stays open for its findings until the last outcome closes it
+    (`record_outcome`); a report with no finding is done at once and closes the run."""
     if what not in RUN_KINDS:
         raise ValueError(f"{what!r} is no run kind ({', '.join(RUN_KINDS)})")
     issues = work_tickets.owner_repo(tracker)
@@ -2616,9 +2616,10 @@ def file_steps(tracker: str, number: int, comments: list[str], findings: int,
         posts += (Step("comment_issue", "add_issue_comment", {
             **issues, "issue_number": number,
             "body": (report_state_comment("blessed", findings) + "\n"
-                     f"The report is in and closes the overhaul; the filing gate is open. File "
+                     f"The report is in and blesses the overhaul; the filing gate is open. File "
                      f"each of its {findings} findings with `work_tickets.py file --finding "
-                     f"{number}:<k>`, or record it with `retro.py outcome`.")}), close)
+                     f"{number}:<k>`, or record it with `retro.py outcome`; the last outcome "
+                     "closes it.")}),)
         return Plan(f"the report of {what} #{number}", posts)
     posts += (Step("comment_issue", "add_issue_comment", {
         **issues, "issue_number": number,
@@ -2704,8 +2705,8 @@ def record_outcome(root: Path, tracker: str, reference: FindingRef, outcome: str
             "body": outcome_comment(reference.finding, outcome, value)}))
         outcomes[reference.finding] = desired
     complete = len(outcomes) == state.findings
-    if complete and state.marker_phase != "blessed":
-        if state.marker_phase != "done":
+    if complete:  # a blessed run still open (an overhaul) closes on its last outcome too
+        if state.marker_phase not in ("done", "blessed"):
             steps.append(Step("comment_issue", "add_issue_comment", {
                 **issues, "issue_number": reference.run,
                 "body": report_state_comment("done", state.findings)}))
@@ -2717,7 +2718,8 @@ def record_outcome(root: Path, tracker: str, reference: FindingRef, outcome: str
         print(f"{run[0].upper()}{run[1:]} finding {reference.finding} already has this outcome")
         return
     plan = Plan(f"record {run} finding {reference.finding}'s outcome",
-                tuple(steps), (f"{run} stays blessed; filing gate open"
+                tuple(steps), (f"{run} is done and closed" if complete and issue_open
+                               else f"{run} stays blessed; filing gate open"
                                if state.marker_phase == "blessed" else
                                f"{run} is done and closed" if complete
                                else f"{run} remains open for its other findings"))

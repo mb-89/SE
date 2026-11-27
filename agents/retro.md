@@ -21,7 +21,7 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
 ## The box
 
 - While an unblessed run, a retro or an overhaul, is running, SE files no issue. Blessing opens the
-  gate immediately and closes the run in the same command (an overhaul's report is its blessing);
+  gate immediately (an overhaul's report is its blessing, and its last outcome closes it);
   its findings stay fileable with `work_tickets.py file --finding <run>:<finding>` and `retro.py
   outcome` ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)). Running work goes on, and
   what comes back meanwhile counts towards the next run.
@@ -100,8 +100,8 @@ retro doc (`docs/retro-*.md`) lands without a work issue, a field report or runn
    the retro, with one shared minute for network calls. It needs no landing, update or other
    session; repeating it resumes partial writes. Older drafts migrate automatically; a draft
    carrying frozen inputs keeps its recorded form and rules. Finding outcomes do not hold the
-   gate. An overhaul's `overhaul.py file` is its blessing: it posts the report and closes the
-   overhaul, the gate open, and its findings are filed as a blessed retro's.
+   gate. An overhaul's `overhaul.py file` is its blessing: it posts the report, the gate open,
+   and the overhaul's last finding outcome closes it.
 8. **Hand back.** Send SE's session one message, the one
    [templates/run-closed.md](../templates/run-closed.md) writes.
    SE files the work findings as work issues, each naming every finding it takes as the message
