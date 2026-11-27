@@ -52,7 +52,7 @@ None.
    and rules recorded at collection, `uv run python <se>/scripts/retro.py bless <this issue>`
    opens the gate, posts the report and closes this retro in one call, without a landing.
 7. **Outcomes**: SE records each accepted `work` finding with
-   `work_tickets.py file --finding <retro>:<finding>` and each declined or merged finding with
+   `work_tickets.py file --finding <this issue>:<finding>` and each declined or merged finding with
    `retro.py outcome`.
 8. **Close**: blessing closes the retro; finding outcomes remain independently tracked.
 
