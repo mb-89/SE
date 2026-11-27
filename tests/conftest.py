@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import os
 import shutil
@@ -25,6 +24,7 @@ import fake_processes as fake_programs  # noqa: E402
 import process_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
+import se_binary as se_binary_build  # noqa: E402
 import shell_door  # noqa: E402
 import spawn_guard  # noqa: E402
 import time_bound  # noqa: E402
@@ -411,28 +411,12 @@ def obs() -> Path:
 SE_BUILD_WAIT_SECONDS = 600
 
 
-def se_build_key() -> str:
-    """What the se binary is built from: every file under components/ but its tests and testdata,
-    and kern's commit, as one digest."""
-    digest = hashlib.sha256()
-    components = ROOT / "components"
-    for path in sorted(components.rglob("*")):
-        name = path.relative_to(components).as_posix()
-        if (path.is_file() and not name.endswith("_test.go") and "/testdata/" not in f"/{name}"
-                and path.suffix in (".go", ".mod", ".sum")):
-            digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
-    with contextlib.suppress(OSError):
-        digest.update((KERN / ".git" / "HEAD").read_bytes())
-    return digest.hexdigest()[:16]
-
-
 @pytest.fixture(scope="session")
 def se_binary() -> Path:
-    """The se binary built from components/ (the scripts that run its verbs, setup.sh and setup.ps1
-    among them), once per tree and checkout at a time: kept in .se/.runtime/test-se/<build key>, so
-    a later run of the same tree builds nothing. The build is the suite's setup, not a test: it
-    runs the real go in the machine's home, under a lock as the obs fixture's build."""
-    binary = ROOT / ".se" / ".runtime" / "test-se" / se_build_key() / ("se.exe" if os.name == "nt" else "se")
+    """The se binary of this tree (tests/se_binary.py), which the complete suite's setup builds
+    (se.toml [tests] setup); a run without that setup builds it here, once per checkout at a time,
+    with the real go in the machine's home, under a lock as the obs fixture's build."""
+    binary = se_binary_build.path()
     if binary.is_file():
         return binary
     if shutil.which("go") is None:
@@ -446,13 +430,8 @@ def se_binary() -> Path:
             return binary
         with pytest.MonkeyPatch.context() as patch, process_door.use(process_door.RealProcesses()):
             use_machine_home(patch)
-            part = binary.with_name(binary.name + f".part{os.getpid()}")
-            part.parent.mkdir(parents=True, exist_ok=True)
-            built = subprocess.run(["go", "build", "-o", str(part), "./cmd/se"], cwd=ROOT / "components",
-                                   capture_output=True, text=True, check=False)
-            if built.returncode:
-                pytest.fail(f"go build ./cmd/se failed:\n{built.stderr}")
-            part.replace(binary)
+            if error := se_binary_build.build(binary):
+                pytest.fail(error)
     return binary
 
 
