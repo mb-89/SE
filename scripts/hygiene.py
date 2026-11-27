@@ -99,6 +99,7 @@ WORKFLOWS = re.compile(r"(?:^|/)\.github/(?:workflows|actions)/")
 # tracked file is refused.
 SECTIONS_SKIPPED: dict[str, str] = {
     "docs/retro-2026-11-13-to-24.md": "a dated record: it quotes sections as they stood in its window",
+    "docs/retro-2026-11-24-to-25.md": "a dated record: it quotes sections as they stood in its window",
     "tests/test_references.py": "plants dangling section references, the cases the check must find",
     "tests/test_repository.py": "plants dangling section references in fixture checkouts",
 }

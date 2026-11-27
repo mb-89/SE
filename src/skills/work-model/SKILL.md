@@ -828,7 +828,9 @@ Claude's cloud has no `~/.se/local.toml`, so there the project's identity applie
 repeats any of this section's rules:
 
 - `work_tickets.py sync`, which every role runs at the start, writes whichever applies into the
-  checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits.
+  checkout's git config (`user.name`, `user.email`), so merges carry it as well as commits, and
+  turns signing off there (`commit.gpgsign false`,
+  [Project settings](../../../docs/settings.md#project-settings)).
 - A fresh clone, such as a cloud session's, runs the project's setup command before its first
   commit, so the project's hooks run its public check on every commit and push.
 - Commit messages carry no tracker numbers
