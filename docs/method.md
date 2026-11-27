@@ -104,7 +104,10 @@ project's CI ran:
 - **The issue rule** (`pr_issues.py`): the work pull request's description names an open work issue
   of the project.
 - **The field report** (`field-report --check`) of the work pull request's description against its
-  work issue, with its component kinds; the guard already runs here.
+  work issue, with its component kinds; the guard already runs here. It judges the report by the
+  pull request template and the standing questions at its **Tested against** commit, as a piece of
+  work's inputs are frozen at its start: a template changed after it fails no queued delivery,
+  and a commit se does not hold reads today's (`work_tickets.py frozen_at`).
 - **The suite in budget** (`work_tickets.py suite`), as today, and the project's own check
   commands (`--check-command`).
 

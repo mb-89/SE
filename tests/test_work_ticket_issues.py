@@ -9387,6 +9387,7 @@ def test_the_branch_tip_and_branch_are_read_from_the_worktree_whatever_git_dir_n
         return subprocess.CompletedProcess(arguments, 0, "abc1234\n", "")
 
     monkeypatch.setattr(work_tickets, "run_git", git)
+    monkeypatch.setattr(work_tickets, "_TEMPLATE_AT", {})
     assert work_tickets.branch_tip(tmp_path / "worker") == "abc1234"
     work_tickets.current_branch(tmp_path / "worker")
     assert len(seen) == 2
@@ -9677,3 +9678,53 @@ def test_the_close_out_through_gh_removes_the_beat_line(worktree, monkeypatch):
                                  "comment_pull": lambda arguments, _: None,
                                  "close_pull": lambda arguments, _: None})
     assert gh.written == [beat_body(None)]
+
+
+NEW_QUESTIONS = ("longest", "wished_tool", "tooling_starfish")
+
+
+def without_new_questions(text: str) -> str:
+    """`text`, the standing questions' note or a report's Retro, as it stood before SE#2046 added
+    the three tooling questions: their fields, examples and sections left out."""
+    for name in NEW_QUESTIONS:
+        text = re.sub(rf"  - name: {name}\n(?:    .*\n)*", "", text)
+        text = re.sub(rf"    {name}: .*\n", "", text)
+        text = re.sub(rf"##+ [^\n]*\n\n<!-- {name}:.*?(?=\n##|\n<!-- se:field-report:end|\Z)", "",
+                      text, flags=re.DOTALL)
+    return text
+
+
+def test_a_report_is_judged_by_the_template_at_its_tested_against_commit(tmp_path, monkeypatch):
+    """SE#2006: a landing that changes the field-report template fails no report already queued.
+    A report answering the standing questions as they stood at its Tested against commit passes
+    there; the same report naming a commit se does not hold is judged by today's template."""
+    old_note = without_new_questions(
+        (PROJECT / "templates" / "standing-questions.md").read_text(encoding="utf-8"))
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    (folder / "standing-questions.md").write_text(old_note, encoding="utf-8")
+    templates = work_tickets.sibling("templates")
+    old = templates.load(folder=folder)["standing-questions"]
+    assert [field.name for field in old.fields][-1] == "bad_output_cause"
+    template = (PROJECT / work_tickets.FIELD_REPORT_TEMPLATE).read_text(encoding="utf-8")
+
+    def git(root, *arguments, env=None):
+        known = arguments[-1].startswith("abc1234:")
+        out = template if arguments[0] == "show" and known else ""
+        return subprocess.CompletedProcess(arguments, 0 if known else 128, out, "")
+
+    monkeypatch.setattr(work_tickets, "run_git", git)
+    monkeypatch.setattr(work_tickets, "_TEMPLATE_AT", {})
+    monkeypatch.setattr(templates, "own_at", lambda name, commit: old if commit == "abc1234" else None)
+    report = COMPLETE_REPORT
+    for item in work_tickets.standing_questions().fields:
+        if item.name in NEW_QUESTIONS:
+            report = re.sub(rf"### {re.escape(item.heading)}\n\n.*?\n(?=\n###|\n<!--|\Z)", "",
+                            report, flags=re.DOTALL)
+    assert "### What took the longest" not in report and "**Tested against `main`:** `abc1234`" in report
+    assert work_tickets.frozen_at(report) == "abc1234"
+    assert work_tickets.field_report_problems(report, None) == []
+    later = report.replace("`abc1234`", "`def5678`", 1)
+    assert work_tickets.frozen_at(later) is None
+    assert any("What took the longest" in problem
+               for problem in work_tickets.field_report_problems(later, None))

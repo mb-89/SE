@@ -90,6 +90,8 @@ PROTECTED_QUESTION = "\uE002"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
+# The integration-branch commit a field report was tested against, where its inputs are frozen.
+TESTED_AGAINST_PATTERN = re.compile(r"\*\*Tested against `[^`\n]+`:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 #: The field report's Branch, the pull request's head branch: `**Branch:** `<branch>``.
 REPORT_BRANCH_PATTERN = re.compile(r"\*\*Branch:\*\*[ \t]*`([^`\n]+)`")
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
@@ -2424,31 +2426,61 @@ QUESTIONS_PLACEHOLDER = "<!-- se:standing-questions -->"
 QUESTIONS_SECTION = "Retro"
 
 
-def standing_questions():
-    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`)."""
-    return sibling("templates").own(STANDING_QUESTIONS)
+def standing_questions(at: str | None = None):
+    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`); with
+    `at`, as they stood at that commit of the se checkout (`frozen_at`), else as they stand now."""
+    templates = sibling("templates")
+    found = templates.own_at(STANDING_QUESTIONS, at) if at else None
+    return found if found is not None else templates.own(STANDING_QUESTIONS)
 
 
-def field_report_template() -> str:
+def frozen_at(body: str) -> str | None:
+    """The commit a field report `body` names as **Tested against**, where the se checkout this
+    script runs from holds its field-report template there (`template_at`): a piece of work's
+    inputs are frozen at its start, so its report is judged by the template it was started from
+    (SE#2006) and no queued delivery fails for a template that changed after it. None otherwise (no
+    such line, a commit of another repository, or one se does not hold), for the template as it
+    stands."""
+    found = TESTED_AGAINST_PATTERN.search(body)
+    return found[1] if found is not None and template_at(found[1]) is not None else None
+
+
+_TEMPLATE_AT: dict[str, str | None] = {}
+
+
+def template_at(commit: str) -> str | None:
+    """The pull request template at `commit` of the se checkout, None where it holds none there."""
+    if commit not in _TEMPLATE_AT:
+        shown = run_git(Path(__file__).resolve().parents[1], "show",
+                        f"{commit}:{FIELD_REPORT_TEMPLATE}")
+        text = shown.stdout if shown.returncode == 0 else ""
+        _TEMPLATE_AT[commit] = text if REPORT_BEGIN in text and REPORT_END in text else None
+    return _TEMPLATE_AT[commit]
+
+
+def field_report_template(at: str | None = None) -> str:
     """The pull request template, the field report's one template, markers included, its
-    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section."""
-    path = Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
-    questions = sibling("templates").sections(standing_questions(), 3).rstrip("\n")
+    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section; with `at`, both
+    as they stood at that commit of the se checkout (`frozen_at`)."""
+    text = template_at(at) if at else None
+    if text is None:
+        try:
+            text = (Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE).read_text(
+                encoding="utf-8")
+        except OSError as error:
+            raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
+    questions = sibling("templates").sections(standing_questions(at), 3).rstrip("\n")
     return text.replace(QUESTIONS_PLACEHOLDER, questions, 1)
 
 
-def question_problems(lines: list[str] | None) -> list[str]:
+def question_problems(lines: list[str] | None, at: str | None = None) -> list[str]:
     """What keeps the field report's QUESTIONS_SECTION, its `lines`, from answering every standing
     question, each refusal of the block's own check; none where the section is missing, which the
     structure check names."""
     if lines is None:
         return []
     templates = sibling("templates")
-    block = standing_questions()
+    block = standing_questions(at)
     return [f'section "## {QUESTIONS_SECTION}": {finding.fix.replace("`## ", "`### ")} (one '
             f'"### <question>" per standing question, {block.path or STANDING_QUESTIONS}; '
             '"None" answers one that does not apply)'
@@ -5761,7 +5793,9 @@ def field_report_problems(body: str, issue_body: str | None,
     the work issue's body, the evidence gate. A section whose template text
     allows "None" may say only that.
     """
-    template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
+    at = frozen_at(body)
+    template = report_in(field_report_template(at) if at else field_report_template(),
+                         FIELD_REPORT_TEMPLATE_NAME)
     report = {heading.casefold(): lines for heading, lines in ordered_sections(body)}
     try:
         issue_number = field_report_issue(body)
@@ -5798,7 +5832,7 @@ def field_report_problems(body: str, issue_body: str | None,
         template_header = next((line.strip() for line in expected if line.strip().startswith("|")), None)
         if template_header is not None:
             problems.extend(table_problems(where, template_header, text))
-    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold())))
+    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold()), at))
     header = "\n".join(report[""])
     problems.extend(
         f'header (above the first section): unfilled placeholder {placeholder}; '
