@@ -468,6 +468,8 @@ On main, released as 17.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/work_tickets.py field-report --check <report.md>` passes
   for each open report.
 
+## SE 21
+
 ### `[tests] over_limit` is gone
 
 - **Change:** no time budget refuses a suite: `se.toml` `[tests] over_limit` is read by nothing,
