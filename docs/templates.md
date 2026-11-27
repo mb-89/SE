@@ -15,6 +15,15 @@ runs today; the [Map](#map) says where each of its parts goes.
 
 ## Names
 
+Inputs are frozen for each piece of work: input, processing, output. The engine records the
+template version, effective fields, nested templates and rules when it writes a draft or document.
+Checks keep those inputs until closure, rather than imposing new acceptance criteria mid-work.
+
+Reopening starts with the newest inputs. Work may also opt in during processing:
+`templates.py renew <template> --body-file <file>` records the newest inputs without inventing
+answers; raising the document's recorded version to the current template version also opts in.
+The next check applies that version, including any newly required fields.
+
 | word | meaning |
 |---|---|
 | **template** | the definition a person or an agent writes and keeps: its fields, its skeleton, its rules, its tags |

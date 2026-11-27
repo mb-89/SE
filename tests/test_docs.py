@@ -623,11 +623,12 @@ def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(tmp_pat
 
 def test_every_obs_build_runs_through_the_one_adapter():
     """deck.py and timeline.py build through build_docs's ADAPTER, installed where missing, and no
-    script names an adapter of its own."""
+    script names an adapter of its own: each asks ready_adapter, or builds through obs_document,
+    which asks it."""
     for script in ("deck.py", "timeline.py", "build_docs.py"):
         text = (ROOT / "scripts" / script).read_text(encoding="utf-8")
         assert '"--adapter", "' not in text, script
-        assert "ready_adapter(" in text, script
+        assert "ready_adapter(" in text or "obs_document(" in text, script
 
 
 def test_setup_and_ci_install_html_before_they_build():

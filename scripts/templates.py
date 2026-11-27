@@ -328,11 +328,12 @@ required field so filled passes and shows the gap; `parse` reads the section bac
 
 **Version** (rule `version`, `provenance`): `check` reads a document against the version it records,
 its template marker's or, for a file, the front matter's `version:` where its `template:` names the
-template. None recorded, or the template's own, passes; another minor or patch version warns;
-another major version, or one that is no semantic version, refuses, naming both versions and the
-fill that writes the document again. The move sets the severity, never the template's `rules`.
-`render` records the template's version now, so the filing commands also read the version of the
-text as it was given (`work_tickets.template_findings`).
+template. New documents record their effective fields and rules as portable inputs; checks and
+rendering keep those inputs even when the template moves. Older documents use the recorded
+version from local template history where available. With no saved or historical inputs, the
+legacy minor/patch warning and major-version refusal still explain the mismatch.
+`templates.py renew <template> --body-file <file>` explicitly adopts the newest inputs; reopening
+an issue does the same. Filing reads the recorded inputs (`work_tickets.template_findings`).
 
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
 `origin/<integration branch>` through `git_door` where that ref holds a template note, else from the working
@@ -443,7 +444,7 @@ import json
 import re
 import sys
 import tomllib
-from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields, replace
+from dataclasses import MISSING, dataclass, field as dataclass_field, fields as dataclass_fields, replace
 from pathlib import Path
 
 import se_script
@@ -665,6 +666,7 @@ class Template:
     code: tuple[tuple[str, str], ...] = ()
     #: Whether the template is a template manifest with its nodes (Template manifests), not a note.
     manifest: bool = False
+    source_root: str = dataclass_field(default="", compare=False, repr=False)
 
     @property
     def is_snippet(self) -> bool:
@@ -687,8 +689,9 @@ class Template:
     def front_lines(self) -> tuple[tuple[str, str], ...]:
         """What a file document's front matter records: `derived_from: {template: <name>, version:
         "<version>"}` and `overlay: <digest>`."""
-        return tuple(zip(PROVENANCE_KEYS, (f'{{template: {self.name}, version: "{self.version}"}}',
-                                           self.digest)))
+        return (*tuple(zip(PROVENANCE_KEYS, (f'{{template: {self.name}, version: "{self.version}"}}',
+                                            self.digest))),
+                (f"se_inputs_{self.name}", input_payload(self)))
 
     @property
     def writes_file(self) -> bool:
@@ -836,6 +839,150 @@ class Document:
     read: dict[str, object] = dataclass_field(default_factory=dict)
     #: The template version the body records, in its marker line or its front matter; "" for none.
     recorded: str = ""
+    inputs: Template | None = dataclass_field(default=None, repr=False)
+
+
+INPUTS_PATTERN = re.compile(
+    r"^(?:<!-- se:inputs |se_inputs_)([\w-]+)(?: |: )(\{[^\n]*\})(?: -->)?\r?$(?:\n)?",
+    re.MULTILINE)
+
+
+def input_data(value):
+    """Portable template inputs: effective fields, nested templates and rules, not runtime code."""
+    if isinstance(value, (Template, Field, Term)):
+        data = {}
+        for item in dataclass_fields(value):
+            if item.name in ("rule", "path", "source_root", "example", "code"):
+                continue
+            given = getattr(value, item.name)
+            if item.default is not MISSING and given == item.default:
+                continue
+            if item.default_factory is not MISSING and given == item.default_factory():
+                continue
+            data[item.name] = input_data(given)
+        return data
+    if isinstance(value, (list, tuple)):
+        return [input_data(item) for item in value]
+    if isinstance(value, dict):
+        return {key: input_data(item) for key, item in value.items()}
+    return value
+
+
+def input_payload(template: Template) -> str:
+    data = json.dumps(input_data(template), ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return data.replace("<", "\\u003c").replace(">", "\\u003e")
+
+
+def input_line(template: Template) -> str:
+    data = input_payload(template)
+    return (f"se_inputs_{template.name}: {data}" if template.writes_file
+            else f"<!-- se:inputs {template.name} {data} -->")
+
+
+def input_template(data: dict) -> Template:
+    values = dict(data)
+    fields = []
+    for given in values.pop("fields", []):
+        given = dict(given)
+        nested = given.pop("nested", None)
+        for key in ("choices", "carried"):
+            if key in given:
+                given[key] = tuple(given[key])
+        if "cases" in given:
+            given["cases"] = tuple(tuple(item) for item in given["cases"])
+        fields.append(replace(Field(**given), nested=input_template(nested) if nested else None))
+    for key in ("actions", "actors", "labels", "paths", "tags"):
+        if key in values:
+            values[key] = tuple(values[key])
+    values["terms"] = tuple(Term(**item) for item in values.get("terms", []))
+    template = Template(**values, fields=tuple(fields))
+    return replace(template, fields=tuple(
+        replace(item, rule=resolve(item.shape, template)) if ":" in item.shape else item
+        for item in template.fields))
+
+
+def inputs_for(template: Template, body: str) -> Template:
+    """An existing document keeps its recorded inputs; raising its version explicitly opts in."""
+    recorded = marked_version(template, body) or front_version(template, body)
+    for match in INPUTS_PATTERN.finditer(body):
+        if match[1] != template.name:
+            continue
+        try:
+            frozen = input_template(json.loads(match[2]))
+        except (ValueError, TypeError, KeyError) as error:
+            raise TemplateError(f"templates: {template.name}'s recorded inputs are unreadable: "
+                                f"{error}; restore its input record") from error
+        if not recorded or recorded == frozen.version:
+            return frozen
+        if recorded == template.version:
+            return template
+        raise TemplateError(f"templates: {template.name} records {recorded}, but its saved inputs "
+                            f"are {frozen.version}; restore that version or run "
+                            f"`templates.py renew {template.name} --body-file <file>`")
+    if recorded and recorded != template.version:
+        historical = historical_inputs(template, recorded)
+        if historical is not None:
+            return historical
+    return template
+
+
+_HISTORICAL_INPUTS: dict[tuple[str, str, str], Template | None] = {}
+
+
+def historical_inputs(template: Template, version: str) -> Template | None:
+    """Resolve pre-snapshot inputs from their own repository's local template history."""
+    if not template.source_root or version_parts(template, version) is None:
+        return None
+    key = (template.source_root, template.name, version)
+    if key in _HISTORICAL_INPUTS:
+        return _HISTORICAL_INPUTS[key]
+    root = Path(template.source_root)
+    door = _sibling("git_door")
+    history = door.run("log", "--first-parent", "--format=%H", "--",
+                       f"{TEMPLATES}/{template.name}.md", root=root)
+    if history.returncode == 0:
+        for revision in history.stdout.splitlines():
+            files = {}
+
+            def read(name: str) -> bool:
+                if name in files:
+                    return True
+                shown = door.run("show", f"{revision}:{TEMPLATES}/{name}", root=root)
+                if shown.returncode != 0:
+                    return False
+                files[name] = shown.stdout
+                if name == TERMS_FILE:
+                    return True
+                data = note_data(shown.stdout, f"{TEMPLATES}/{name}")
+                names = [data["extends"]] if data.get("extends") else []
+                names += [value.split("@")[0] for field in data.get("fields", [])
+                          for key in ("node", "entries", "items")
+                          if isinstance(value := field.get(key), str)]
+                return all(read(f"{name}.md") for name in names)
+
+            if not read(f"{template.name}.md"):
+                continue
+            data = note_data(files[f"{template.name}.md"], template.path)
+            if data.get("version") != version:
+                continue
+            read(TERMS_FILE)
+            frozen = _loaded([(template.repository, files, lambda name: f"{TEMPLATES}/{name}")])[
+                template.name]
+            _HISTORICAL_INPUTS[key] = frozen
+            return frozen
+    _HISTORICAL_INPUTS[key] = None
+    return None
+
+
+def renew(template: Template, body: str) -> str:
+    """Start a new input phase, on reopen or an explicit opt-in, without inventing field answers."""
+    body = INPUTS_PATTERN.sub("", body)
+    body = "\n".join(line for line in body.split("\n")
+                     if not (TEMPLATE_MARKER_PATTERN.fullmatch(line)
+                             and TEMPLATE_MARKER_PATTERN.fullmatch(line)[1] == template.name))
+    document = parse(template, body)
+    document.inputs = template
+    return render(template, document)
 
 
 # Loading
@@ -1290,7 +1437,8 @@ def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -
     files = _template_files(root, tree, folder)
     own = folder is None and root.resolve() == ROOT.resolve()
     where = (lambda name: str(folder / name)) if folder is not None else (lambda name: f"{TEMPLATES}/{name}")
-    return _loaded([(SE_REPOSITORY if own else PROJECT_REPOSITORY, files, where)])
+    return _located(_loaded([(SE_REPOSITORY if own else PROJECT_REPOSITORY, files, where)]),
+                    {SE_REPOSITORY if own else PROJECT_REPOSITORY: root})
 
 
 def catalog(root: Path = ROOT, *, tree: bool = False) -> dict[str, Template]:
@@ -1303,6 +1451,7 @@ def catalog(root: Path = ROOT, *, tree: bool = False) -> dict[str, Template]:
     repository's template. For SE's own checkout, SE's `templates/` is the project's."""
     own = root.resolve() == ROOT.resolve()
     layers: list[tuple[str, dict[str, str], object]] = []
+    sources = {SE_REPOSITORY: ROOT, PROJECT_REPOSITORY: root}
     try:
         files = _template_files(root, tree)
     except TemplateError:
@@ -1319,12 +1468,27 @@ def catalog(root: Path = ROOT, *, tree: bool = False) -> dict[str, Template]:
     except modules.ModuleError as error:
         raise TemplateError(f"templates: {error}") from error
     for repository, folder in repositories:
+        sources[repository] = folder.parent
         layers.append((repository, _folder_files(folder),
                        lambda name, repository=repository: f"{repository}:{TEMPLATES}/{name}"))
     if not own:
         layers.append((SE_REPOSITORY, _template_files(ROOT, tree),
                        lambda name: f"{SE_REPOSITORY}:{TEMPLATES}/{name}"))
-    return _loaded(layers)
+    return _located(_loaded(layers), sources)
+
+
+def _located(templates: dict[str, Template], sources: dict[str, Path]) -> dict[str, Template]:
+    located = {}
+
+    def locate(name: str) -> Template:
+        if name not in located:
+            template = templates[name]
+            located[name] = replace(template, source_root=str(sources[template.repository]),
+                                    fields=tuple(replace(item, nested=locate(item.node))
+                                                 if item.nested else item for item in template.fields))
+        return located[name]
+
+    return {name: locate(name) for name in templates}
 
 
 def _loaded(layers: list[tuple[str, dict[str, str], object]]) -> dict[str, Template]:
@@ -2191,6 +2355,13 @@ def _item_text(body: str) -> str:
 
 
 def parse(template: Template, body: str, title: str | None = None) -> Document:
+    template = inputs_for(template, body)
+    document = _parse(template, body, title)
+    document.inputs = template
+    return document
+
+
+def _parse(template: Template, body: str, title: str | None = None) -> Document:
     """`body` read into `template`'s fields (the module docstring: reading)."""
     if template.is_adapter:  # the body as it stands: its own check reads it
         fields = {} if title is None else {"title": title}
@@ -2391,17 +2562,32 @@ def stamped(template: Template, body: str) -> str:
     if template.is_adapter or template.message or template.writes_file:
         return body
     if any(match.group(1) == template.name for match in TEMPLATE_MARKER_PATTERN.finditer(body)):
-        return body
+        chosen = inputs_for(template, body)
+        recorded = marked_version(template, body)
+        return body if recorded and recorded != chosen.version else record_inputs(chosen, body)
     lines = body.splitlines(keepends=True)
     after = template.scope.get("after", "") if template.scope else FLEET_MARKER
     for index, line in enumerate(lines):
         if line.strip() == after:
-            return "".join([*lines[:index], _end(line), template.marker_line + "\n", *lines[index + 1:]])
+            return record_inputs(template, "".join(
+                [*lines[:index], _end(line), template.marker_line + "\n", *lines[index + 1:]]))
     if template.scope:
         raise TemplateError(f"templates: the body has no `{after}` line, which the {template.name} "
                             "template's marker follows")
     gap = "\n" if body and not body.startswith("\n") else ""
-    return f"{FLEET_MARKER}\n{template.marker_line}\n{gap}{body}"
+    return record_inputs(template, f"{FLEET_MARKER}\n{template.marker_line}\n{gap}{body}")
+
+
+def record_inputs(template: Template, body: str) -> str:
+    if template.is_adapter or template.message or template.kind in ("block", "entry", "interface", "code"):
+        return body
+    if any(match[1] == template.name for match in INPUTS_PATTERN.finditer(body)):
+        return body
+    line = input_line(template) + "\n"
+    if template.writes_file:
+        return body
+    marker = marker_of(template, body)
+    return body.replace(marker + "\n", marker + "\n" + line, 1) if marker else body
 
 
 def named_template(templates: dict[str, Template], action: str, body: str) -> Template | None:
@@ -2454,7 +2640,9 @@ def _with_template(front: str, template: Template) -> str:
             found = derived_from(front[:closing])
             span = (found[0], found[1]) if found else None
         else:
-            match = _front_key(key).search(front, 0, closing)
+            pattern = (re.compile(rf"^{re.escape(key)}:[^\r\n]*$", re.MULTILINE)
+                       if key.startswith("se_inputs_") else _front_key(key))
+            match = pattern.search(front, 0, closing)
             span = (match.start(), match.end()) if match else None
         if span:
             front = front[:span[0]] + line + front[span[1]:]
@@ -2554,7 +2742,7 @@ def _count(item: Field, value: object) -> int:
 
 
 def _without_markers(text: str) -> str:
-    kept = [line for line in text.splitlines(keepends=True)
+    kept = [line for line in INPUTS_PATTERN.sub("", text).splitlines(keepends=True)
             if line.strip() != FLEET_MARKER and not TEMPLATE_MARKER_PATTERN.match(line.rstrip("\r\n"))]
     return "".join(kept)
 
@@ -2562,6 +2750,8 @@ def _without_markers(text: str) -> str:
 def render(template: Template, document: Document | dict) -> str:
     """Canonical Markdown of `document` (a parsed Document, or a mapping of field values), as the
     module docstring's "Writing" says."""
+    if isinstance(document, Document) and document.inputs is not None:
+        template = document.inputs
     if template.is_adapter:
         if not isinstance(document, Document):
             raise TemplateError(f"templates: {template.name} is an adapter and has no fields to render; the "
@@ -2662,7 +2852,7 @@ def render(template: Template, document: Document | dict) -> str:
             number += used
         if out and out[-1] and not out[-1].endswith("\n"):
             out[-1] += "\n"
-    return "".join(out).rstrip("\n") + "\n"
+    return record_inputs(template, "".join(out).rstrip("\n") + "\n")
 
 
 def _end(text: str) -> str:
@@ -3167,6 +3357,7 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     """Every finding of `document` against `template`, refusals first, in field order; an adapter's
     are its own check's. `raw`, the raw input a fill takes, is what a `quote` field's quotes must
     hold (`quoted`); without it a quote field must only quote."""
+    template = document.inputs or template
     if template.is_adapter:
         return adapter_findings(template, document)
     found: list[Finding] = provenance(template, document)
@@ -3452,6 +3643,7 @@ def provenance(template: Template, document: Document) -> list[Finding]:
     docs/templates.md "The document"): none where it records none or the same; a minor or patch
     move warns; a major move, or a recorded version that is none, refuses, naming both versions and
     the fill that brings the document up."""
+    template = document.inputs or template
     recorded, current = document.recorded, template.version
     if not recorded or not current or recorded == current or \
             (version_parts(template, recorded) or ()) == version_parts(template, current):
@@ -4594,6 +4786,10 @@ def main(arguments: list[str] | None = None) -> int:
     drafting = commands.add_parser("draft", help="print the empty template")
     drafting.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     drafting.add_argument("--json", action="store_true")
+    renewing = commands.add_parser(
+        "renew", help="start a new input phase on reopen, or opt into the newest template and rules")
+    renewing.add_argument("template", help="the newest template to record")
+    renewing.add_argument("--body-file", type=Path, required=True, help="update this document in place")
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
@@ -4663,7 +4859,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling, scaffolding, staling, documenting):
+    for command in (checking, drafting, schemas, listing, filling, scaffolding, staling, documenting, renewing):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -4685,6 +4881,13 @@ def main(arguments: list[str] | None = None) -> int:
         templates = (load(ROOT, tree=tree, folder=options.templates)
                      if options.templates is not None
                      else catalog(_project(options), tree=tree))
+        if options.command == "renew":
+            template = _template(templates, options.template)
+            body = _file_text(options.body_file, "templates.py renew")
+            options.body_file.write_text(renew(template, body), encoding="utf-8", newline="\n")
+            print(f"Recorded new inputs: {template.name} {template.version}; "
+                  "complete its fields before the next check")
+            return 0
         if options.command == "list":
             print("\n".join(f"{glob}: {name}" for glob, name in owned(templates)) if options.owned
                   else "\n".join(list_templates(templates)))

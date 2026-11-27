@@ -176,9 +176,10 @@ EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
 
 
 BEGIN, END = work_tickets.REPORT_BEGIN, work_tickets.REPORT_END
-# The standing questions as a field report answers them: the first, then "None" for the rest.
+# The standing questions as a field report answers them: the first and each that "None" cannot
+# answer, then "None" for the rest.
 ANSWERED_QUESTIONS = "\n".join(
-    f"### {item.heading}\n\n{'The tests.' if index == 0 else 'None.'}\n"
+    f"### {item.heading}\n\n{'The tests.' if index == 0 or not item.none_ok else 'None.'}\n"
     for index, item in enumerate(work_tickets.standing_questions().fields))
 COMPLETE_REPORT = BEGIN + """
 **Work issue:** #5  **Branch:** `feature/example-20261104`  **Result:** complete
@@ -238,8 +239,12 @@ def reported_at(tip: str) -> str:
     return COMPLETE_REPORT.replace("**Branch tip:** `abc1234`", f"**Branch tip:** `{tip}`")
 
 def answer_questions(report: str) -> str:
-    """`report`, as field-report --draft writes it, with each standing question answered None."""
-    return re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", report, flags=re.MULTILINE)
+    """`report`, as field-report --draft writes it, with each standing question answered None, or
+    "The tests." where None does not answer it."""
+    open_ended = {item.name for item in work_tickets.standing_questions().fields if not item.none_ok}
+    return re.sub(r"^(### [^\n]+\n\n)<!-- (\w+): [^\n]*-->$",
+                  lambda match: match[1] + ("The tests." if match[2] in open_ended else "None."),
+                  report, flags=re.MULTILINE)
 
 
 def fill_evidence_rows(report: str) -> str:
@@ -317,6 +322,9 @@ IDENTITY = '[project]\nidentity = "mb <mb>"\n'
 _SE_TEMPLATES = work_tickets.sibling("templates").load(work_tickets.SE_ROOT, tree=True)
 WORK_MARKER, TICKET_MARKER, ROUTED_MARKER = (_SE_TEMPLATES[name].marker_line
                                              for name in ("work", "ticket", "routed"))
+#: The inputs line a body filed as given records under its marker (templates.py "Version").
+WORK_INPUTS, TICKET_INPUTS = (work_tickets.sibling("templates").input_line(_SE_TEMPLATES[name])
+                              for name in ("work", "ticket"))
 
 
 def stamped(template: str, body: str) -> str:
@@ -6865,7 +6873,7 @@ def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh
     assert person[:3] == ["label", "create", "se-person"]
     assert create[:4] == ["issue", "create", "--title", "voice-input"]
     assert [create[i + 1] for i, a in enumerate(create) if a == "--label"] == ["backlogged", "se-person"]
-    assert gh.bodies[-1] == f"{work_tickets.FLEET_MARKER}\n{TICKET_MARKER}\nA far-out idea.\n"
+    assert gh.bodies[-1] == f"{work_tickets.FLEET_MARKER}\n{TICKET_MARKER}\n{TICKET_INPUTS}\nA far-out idea.\n"
 
     labelled = FakeGh()
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: (
@@ -7065,7 +7073,7 @@ def test_filing_checks_the_body_with_the_one_reference_function(worktree, gh, mo
     body = worktree / "body.md"
     body.write_text("A body.\n", encoding="utf-8")
     assert run(worktree, "backlog", "file", "--title", "idea", "--body-file", str(body)) == 1
-    assert seen == [f"{work_tickets.FLEET_MARKER}\n{TICKET_MARKER}\nA body.\n"]
+    assert seen == [f"{work_tickets.FLEET_MARKER}\n{TICKET_MARKER}\n{TICKET_INPUTS}\nA body.\n"]
 
 
 def test_a_label_that_differs_only_in_case_is_the_existing_one(worktree, monkeypatch, capsys):
@@ -7114,7 +7122,7 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body)) == 0
     assert capsys.readouterr().out == "Filed work issue https://git.example/owner/repo/issues/6\n"
     assert github.issues[6]["labels"] == ["work", "ready", "repo:repo"]
-    assert github.issues[6]["body"] == (f"{work_tickets.FLEET_MARKER}\n{WORK_MARKER}\n"
+    assert github.issues[6]["body"] == (f"{work_tickets.FLEET_MARKER}\n{WORK_MARKER}\n{WORK_INPUTS}\n"
                                         "## Goal\n\nA filed package.\n")
     assert run(worktree, "route", "1", "--title", "fix/routed-20261106", "--routing-file", str(routing)) == 0
     assert github.issues[1]["title"] == "fix/routed-20261106"
@@ -7649,6 +7657,19 @@ def test_integrate_leaves_an_issue_with_open_points_of_the_landed_head_open(
     assert ("Stays open for the review's open points, which a worker takes on this issue: "
             "3. Name it") in bodies[0]
     assert "#5 stays open for the review's open points" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["longest", "wished_tool", "tooling_starfish"])
+@pytest.mark.parametrize("answer", ["", "None."])
+def test_the_check_refuses_a_report_that_leaves_a_tooling_question_empty_naming_it(name, answer):
+    """The owner, 26 Nov: every role answers in every field report what took the longest, what tool it
+    wished was present, and the tooling starfish; a report that leaves one empty is refused, naming it."""
+    heading = next(item.heading for item in work_tickets.standing_questions().fields if item.name == name)
+    report = COMPLETE_REPORT.replace(f"### {heading}\n\nThe tests.\n", f"### {heading}\n\n{answer}\n")
+    assert report != COMPLETE_REPORT
+    assert work_tickets.field_report_problems(COMPLETE_REPORT, None) == []
+    problems = work_tickets.field_report_problems(report, None)
+    assert len(problems) == 1 and heading in problems[0] and '"## Retro"' in problems[0]
 
 
 def test_open_points_are_requirements_of_every_delivery_but_the_head_they_passed():
@@ -8672,12 +8693,12 @@ def test_with_no_templates_table_file_backlog_file_and_route_file_as_given_and_m
     assert run(worktree, "route", "1", "--title", "fix/routed-20261116",
                "--routing-file", str(routing)) == 0
     assert " template " not in capsys.readouterr().err
-    marked = f"<!-- se:fleet -->\n{WORK_MARKER}\nNo template at all: one line.\n"
+    marked = f"<!-- se:fleet -->\n{WORK_MARKER}\n{WORK_INPUTS}\nNo template at all: one line.\n"
     assert github.issues[2] == {
         "number": 2, "title": "feat/plain-20261116", "body": marked, "labels":
         ["work", "ready", "repo:repo"], "url": "https://git.example/owner/repo/issues/2"}
     assert github.issues[3] == {
-        "number": 3, "title": "plain-idea", "body": marked.replace(WORK_MARKER, TICKET_MARKER),
+        "number": 3, "title": "plain-idea", "body": marked.replace(WORK_MARKER, TICKET_MARKER).replace(WORK_INPUTS, TICKET_INPUTS),
         "labels": ["backlogged", "se-person"],
         "url": "https://git.example/owner/repo/issues/3"}
     assert (github.issues[1]["title"], github.issues[1]["labels"]) == (
@@ -8812,7 +8833,7 @@ def test_hold_files_as_given_after_two_refusals_off_template_and_never_started(
     assert run(worktree, *command, "--hold") == 0
     assert "held: labelled off-template" in capsys.readouterr().out
     held = github.issues[2]
-    assert held["body"] == f"<!-- se:fleet -->\n{WORK_MARKER}\nOnly a line, no template.\n"
+    assert held["body"] == f"<!-- se:fleet -->\n{WORK_MARKER}\n{WORK_INPUTS}\nOnly a line, no template.\n"
     assert held["labels"] == ["work", "repo:repo", "off-template"]
     assert "off-template" in github.labels
     assert run(worktree, "ready") == 0
@@ -8843,7 +8864,7 @@ def test_hold_on_backlog_file_and_route_drops_ready_and_adds_off_template(
         assert run(worktree, *command, "--hold") == 0
         capsys.readouterr()
     assert github.issues[2]["labels"] == ["backlogged", "se-person", "off-template"]
-    assert github.issues[2]["body"] == f"<!-- se:fleet -->\n{TICKET_MARKER}\nA line.\n"
+    assert github.issues[2]["body"] == f"<!-- se:fleet -->\n{TICKET_MARKER}\n{TICKET_INPUTS}\nA line.\n"
     assert github.issues[1]["labels"] == ["work", "repo:repo", "off-template"]
     assert github.issues[1]["body"].endswith("### Package kind\n\nnone of them\n")
 
@@ -9178,7 +9199,7 @@ def test_a_retro_filed_from_its_template_passes_while_the_work_template_refuses(
     assert set(filed["labels"]) >= {"work", "ready", "repo:repo", "retro"}
     assert "<!-- se:template se/work " in filed["body"]
     assert "retro.py collect <this issue> --out <draft>" in filed["body"]
-    assert "retro.py file <this issue> --draft <draft>" in filed["body"]
+    assert "retro.py bless <this issue> --draft <draft>" in filed["body"]
 
 
 def test_ses_own_settings_refuse_a_work_body_without_a_problem(worktree, gh, monkeypatch, capsys,

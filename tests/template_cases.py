@@ -196,9 +196,12 @@ def _variants(template: templates.Template, document: str) -> list[str]:
         found.append(document.rstrip("\n") + f"\n\n{hashes} {sections[-1].heading}\n\nAgain.\n")
     found.append("---\nid: X1\n---\n" + document)
     if template.version and template.marker_line in document:
+        # A moved version without the inputs line: recorded inputs would hold the version they
+        # record, so the move reads against the template (templates.py "Version").
+        legacy = templates.INPUTS_PATTERN.sub("", document)
         major, minor, patch = template.version.split(".")
         for version in (f"{major}.{int(minor) + 1}.{patch}", f"{int(major) + 1}.0.0", "next"):
-            found.append(document.replace(f" {template.version} ", f" {version} ", 1))
+            found.append(legacy.replace(f" {template.version} ", f" {version} ", 1))
     if any(item.fence for item in template.fields):
         found.append(document.replace("candidates:", "options:", 1))
         found.append(document.replace("criteria:", "criteria: []\nold_criteria:", 1))
@@ -1499,12 +1502,35 @@ def _existing(files: dict[str, str]) -> list[dict]:
     return cases
 
 
+@contextmanager
+def _no_history():
+    """No case reads a template's git history: a recorded version that is not the template's own,
+    without recorded inputs, reads against the template (templates.historical_inputs), so the
+    cases are the same in every clone and the Go engine needs no history."""
+    historical = templates.historical_inputs
+    templates.historical_inputs = lambda template, version: None
+    try:
+        yield
+    finally:
+        templates.historical_inputs = historical
+
+
 def build() -> dict[str, str]:
     """Every case file, by its name, as its text."""
+    with _no_history():
+        return _build()
+
+
+def _build() -> dict[str, str]:
     made: dict[str, dict] = {}
     se = _set("se", templates.load(ROOT, tree=True), "SE's templates/")
     for name, entry in se["templates"].items():
         made[f"se-{name}.json"] = {"generated": se["generated"], "set": "se", "templates": {name: entry}}
+        if len(_text(made[f"se-{name}.json"]).encode("utf-8")) >= SPLIT_BYTES:
+            # Its body cases in a file of their own, beside its fills, so each stays under the limit.
+            made[f"se-{name}.json"]["templates"][name] = {**entry, "bodies": []}
+            made[f"se-{name}-bodies.json"] = {"generated": se["generated"], "set": "se",
+                                              "templates": {name: {**entry, "fills": []}}}
     # One file of select cases per action, as their count grows with every template's base.
     for action in dict.fromkeys(case["action"] for case in se["select"]):
         made[f"se-select-{action}.json"] = {
@@ -1570,7 +1596,42 @@ def build() -> dict[str, str]:
             raise AssertionError(f"template_cases: the broken set {name} loads")
     made["load-errors.json"] = {"generated": GENERATED.format(source="the broken sets below"),
                                 "set": "load-errors", "errors": errors}
-    return {name: json.dumps(data, ensure_ascii=False) + "\n" for name, data in made.items()}
+    return {name: _text(data) for name, data in made.items()}
+
+
+#: The size from which a template's body cases go to a file of their own: under the 200 000 bytes
+#: a case file may hold (tests/test_template_cases.py, scripts/hygiene.py MAX_BYTES).
+SPLIT_BYTES = 190_000
+
+
+def _text(data: dict) -> str:
+    """A case file's text: its data as JSON, each recorded-inputs payload once."""
+    return json.dumps(_shared_inputs(data), ensure_ascii=False) + "\n"
+
+
+def _shared_inputs(data: dict) -> dict:
+    """`data` with each recorded-inputs payload (templates.INPUTS_PATTERN) written once, under
+    `inputs`, and `$inputs:<n>$` in its place everywhere else: each body and document repeats its
+    template's whole inputs, which would put a case file over the size limit. The Go cases expand
+    them back (cases_test.go `readCases`)."""
+    payloads: dict[str, int] = {}
+
+    def token(match: re.Match) -> str:
+        return match[0].replace(match[2], f"$inputs:{payloads.setdefault(match[2], len(payloads))}$", 1)
+
+    def walk(value):
+        if isinstance(value, str):
+            return templates.INPUTS_PATTERN.sub(token, value)
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        return value
+
+    shared = walk(data)
+    if payloads:
+        shared["inputs"] = list(payloads)
+    return shared
 
 
 def drift(wanted: dict[str, str] | None = None) -> list[str]:
