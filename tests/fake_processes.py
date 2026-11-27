@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import json
 import locale
 import os
 import subprocess
@@ -297,6 +298,44 @@ def se_hook(invocation: Invocation) -> Path | None:
     return None
 
 
+def is_se_template(invocation: Invocation) -> bool:
+    """A call of the Go template engine's command line, `se template <verb>` (scripts/template_door.py)."""
+    words = invocation.words
+    return len(words) > 2 and Path(words[0]).name.split(".")[0].split("-")[0] == "se" and words[1] == "template"
+
+
+def se_template(invocation: Invocation) -> Answer:
+    """`se template fill|check` answered in-process. While SE's Python engine stands, it answers as
+    the Go engine does: tests/template_cases.py holds the two to one answer (work issue
+    "go-template-engine-only", whose cut-over moves its callers to the Go engine one by one)."""
+    import templates
+
+    words = invocation.words
+    verb, root = words[2], Path(words[words.index("--root") + 1]) if "--root" in words else Path(invocation.cwd or ".")
+    request = json.loads(invocation.stdin.decode("utf-8"))
+    catalog = templates.load(root, tree=True)
+    if verb == "fill":
+        template = catalog[request["template"]]
+        document, found, _ = templates.fill(template, request.get("fields") or {}, request.get("raw", ""),
+                                            title=request.get("title"))
+        refused = [str(finding) for finding in found if finding.severity == templates.REFUSE]
+        if refused:
+            return Answer(1, "", f"se template fill: templates fill {template.name}: refused, nothing was made; "
+                                 "fix every finding and fill again:\n" + "\n".join(refused) + "\n")
+        return Answer(0, json.dumps({"template": template.name, "document": document}) + "\n")
+    if verb == "check":
+        template = catalog.get(request.get("template", "")) if request.get("template") else None
+        if template is None:
+            chosen, found = templates.verdict(catalog, request.get("action", ""), request["body"], request.get("title"))
+        else:
+            chosen, found = template, templates.check(template, templates.parse(template, request["body"], request.get("title")))
+        answer = {"template": chosen.name if chosen else "", "findings": [
+            {"field": f.field, "rule": f.rule, "severity": f.severity, "fix": f.fix} for f in found]}
+        answer["refused"] = any(f.severity == templates.REFUSE for f in found)
+        return Answer(0, json.dumps(answer) + "\n")
+    return Answer(2, "", f'se template {verb}: the verb is fill or check, not "{verb}"\n')
+
+
 @dataclass
 class FakeProcesses:
     """The door's fake for one test: handlers by program name, SE's scripts and hooks in-process."""
@@ -317,6 +356,8 @@ class FakeProcesses:
         for program, handler in self.handlers:
             if (executable_name(program) == name) if isinstance(program, str) else program(invocation):
                 return handler
+        if is_se_template(invocation):
+            return se_template
         hook = se_hook(invocation) if self.hooks else None
         if hook is not None:
             return HOOKS[hook.name]
