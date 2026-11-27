@@ -3228,10 +3228,17 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
 def branch_head(root: Path, branch: str) -> str:
     """The ref `release-trailer`, `guard` and `integrate` read `branch` at: the local branch where
     the clone has one, else `origin/<branch>`, the ref an integrator clone that only fetched it
-    has; refused with neither."""
-    for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
-        if run_git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0:
-            return ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+    has; refused with neither. A local branch behind `origin/<branch>`, such as the one `start`
+    made at the claim commit before the worker pushed, gives way to origin's: the delivered
+    commits are there. One with commits origin lacks stays, and the landing's own check refuses
+    a merge that lacks the pull request head."""
+    found = [ref for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}")
+             if run_git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0]
+    if (len(found) == 2 and len({checked_git(root, "rev-parse", ref).strip() for ref in found}) == 2
+            and run_git(root, "merge-base", "--is-ancestor", *found).returncode == 0):
+        return f"origin/{branch}"
+    for ref in found:
+        return ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
     raise QueueError(
         f"Cannot find branch {branch}: neither {branch} nor origin/{branch} exists in {root}; "
         f"fetch it with git -C {root} fetch origin {branch}, then run the command again"

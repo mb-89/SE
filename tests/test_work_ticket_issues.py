@@ -3323,6 +3323,39 @@ def test_integrate_accepts_an_empty_discovery_branch(main_checkout, monkeypatch)
     assert not worker.exists()
 
 
+def test_integrate_lands_origins_head_over_a_local_branch_left_at_the_claim(main_checkout, monkeypatch):
+    """A cloud landing (SE#1997): `start` made the local work branch at the claim commit, the
+    worker pushed its commits to origin's; integrate merges origin's head, no manual step."""
+    git_ok("-C", str(main_checkout), "branch", "feature/claimed")  # start's branch, at the claim
+    origin = git_run(main_checkout, "remote", "get-url", "origin").stdout.strip()
+    worker = fake_git.clone(origin, main_checkout.parent / "cloud-worker")
+    git_ok("-C", str(worker), "switch", "-q", "-c", "feature/claimed")
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "-c", "user.name=w", "-c", "user.email=w@example.invalid",
+           "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/claimed")
+    head = git_run(worker, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    report = {"body": reported_at(head)}
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: report)
+    monkeypatch.setattr(
+        work_tickets, "run_gh",
+        lambda root, args: json.dumps({"headRefName": "feature/claimed", "headRefOid": head,
+                                       "body": report["body"],
+                                       "url": "https://git.example/owner/repo/pull/7"})
+        if args[:2] == ["pr", "view"] else "")
+    monkeypatch.setattr(work_tickets, "run_gh_with_body", lambda root, args, body: "")
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "passed"))
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+    assert commit and squashed_onto_origin(main_checkout, commit)
+    assert (main_checkout / "worker.txt").read_text(encoding="utf-8") == "worker\n"
+
+
 @pytest.mark.parametrize("failed_step", ["Complete suite", "Output regeneration", "Project check"])
 def test_integrate_failure_restores_pre_merge_main_and_escalates(
         main_checkout, monkeypatch, failed_step):
