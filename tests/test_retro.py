@@ -574,6 +574,19 @@ def run_line(start: str, wall: float, issue: int) -> dict:
             "gh_calls": 3, "gh_refusals": 0, "gh_wait_seconds": 0.0, "exit_code": 0, "issue": issue}
 
 
+def test_the_window_counts_a_partial_landing_as_a_failure(checkout):
+    """SE#2006: a partial landing closes its issue without the `escalated` label, and the retro
+    still counts it as a failure, one escalation."""
+    given = answers(checkout)
+    given["issues.json"][3] = issue(12, "feat/b", "2026-11-03T12:00:00Z")
+    pulls = given["pulls.json"]
+    pulls[3] = {**pulls[3], "body": pulls[3]["body"].replace("**Result:** complete",
+                                                             "**Result:** partial")}
+    assert "**Result:** partial" in pulls[3]["body"]
+    by = {item.number: item for item in collected(checkout, given).issues}
+    assert (by[12].landed, by[12].escalations) == (True, 1)
+
+
 def test_collect_reads_metrics_back_from_the_landings_and_counts_a_run_once(
         checkout, tmp_path, monkeypatch):
     """A cloud integrator's line survives only in its landing's description (#23's); a run the

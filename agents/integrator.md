@@ -17,6 +17,9 @@ the design notes it names; this file holds what is the same for every integratio
 nest; where an escalation goes is the work model's
 [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder).
 
+Each report you send SE ends with what the person is needed for, or `Nothing from you right
+now.`, for SE to pass on: [Every turn ends with what the person is needed for](../skills/work-model/SKILL.md#rules-for-all-roles).
+
 ## Never wait for a human
 
 There is no human on the other end. Never call `ask_user` or issue a question, confirmation or
@@ -188,6 +191,17 @@ merge or a start.
      report says `**Result:** partial` and its "Not delivered" names the pieces left, each a bullet
      led by `**Piece <n>, …**`, `integrate` leaves it open and comments those pieces, and
      `pr-body` names it with `Refs`. The complete piece closes it.
+   - Any other partial delivery is a failure, and its landing is the handling of that failure: no
+     issue closes half done, and none stays open for a remainder.
+
+     `integrate` lands it only where
+     each piece its "Not delivered" left names its home: a new work issue for a feature, a comment
+     on a named next issue for a fix, or `se-person` with the issue it flags for what needs the
+     person. It then closes the issue.
+
+     A piece without a home is refused before the merge and escalated to SE, which gives it its
+     home in the description; integrate again then. The next retro counts each partial landing as
+     a failure.
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
    retained worktree explicitly. Follow the work model's
    [immediate cleanup rule](../skills/work-model/SKILL.md#visible-sessions), including archiving

@@ -1359,6 +1359,9 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             report_pull = next((pull for pull in sorted(naming, key=lambda p: -p.number)
                                 if report_of(pull.body)), None)
         report = report_of(report_pull.body) if report_pull else None
+        result = work_tickets.FIELD_REPORT_RESULT_PATTERN.search(report or "")
+        if result is not None and result[1] == "partial":
+            escalations = max(escalations, 1)  # a partial landing is a failure the retro counts
         issue_texts[issue.number] = [issue.title, issue.body, *comments, report or ""]
         duplicate = is_duplicate(issue)
         closed.append(Closed(

@@ -3808,8 +3808,8 @@ def partial_left(report: str) -> list[str]:
     """What a partial field report naming no planned piece left undone: one item per top-level
     bullet of its "Not delivered" (its bold lead without a trailing `:` or `.`, else its first
     line), else that section's first paragraph on one line, else `NOTHING_LEFT_NAMED`; none for
-    a complete report or a planned split (`planned_pieces`). Its issue stays open at the landing,
-    as a partial is not done and only SE drops or moves what it left."""
+    a complete report or a planned split (`planned_pieces`). Each must name its home
+    (`unhomed_pieces`) before the landing, which then closes the issue."""
     result = FIELD_REPORT_RESULT_PATTERN.search(report)
     if result is None or result.group(1) != "partial" or planned_pieces(report):
         return []
@@ -3828,6 +3828,50 @@ def partial_left(report: str) -> list[str]:
     if not paragraph or paragraph.rstrip(".").casefold() == "none":
         return [NOTHING_LEFT_NAMED]
     return [paragraph]
+
+
+# The homes a partial landing's remainder must name, one per piece left (SE#2006): a comment on a
+# named next issue for a fix, `se-person` with the issue it flags for what needs the person, or a
+# new work issue for a feature. No issue closes half done, and none stays open for a remainder.
+COMMENT_HOME = re.compile(r"/issues/\d+#issuecomment-\d+")
+ISSUE_HOME = re.compile(r"(?:^|[\s(])#(\d+)\b|/issues/(\d+)\b")
+PARTIAL_HOMES = ("a new work issue for a feature (`#<n>`)",
+                 "a comment on a named next issue for a fix (its `#issuecomment-` link)",
+                 "`se-person` with the issue it flags, for what needs the person")
+
+
+def left_pieces(report: str) -> list[tuple[str, str]]:
+    """The pieces a partial field report naming no planned piece left (`partial_left`), each with
+    its whole text: its top-level bullet of "Not delivered" and the lines under it, else the
+    section's first paragraph."""
+    names = partial_left(report)
+    if not names or names == [NOTHING_LEFT_NAMED]:
+        return [(name, "") for name in names]
+    left = section(markdown_sections(report), "not delivered")
+    texts: list[str] = []
+    for line in left.splitlines():
+        if TOP_BULLET_PATTERN.fullmatch(line.rstrip()):
+            texts.append(line)
+        elif texts:
+            texts[-1] += "\n" + line
+    return list(zip(names, texts or [left]))
+
+
+def piece_home(text: str, work_number: int | None) -> str | None:
+    """The home a piece left names (PARTIAL_HOMES): `comment`, `person` or `issue`; None for
+    none. The work issue itself is no home."""
+    if COMMENT_HOME.search(text):
+        return "comment"
+    issues = [int(match[1] or match[2]) for match in ISSUE_HOME.finditer(text)]
+    issues = [number for number in issues if number != work_number]
+    if not issues:
+        return None
+    return "person" if PERSON_LABEL in text else "issue"
+
+
+def unhomed_pieces(report: str, work_number: int | None) -> list[str]:
+    """The pieces a partial delivery left with no home (`piece_home`), which `integrate` refuses."""
+    return [name for name, text in left_pieces(report) if piece_home(text, work_number) is None]
 
 
 def pull_request_body(issue: dict[str, object] | None, report: str) -> str:
@@ -9579,9 +9623,10 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
                   comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
     take it out of progress with its beat line, and close it unless something keeps it open:
-    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left; or
-    `left`, what a partial delivery naming no planned piece left (`partial_left`), which also takes
-    any `ready` off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
+    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left.
+    `left`, what a partial delivery naming no planned piece left (`partial_left`), each piece with
+    its home (`unhomed_pieces` refused before the merge), keeps nothing open: the comment names
+    them, and `ready` comes off before the close."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
     if work_number is None:
@@ -9591,8 +9636,7 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
             Step("close_pull", "update_pull_request",
                  {**pulls, "pullNumber": pull_number, "state": "closed"}),
         ), "the authorized fix has no work issue to close")
-    escalate = (label_step(tracker, work_number, "ready", add=False),
-                label_step(tracker, work_number, "escalated", add=True)) if left else ()
+    unready = (label_step(tracker, work_number, "ready", add=False),) if left else ()
     return Plan(f"close out #{work_number}", (
         Step("comment_pull", "add_issue_comment",
              {**pulls, "issue_number": pull_number, "body": landed}),
@@ -9602,8 +9646,8 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int 
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
         beat_step(tracker, work_number, write=False),
-        *escalate,
-        *(() if pending or left else (Step("close_issue", "issue_write", {
+        *unready,
+        *(() if pending else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
             "state_reason": "completed"}),)),
     ))
@@ -9758,6 +9802,16 @@ def integrate(
         raise QueueError(f"Pull request #{pull_number} has no head branch")
     feedback.phase(f"guard {branch} against its field report")
     guard(root, branch, report)
+    unhomed = unhomed_pieces(report, work_number)
+    if unhomed:
+        reason = (f"pull request #{pull_number} is a partial delivery whose Not delivered gives "
+                  f"no home to: {'; '.join(unhomed)}. A landing closes its work issue, so each "
+                  f"piece left names one of: {'; '.join(PARTIAL_HOMES)}; nothing was merged. SE "
+                  "gives each its home, names it in that piece of the description, and the "
+                  "integrator integrates again")
+        if work_number is not None:
+            integration_escalation(root, work_number, tracker, reason)
+        raise QueueError(reason)
 
     feedback.phase(f"sync {target}")
     sync(root)
@@ -10269,8 +10323,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         waits += ("Stays open for the planned pieces left, as the field report names them: "
                   + "; ".join(pieces) + "\n")
     if left:
-        waits += ("Stays open for what this partial delivery left, which SE re-scopes: "
-                  + "; ".join(left) + "\n")
+        waits += ("A partial delivery, a failure the next retro counts; each piece it left has "
+                  "its home under the field report's Not delivered: " + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, str(state.get("release_kind") or "patch"), list(state.get("component_tags") or []))} "
@@ -10320,9 +10374,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     if left:
-        print(interface_message("escalation", issue=str(work_number),
-                                question="stays open for what its partial delivery left; re-scope the "
-                                         f"issue or take it to the owner: {'; '.join(left)}"))
+        print(f"#{work_number} landed partial, a failure the next retro counts; each piece left has "
+              f"its home under the field report's Not delivered: {'; '.join(left)}")
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
