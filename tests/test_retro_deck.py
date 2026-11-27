@@ -12,6 +12,7 @@ import pytest
 
 import retro_deck
 import templates
+from test_docs import obs_in_process
 
 STEPS = [("2. Table of what happened", "| chapter | steps |\n|---|---|\n| 1 | #11 |"),
          ("3. The standing questions", "| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |\n\n"
@@ -113,9 +114,7 @@ def test_the_vault_writes_times_as_the_template_states_them(tmp_path):
     assert "| 1 | 2 Nov 10:00 | #11 |" in (tmp_path / "step-01.md").read_text(encoding="utf-8")
 
 
-@pytest.mark.spawns("tool: the retro's deck builds with the real obs, obs-document in obs's own Python "
-                    "environment, which runs only as a process")
-def test_the_real_build_writes_one_file_and_its_data_names_the_host_and_the_decisions(tmp_path, obs):
+def test_the_real_build_writes_one_file_and_its_data_names_the_host_and_the_decisions(tmp_path, obs_in_process):
     destination = tmp_path / "report" / "retro-30.html"
     long = " ".join(["A finding the judge wrote in one long paragraph."] * 40)
     steps = [*STEPS, ("5. Classes and homes", f"{long}\n\nThe chapter from 2026-11-02T10:00:00Z.")]
