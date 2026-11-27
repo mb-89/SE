@@ -46,7 +46,7 @@ both.
 | `templates/release-trailer.md` | An integration merge's release kind, its one trailer. |
 | `templates/requirement.md` | One requirement: one checkable statement, how it is checked and where it comes from. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
-| `templates/retro-deck.md` | A retro's deck ends with Anything else? and Nothing else as its single selectable default. |
+| `templates/retro-deck.md` | Every decision chapter is a decision note; a retro's deck ends with Anything else? and Nothing else as its single selectable default. |
 | `templates/retro-doc.md` | A retro report's link to its committed retro doc: the commit and the doc's path in the checkout. |
 | `templates/retro-due.md` | The retro and overhaul countdowns: per kind what it counted since where it starts, the days, and whether it is due or open. |
 | `templates/retro-part.md` | The label a part of a split retro report ends in: which part of how many, of which retro's report. |
@@ -116,12 +116,12 @@ A `file.write` template claims files by its `applies.paths` globs, such as a mil
 `templates.py check --path <file>` checks one against the template its front matter's
 `derived_from` names or the conditions pick, refuses one none picks and leaves unclaimed files free.
 
-The front matter and `#` title stay as they are, but for the `derived_from` and `overlay` lines the
-front matter records its template by.
+The front matter and `#` title stay as they are, but for `derived_from`, `overlay` and
+`se_inputs_<template>`, which record the template version and its effective fields and rules.
 
-A document is checked against the template version its marker or front matter records: another
-minor or patch version warns, another major version refuses, naming both versions and the fill
-that writes it again ([docs/templates.md "The document"](templates.md#the-document)).
+A document is checked against its recorded inputs, not changing acceptance criteria. Reopening
+adopts the newest inputs; an explicit `templates.py renew <template> --body-file <file>` opts in
+earlier ([docs/templates.md "The document"](templates.md#the-document)).
 
 `--templates <folder>` reads the templates from another folder.
 
