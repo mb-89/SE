@@ -167,6 +167,8 @@ Never start a server or serve a deck.
 
 A deck may also carry record chapters, notes without a bless request and without a `pugh` fence, such as
 what was decided without the person and their [tasks](#tasks-for-the-person), beside at least one decision.
+Every chapter with a bless request is a decision note: `deck.py build` refuses one without the note's
+sections and its `pugh` fence, so no deck brings the person a decision in prose.
 
 1. Write the decision notes and their manifest into a scratch directory `<notes>`, then run
    `uv run python <se>/scripts/deck.py build <notes> --destination <deck>.html --host <host>`.

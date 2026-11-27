@@ -228,7 +228,7 @@ TITLE_WORDS = 5
 RULE_BOOK = "src/skills/work-model/references/rules.md"
 WORK, DECISION = "work", "decision"
 BLOCK_VERSION = 1
-RETRO_LABEL = "retro"
+RETRO_LABEL = sibling("issue_kinds").RETRO.labels[0]
 RETRO_TITLE = "docs/retro-"
 WORK_LABEL = work_tickets.WORK_LABELS[0]
 ESCALATED_LABEL = "escalated"
@@ -681,6 +681,15 @@ class ToolDoor:
         answer = self.door.ask("issue_read", {"method": "get_comments", "issue_number": number,
                                              "perPage": 100})
         return listed(answer, "comments")
+
+
+def checked(door, number: int, command: str) -> None:
+    """Refuse, before `command` writes anything, where retro issue `number` read through `door` is
+    another kind of issue (issue_kinds.check); an answer the door does not hold yet is checked on the
+    run that holds it."""
+    issue = door.issue(number) if number else {}
+    if issue:
+        sibling("issue_kinds").check(issue, sibling("issue_kinds").RETRO, command, QueueError)
 
 
 def is_retro(issue: Issue) -> bool:
@@ -2598,12 +2607,14 @@ def posted_block(texts: list[str], number: int, show) -> dict | None:
 def file_steps(tracker: str, number: int, comments: list[str], findings: int,
                what: str = "retro") -> Plan:
     """The writes for the report of run `number` of kind `what` (RUN_KINDS): its parts, then its
-    state, which opens `file --finding` for its findings. A retro's report is in report state until
+    state, which opens `file --finding` for its findings. The kind's filing rule is issue_kinds
+    KINDS' `report_blesses`: a retro's report is in report state until
     its blessing (`bless`) or its last outcome; an overhaul's report is its blessing, so it holds
     no filing from then on, and it stays open for its findings until the last outcome closes it
     (`record_outcome`); a report with no finding is done at once and closes the run."""
     if what not in RUN_KINDS:
         raise ValueError(f"{what!r} is no run kind ({', '.join(RUN_KINDS)})")
+    blesses = sibling("issue_kinds").KINDS[what].report_blesses
     issues = work_tickets.owner_repo(tracker)
     posts = tuple(Step("comment_issue", "add_issue_comment", {
         **issues, "issue_number": number, "body": comment},
@@ -2612,7 +2623,7 @@ def file_steps(tracker: str, number: int, comments: list[str], findings: int,
     close = Step("close_issue", "issue_write", {
         **issues, "method": "update", "issue_number": number,
         "state": "closed", "state_reason": "completed"})
-    if what == "overhaul" and findings:
+    if blesses and findings:
         posts += (Step("comment_issue", "add_issue_comment", {
             **issues, "issue_number": number,
             "body": (report_state_comment("blessed", findings) + "\n"
@@ -2775,6 +2786,7 @@ def run_file(args: argparse.Namespace) -> int:
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
     else:
+        checked(door, args.retro, "retro.py file")
         work_tickets.run_plan(steps, issue_actions(root, tracker, door))
         status = ("; no findings, so it is done and closed" if not block["findings"]
                   else "; the retro remains open for finding outcomes")
@@ -2799,8 +2811,9 @@ def bless(args: argparse.Namespace, deadline: float) -> int:
         raise QueueError("bless needs a signed-in GitHub door to finish in one call; "
                          "run `gh auth login`, then repeat this bless command")
     issue = door.issue(args.retro)
-    if not issue or not is_retro(issue_of(issue)):
-        raise QueueError(f"bless: #{args.retro} is not a retro issue; nothing was written")
+    if not issue:
+        raise QueueError(f"bless: #{args.retro} does not exist; nothing was written")
+    checked(door, args.retro, "retro.py bless")
     given = door.comments(args.retro)
     if getattr(door, "missing", []):
         raise QueueError(f"bless: retro #{args.retro}'s issue or comments are missing; "
@@ -2939,8 +2952,8 @@ def without_table(text: str, header: str) -> str:
 def deck_parts(block: dict, text: str, root: Path | None = None
                ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """The retro's deck from its judged draft `text` and its block: every step the retro ran as a
-    chapter, each thing once, then one decision chapter per finding and a final "Anything else?"
-    decision with "Nothing else" as its default answer.
+    chapter, each thing once, then one decision chapter per finding (retro_deck.text closes it with
+    the question its run kind asks).
 
     - what was collected, without the per-issue table and the field reports' answers
       (LANDED_SECTION, ANSWERS_SECTION);
@@ -2962,9 +2975,7 @@ def deck_parts(block: dict, text: str, root: Path | None = None
              (heading["matrix"], f"{body('matrix')}\n\n## {heading['answers']}\n\n{answers}"),
              (heading["classes"], review.demoted("\n".join(judged_class_lines(classes, block, named_only=True)),
                                                  -1).strip())]
-    decisions = [finding_chapter(item, classes) for item in block["findings"]]
-    decisions.append(sibling("retro_deck").ANYTHING_ELSE)
-    return steps, decisions
+    return steps, [finding_chapter(item, classes) for item in block["findings"]]
 
 
 def run_deck(args: argparse.Namespace) -> int:
@@ -2980,13 +2991,15 @@ def run_deck(args: argparse.Namespace) -> int:
     deck = sibling("retro_deck")
     try:
         steps, decisions = deck_parts(block, text, root)
-        written = deck.text(f"{work_tickets.repository_name(root)}: Retro #{args.retro}", "", steps, decisions)
+        kind = sibling("issue_kinds").RETRO
+        written = deck.text(kind, f"{work_tickets.repository_name(root)}: Retro #{args.retro}", "", steps,
+                            decisions)
     except deck.DeckError as error:
         raise QueueError(f"Retro #{args.retro}: {error}") from None
-    code = deck.build(written, args.destination, args.host, args.answers)
+    code = deck.build(kind, written, args.destination, args.host, args.answers)
     if code == 0:
         print(f"Retro #{args.retro}: the report is the deck {args.destination}, its one file: a title "
-              f"page, {len(steps)} steps and {len(decisions)} decision chapter(s)"
+              f"page, {len(steps)} steps and {len(decisions) + kind.anything_else} decision chapter(s)"
               + (", the person's answers recorded" if args.answers else ""))
     return code
 
@@ -3014,6 +3027,7 @@ def run_collect(args: argparse.Namespace) -> int:
         door = FileDoor(Path("<dir>"), tracker, remote)
     else:
         door = GhDoor(root, tracker, remote)
+    checked(door, args.retro, "retro.py collect")
     sessions = None
     if args.sessions is not None:
         try:

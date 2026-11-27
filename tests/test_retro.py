@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import retro
+import issue_kinds
 import retro_deck
 import templates
 import se_component
@@ -191,6 +192,8 @@ def answers(checkout: Path) -> dict[str, object]:
                  "Tidy up"),
             pull(26, "feat/abandoned", "Refs #14"),
         ],
+        # The retro issue itself, read first for its kind (issue_kinds.check).
+        "issue-30.json": {"number": 30, "title": "retro-20261112", "labels": ["retro"], "state": "open"},
         "comments-5.json": [{"body": posted(5, previous)}],
         "comments-11.json": [
             {"body": "Integration stopped: Cannot merge feat/a; conflicts: x.py\n"},
@@ -644,11 +647,14 @@ def test_without_gh_the_plans_are_printed_and_the_answers_read(checkout, tmp_pat
     assert retro.main(command) == 0
     first = capsys.readouterr().out
     assert "GitHub plan: the window of retro #30" in first
-    assert '1. list_issues {"owner": "owner", "perPage": 100, "repo": "repo", "state": "CLOSED"}' in first
-    assert "2. list_pull_requests" in first and "issue_read" not in first
+    # The retro issue itself first, for its kind (issue_kinds.check), then the window.
+    assert '1. issue_read {"issue_number": 30, "method": "get"' in first
+    assert '2. list_issues {"owner": "owner", "perPage": 100, "repo": "repo", "state": "CLOSED"}' in first
+    assert "3. list_pull_requests" in first and first.count("issue_read") == 1
     assert f"Then: retro.py collect 30 --answers {directory} --out {out}" in first
     for name in ("issues.json", "pulls.json"):
         (directory / name).write_text(json.dumps(given[name]), encoding="utf-8")
+    (directory / "issue-30.json").write_text(json.dumps(given["issue-30.json"]), encoding="utf-8")
 
     assert retro.main(command) == 0
     retros = capsys.readouterr().out
@@ -1163,8 +1169,8 @@ def built_deck(checkout: Path, tmp_path: Path, monkeypatch, text: str, *extra: s
     import retro_deck
     asked: dict = {}
 
-    def build(written, destination, host=None, answers=None):
-        asked.update(written=written, destination=destination, host=host, answers=answers)
+    def build(kind, written, destination, host=None, answers=None):
+        asked.update(kind=kind, written=written, destination=destination, host=host, answers=answers)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text("<html></html>", encoding="utf-8")
         return 0
@@ -1204,9 +1210,8 @@ def test_the_deck_holds_every_step_then_finding_decisions_and_anything_else(chec
     assert "#14 closed without one." not in classes and "A rule, not a habit." not in classes
     assert [heading for heading, _ in decisions] == [
         "1. Refuse a landing whose work issue has no field report",
-        "2. Make the field report a rule of the rule book",
-        "Anything else?"]
-    work, decision, anything_else = (text for _, text in decisions)
+        "2. Make the field report a rule of the rule book"]
+    work, decision = (text for _, text in decisions)
     # A project's retro deck: every decision chapter is a note of the decision template, the same sections
     # in the same order, then the pugh fence.
     for _, note in decisions:
@@ -1218,7 +1223,10 @@ def test_the_deck_holds_every_step_then_finding_decisions_and_anything_else(chec
     assert "Bless sends it to SE, which bundles it into a work issue." in work and '"losses": "One work issue."' in work
     assert decision.startswith("## Current situation\n\nA rule, not a habit.") and '"losses": "it changes a rule"' in decision
     assert "Gerrit and GitHub both gate a merge on its checks." in decision
-    assert (heading_and_note := decisions[-1]) == retro_deck.ANYTHING_ELSE and heading_and_note[1] == anything_else
+    # The retro's kind closes the deck: the final default comes after the finding decisions.
+    written = retro_deck.text(issue_kinds.RETRO, "example: Retro #30", "", steps, decisions)
+    chapters = retro_deck.chapters(templates.parse(retro_deck.template(), written).fields["decisions"])
+    assert chapters == [*decisions, retro_deck.ANYTHING_ELSE]
 
 
 def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
@@ -1226,8 +1234,9 @@ def test_a_retro_without_findings_still_ends_with_anything_else(checkout):
     block = retro.read_block(text)
     block["findings"] = []
     block["classes"] = []
-    _, decisions = retro.deck_parts(block, text)
-    assert decisions == [retro_deck.ANYTHING_ELSE]
+    steps, decisions = retro.deck_parts(block, text)
+    written = retro_deck.text(issue_kinds.RETRO, "example: Retro #30", "", steps, decisions)
+    assert decisions == [] and "\n### Anything else?\n" in written
 
 
 def test_deck_refuses_a_finding_without_what_others_do_naming_it(checkout, tmp_path, monkeypatch, capsys):
@@ -1300,6 +1309,13 @@ class FakeTracker:
     def actions(self, root, repo):
         return {name: (lambda arguments, _, name=name: self.calls.append((name, arguments)))
                 for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
+
+    def issue(self, number: int) -> dict:
+        """The run's issue, read for its kind (issue_kinds.check) before anything is written."""
+        return {"number": number, "title": "retro-20261112", "labels": ["retro"], "state": "open"}
+
+    def comments(self, number: int) -> list[dict]:
+        return []
 
 
 @pytest.fixture
@@ -1559,6 +1575,7 @@ def filed(checkout: Path, monkeypatch, text: str) -> list[tuple[str, dict]]:
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     draft = commit_doc(checkout, text)
     assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
@@ -1702,6 +1719,7 @@ def test_file_posts_the_block_on_the_issue_where_main_does_not_hold_the_draft(
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     monkeypatch.setattr(retro, "COMMENT_LIMIT", 2000)
     text = judged_draft(checkout)
     if where == "outside":
@@ -1751,6 +1769,7 @@ def test_file_reads_a_draft_of_the_older_six_step_template_in_the_current_form(
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     draft = tmp_path / "old.md"
     draft.write_text(old, encoding="utf-8")
     assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
@@ -1771,6 +1790,7 @@ def test_file_checks_the_template_inputs_recorded_at_collection_not_the_newest_f
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     draft = tmp_path / "answered.md"
     draft.write_text(text, encoding="utf-8")
     assert retro.main(["file", "30", "--draft", str(draft), "--repo", REPO,
@@ -1843,6 +1863,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     given = answers(checkout)
     block = {"version": 1, "sizes": {"closed": 7}, "window": {"retro": 5},
              "classes": [{**LOST_REPORTS, "name": "C"}], "went_well": ["Something went well."],
@@ -2456,3 +2477,19 @@ def test_a_breaking_release_check_that_fails_is_named_in_the_draft(checkout, tmp
 def test_a_project_without_se_toml_pins_nothing_for_the_check(tmp_path):
     assert retro.breaking_releases(tmp_path) == {
         "lines": ["no breaking release beyond a pin: the project has no se.toml"], "error": None}
+
+
+def test_collect_on_an_overhaul_issue_is_refused_naming_overhaul_read(checkout, tmp_path, monkeypatch, capsys):
+    """Overhaul #1993, finding 1: `retro.py collect 1993` ran on an overhaul issue and wrote an empty
+    draft. It is refused before any window is read or any draft written, naming the command that takes it."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    directory, out = tmp_path / "answers", tmp_path / "retro-1993.md"
+    directory.mkdir()
+    (directory / "issue-1993.json").write_text(json.dumps(
+        {"number": 1993, "title": "overhaul-20261127", "labels": ["discovery"], "state": "open"}),
+        encoding="utf-8")
+    assert retro.main(["collect", "1993", "--answers", str(directory), "--out", str(out), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 1
+    captured = capsys.readouterr()
+    assert "#1993 is an overhaul issue: run `overhaul.py read 1993` for it" in captured.err
+    assert "GitHub plan" not in captured.out and not out.exists()

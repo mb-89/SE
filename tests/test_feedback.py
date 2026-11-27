@@ -106,7 +106,7 @@ def test_refresh_announces_each_phase_as_it_starts(tmp_path, monkeypatch, capsys
     work_tickets.initialize(tmp_path)
     issue = {"repo": "owner/repo", "number": 5, "url": "https://github.com/owner/repo/issues/5",
              "title": "feat/x", "body": "## Requirements\n\n1. one\n", "updatedAt": "",
-             "labels": [], "comments": []}
+             "labels": [{"name": "work"}], "comments": []}
 
     def fetch(root, number, repo):
         assert capsys.readouterr().err == "Phase: read work issue #5\n"  # before the read

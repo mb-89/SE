@@ -673,10 +673,13 @@ def test_without_gh_read_prints_its_reads_round_by_round_and_takes_the_answers(
     # The host's list_issues names no close time: each retro and overhaul is read one by one.
     listed = {name: [{key: value for key, value in item.items() if key != "closed_at"}
                      for item in given[name]] for name in ("issues.json", "open-issues.json")}
-    rounds = [listed, {f"issue-{item['number']}.json": item for item in given["issues.json"]
-                       if item["number"] in (40, 41, 42, 43, 46)},
+    # The overhaul issue itself is read first, for its kind (issue_kinds.check).
+    this = next(item for item in given["open-issues.json"] if item["number"] == THIS)
+    rounds = [{**listed, f"issue-{THIS}.json": this},
+              {f"issue-{item['number']}.json": item for item in given["issues.json"]
+               if item["number"] in (40, 41, 42, 43, 46)},
               {name: value for name, value in given.items() if name.startswith("comments-")}]
-    expected = [["list_issues", "list_issues"], ["issue_read"] * 5, ["issue_read"] * 4]
+    expected = [["issue_read", "list_issues", "list_issues"], ["issue_read"] * 5, ["issue_read"] * 4]
     for answer, tools in zip(rounds, expected):
         assert overhaul.main(arguments) == 0
         output = capsys.readouterr().out
@@ -795,8 +798,8 @@ def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_p
     import retro_deck
     asked = {}
 
-    def build(written, destination, host=None, answers=None):
-        asked.update(written=written, host=host)
+    def build(kind, written, destination, host=None, answers=None):
+        asked.update(kind=kind, written=written, host=host)
         return 0
 
     monkeypatch.setattr(retro_deck, "build", build)
@@ -827,6 +830,7 @@ def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_p
                           "--host", "claude-app"]) == 0
     fields = templates.parse(templates.own("retro-deck"), asked["written"]).fields
     assert fields["title"] == "Overhaul #50" and asked["host"] == "claude-app"
+    assert asked["kind"].document_type == "Overhaul report" and "### Anything else?" not in asked["written"]
     assert "a title page, 7 steps and 3 decision chapter(s)" in capsys.readouterr().out
 
 
@@ -840,12 +844,20 @@ class FakeTracker:
         return {name: (lambda arguments, _, name=name: self.calls.append((name, arguments)))
                 for name in ("comment_issue", "close_issue", "add_label", "remove_label")}
 
+    def issue(self, number: int) -> dict:
+        """The run's issue, read for its kind (issue_kinds.check) before anything is written."""
+        return {"number": number, "title": "overhaul-20261112", "labels": ["discovery"], "state": "open"}
+
+    def comments(self, number: int) -> list[dict]:
+        return []
+
 
 def test_file_marks_rule_changes_for_the_person_posts_the_report_and_files_nothing(
         checkout, tmp_path, monkeypatch, capsys):
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     draft = tmp_path / "draft.md"
     draft.write_text(judged_draft(checkout), encoding="utf-8")
 
@@ -905,6 +917,7 @@ def test_the_next_read_scores_the_findings_file_posted(checkout, tmp_path, monke
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
+    monkeypatch.setattr(work_tickets, "filing_door", lambda root, repo: tracker)
     draft = tmp_path / "draft.md"
     draft.write_text(judged_draft(checkout), encoding="utf-8")
     assert overhaul.main(["file", str(THIS), "--draft", str(draft), "--repo", REPO,

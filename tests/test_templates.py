@@ -1800,11 +1800,12 @@ def test_the_overhaul_report_passes_with_the_block_it_carries(catalog):
     assert template.name == "overhaul" and found == []
 
 
-# The decks whose decision deck.py's section rule refuses: those its test names, and the silent
-# decision, which the build refuses for its missing bless first and which has no sections either.
-UNEXPLAINED = {*parametrized(
-    test_deck.test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_options),
-    "decision-without-bless"}
+# The decisions deck.py's section rule refuses, as (deck, note): every note of the decks its test
+# names, and the silent decision, which the build refuses for its missing bless first and which has
+# no sections either.
+UNEXPLAINED = {*((name, note) for name in parametrized(
+    test_deck.test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_options)
+    for note in test_deck.DECKS[name][0]), ("decision-without-bless", "silent")}
 
 
 @pytest.mark.parametrize("name", list(test_deck.DECKS))
@@ -1817,7 +1818,7 @@ def test_the_decision_template_gives_the_section_rule_of_deck_py(catalog, name):
         template, found = templates.verdict(catalog, "deck.build", text)
         assert (template is not None) == deck._holds_pugh(nodes), (name, note)
         refused = [finding for finding in found if finding.severity == templates.REFUSE]
-        assert bool(refused) == (template is not None and name in UNEXPLAINED), (name, note, refused)
+        assert bool(refused) == (template is not None and (name, note) in UNEXPLAINED), (name, note, refused)
         assert deck._explains(nodes) or not deck._holds_pugh(nodes) or refused
 
 

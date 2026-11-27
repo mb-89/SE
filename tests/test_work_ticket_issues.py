@@ -270,7 +270,7 @@ def draft_complete_field_report(worktree: Path) -> Path:
 class FakeGh:
     def __init__(self) -> None:
         self.issue = {"number": 5, "title": BRANCH, "body": BODY, "url": URL,
-                      "updatedAt": "2026-11-04T10:00:00Z", "comments": []}
+                      "updatedAt": "2026-11-04T10:00:00Z", "labels": [{"name": "work"}], "comments": []}
         self.open_reports: list[dict] = []
         self.pull_request: dict | None = {
             "number": 7, "url": "https://git.example/owner/repo/pull/7",
