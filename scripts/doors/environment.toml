@@ -1,0 +1,9 @@
+# The environment: the process's variables, read or written. It has no door's code yet, so `files`
+# is empty and every reach counts. Read by scripts/door_report.py, whose docstring owns the keys. At
+# warn while the scripts that read variables themselves move behind one door.
+door = "environment"
+level = "warn"
+files = []
+contract_tests = []
+calls = ["os.getenv", "os.getenvb", "os.putenv", "os.unsetenv"]
+names = ["os.environ", "os.environb"]

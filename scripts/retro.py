@@ -6,7 +6,11 @@
 last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed,
 and the whole history, from the project's first issue, where none has (docs/fleet.md "Retro due":
 a retro covers everything up to its start). `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
-issue closed (whose findings it then scores); the rule checks judge that window alone. Each issue
+issue closed (whose findings it then scores); the rule checks judge that window alone. Its
+GitHub reads scale with the window, not the history: the retros by their label, then only the
+closed issues GitHub's `since` filter names as updated since the window's start, the pull requests
+newest update first back to it, and one by one the older items a check names (`read_window`); the
+answer files are read whole. Each issue
 comes with the field report of the pull request that landed
 it, found through the landing pull request's `<!-- se:field-report-in <n> -->` marker. It writes a
 draft that is a document of the retro template (TEMPLATE_NAME, `templates/retro.md`), its five steps
@@ -258,6 +262,11 @@ def when(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def github_time(value: str) -> str:
+    """`value`, an ISO time or date, as GitHub's `since` filter takes it: UTC, to the second."""
+    return when(value).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def first(item: dict, *keys: str) -> object:
     """The first of `keys` `item` has a value for: REST answers are snake_case, the host's tools
     sometimes camelCase."""
@@ -461,6 +470,19 @@ class GhDoor:
 
     def pulls_until(self, stop) -> list[dict]:
         return self.pages_until(self.pulls_door, "pulls?state=closed", stop)
+
+    def closed_issues_since(self, since: str | None) -> list[dict]:
+        """The closed issues GitHub names as updated since `since` (its `since` filter); every
+        closed issue where `since` is None."""
+        if since is None:
+            return self.closed_issues()
+        return [item for item in self.pages(self.issues_door,
+                                            f"issues?state=closed&since={github_time(since)}")
+                if "pull_request" not in item]
+
+    def pull(self, number: int) -> dict:
+        answer = self.pulls_door.api(f"pulls/{number}")
+        return answer if isinstance(answer, dict) else {}
 
     def closed_issues(self) -> list[dict]:
         return [item for item in self.pages(self.issues_door, "issues?state=closed")
@@ -852,48 +874,135 @@ def window_start(last: Issue | None, since: str | None) -> tuple[str | None, int
     return None, None, HISTORY
 
 
-def read_window(door, number: int, since: str | None = None,
-                retro: int | None = None) -> Read | None:
-    """The window of retro `number` (0: of the next retro) read through `door`, starting at
-    `since` or, with `retro`, where that closed retro issue closed; None where the door is still
-    missing answers (`door.missing`)."""
-    issues = [issue_of(item) for item in door.closed_issues()]
-    pulls = [pull_of(item) for item in door.pulls()]
-    if door.missing:
-        return None
+#: The reads a door offers for the window's server-side read (`read_window`): the runs by their
+#: label, the closed issues GitHub filters by their update, the pull requests newest update first
+#: and single items; a door without all of them (FileDoor, whose saved lists are whole) is read
+#: whole.
+WINDOW_READS = ("closed_issues_labelled", "closed_issues_since", "pulls_until", "pull")
 
-    def completed(chosen: list[Issue]) -> bool:
-        """Each of `chosen` with its close time and reason, read one by one where the list
-        named none; False while the door still misses answers."""
-        for issue in chosen:
-            if not issue.closed_at:
-                read = issue_of(door.issue(issue.number))
-                issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
-                issue.body = issue.body or read.body
-        return not door.missing
 
-    if not completed([issue for issue in issues if is_retro(issue) and issue.number != number]):
+def windowed(door) -> bool:
+    """Whether `door` reads a window server-side (WINDOW_READS)."""
+    return all(hasattr(door, name) for name in WINDOW_READS)
+
+
+def complete_closes(door, chosen: list[Issue]) -> bool:
+    """Each of `chosen` with its close time and reason, read one by one where the list named
+    none (the host's `list_issues`); False while the door still misses answers."""
+    for issue in chosen:
+        if not issue.closed_at:
+            read = issue_of(door.issue(issue.number))
+            issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
+            issue.body = issue.body or read.body
+            issue.created_at = issue.created_at or read.created_at
+    return not door.missing
+
+
+def closed_since(door, labels: tuple[str, ...], start, extra: tuple[int, ...] = ()) -> list[Issue] | None:
+    """The closed issues a window needs, from a door that reads it server-side (`windowed`): the
+    runs by their `labels` and the issues `extra` names, each close time completed; then the
+    closed issues GitHub names as updated since `start(runs)`, the window's start (None: every
+    closed issue), which takes every issue closed in the window, a run named by its title alone
+    among them: a close is an update. None while the door still misses answers."""
+    runs: dict[int, Issue] = {}
+    for label in labels:
+        for item in door.closed_issues_labelled(label):
+            if "pull_request" not in item:
+                runs[int(item.get("number") or 0)] = issue_of(item)
+    for number in extra:
+        if number not in runs:
+            item = door.issue(number)
+            if "pull_request" not in item and str(item.get("state") or "").lower() == "closed":
+                runs[number] = issue_of(item)
+    if not complete_closes(door, list(runs.values())):
         return None
+    recent = {issue.number: issue for issue in map(issue_of, door.closed_issues_since(
+        start(list(runs.values()))))}
+    return list({**recent, **runs}.values())
+
+
+def window_pulls(door, since: datetime | None, window: list[Issue], tracker: str,
+                 branch: str) -> list[Pull]:
+    """The closed pull requests a window needs, newest update first: back to its start `since`
+    (None: every one) and on while a work issue of `window` has no landing read yet, down to that
+    issue's creation, as a landing merged before the window started counts for an issue closed
+    in it (`recent_reads` reads the countdowns' the same way)."""
+    waiting = {issue.number: when(issue.created_at) for issue in window}
+
+    def stop(item: dict) -> bool:
+        updated = when(first(item, "updated_at", "updatedAt"))
+        if since and updated and updated < since and all(
+                created and updated < created for created in waiting.values()):
+            return True
+        found = pull_of(item)
+        if found.merged_at and found.base == branch:
+            waiting.pop(reference(found, tracker), None)
+        return False
+
+    return [pull_of(item) for item in door.pulls_until(stop)]
+
+
+def last_retro(issues: list[Issue], number: int, retro: int | None) -> Issue | None:
+    """The previous retro of retro `number` among `issues`: the one `retro` names, else the last
+    to close."""
     retros = [issue for issue in issues if is_retro(issue) and issue.number != number
               and when(issue.closed_at)]
-    if retro is not None:
-        last = next((issue for issue in retros if issue.number == retro), None)
-        if last is None:
-            raise QueueError(f"--retro {retro}: #{retro} is no closed retro issue (titled "
-                             f"{RETRO_TITLE}... or labelled {RETRO_LABEL}) other than #{number}")
+    if retro is None:
+        return max(retros, key=lambda issue: when(issue.closed_at), default=None)
+    last = next((issue for issue in retros if issue.number == retro), None)
+    if last is None:
+        raise QueueError(f"--retro {retro}: #{retro} is no closed retro issue (titled "
+                         f"{RETRO_TITLE}... or labelled {RETRO_LABEL}) other than #{number}")
+    return last
+
+
+def read_window(door, number: int, since: str | None = None, retro: int | None = None,
+                tracker: str = "", branch: str = "") -> Read | None:
+    """The window of retro `number` (0: of the next retro) read through `door`, starting at
+    `since` or, with `retro`, where that closed retro issue closed; None where the door is still
+    missing answers (`door.missing`).
+
+    A door that reads the window server-side (`windowed`) reads the retros by their label (and
+    the one `retro` names), then only the closed issues updated since the window's start
+    (`closed_since`) and the pull requests back to it (`window_pulls`): the reads scale with
+    the window, not with the history. Any other door is read whole."""
+    cut = windowed(door)
+    if cut:
+        def start(runs: list[Issue]) -> str | None:
+            if since is not None:
+                return since
+            last = last_retro([issue for issue in runs if is_retro(issue)], number, retro)
+            return last.closed_at if last else None
+
+        found_issues = closed_since(door, (RETRO_LABEL,), start,
+                                    (retro,) if retro is not None and since is None else ())
+        if found_issues is None:
+            return None
+        issues, pulls = found_issues, []
     else:
-        last = max(retros, key=lambda issue: when(issue.closed_at), default=None)
+        issues = [issue_of(item) for item in door.closed_issues()]
+        pulls = [pull_of(item) for item in door.pulls()]
+    if door.missing:
+        return None
+    if not complete_closes(door, [issue for issue in issues
+                                  if is_retro(issue) and issue.number != number]):
+        return None
+    last = last_retro(issues, number, retro)
     start = window_start(last, since)
     moment = when(start[0])
     # An issue closed in the window was updated in it: only those are read one by one.
-    if not completed([issue for issue in issues if WORK_LABEL in issue.labels
-                      and not is_retro(issue) and (moment is None or not issue.updated_at
-                                                   or when(issue.updated_at) > moment)]):
+    if not complete_closes(door, [issue for issue in issues if WORK_LABEL in issue.labels
+                                  and not is_retro(issue) and (moment is None or not issue.updated_at
+                                                               or when(issue.updated_at) > moment)]):
         return None
     found = Read(issues, pulls, last, [], *start)
     found.window = sorted((issue for issue in issues if WORK_LABEL in issue.labels
                            and not is_retro(issue) and found.in_window(issue.closed_at)),
                           key=lambda issue: issue.number)
+    if cut:
+        found.pulls = window_pulls(door, moment, found.window, tracker, branch)
+        if door.missing:
+            return None
     return found
 
 
@@ -1171,7 +1280,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
     (`door.missing`). With `refusals`, the refused deliveries and declined reviews
     (`refusal_records`); with `signals`, the session signals of those files
     (`session_signals`)."""
-    read = read_window(door, number, since, retro)
+    read = read_window(door, number, since, retro, tracker, branch)
     if read is None:
         return None
     issues, pulls, last, window, in_window = read.issues, read.pulls, read.last, read.window, read.in_window
@@ -1180,6 +1289,22 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
     merged = [pull for pull in pulls if pull.merged_at]
     references = {pull.number: reference(pull, tracker) for pull in pulls}
     landings = [pull for pull in merged if pull.base == branch and in_window(pull.merged_at)]
+    if windowed(door):
+        # Read server-side, the window holds no item from before it: what a landing or its field
+        # report marker names from there is read one by one, only where a check needs it.
+        for pull in landings:
+            named = references[pull.number]
+            if named is not None and named not in by_number and named not in pull_numbers:
+                item = door.issue(named)
+                if "pull_request" in item:
+                    pull_numbers[named] = pull_of(door.pull(named))
+                elif str(item.get("state") or "").lower() == "closed":
+                    by_number[named] = issue_of(item)
+            marker = REPORT_IN.search(pull.body)
+            if marker and int(marker[1]) not in pull_numbers:
+                pull_numbers[int(marker[1])] = pull_of(door.pull(int(marker[1])))
+        if door.missing:
+            return None
 
     closed: list[Closed] = []
     # What collect reads of each work issue, for the earlier classes' patterns, and its comments,

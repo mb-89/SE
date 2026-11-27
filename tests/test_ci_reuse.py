@@ -1,6 +1,6 @@
-"""A pull request's edit or label change reuses the suite's result of an earlier run of the same tree
-(scripts/ci_reuse.py, docs/tests.md "Edits reuse the suite"): which earlier run counts, that a failed one
-keeps `check` failed, when everything runs, and the workflow steps that act on the decision.
+"""A run of `check` reuses the suite's result of an earlier run of the same tree, on every event of a
+landing (scripts/ci_reuse.py, docs/tests.md "One suite run per tree"): which earlier run counts, that a
+failed one keeps `check` failed, when everything runs, and the workflow steps that act on the decision.
 GitHub is a fake door, or for the end-to-end decision a local HTTP server; the workflow is read as
 text and its decision steps run as its runner runs them."""
 
@@ -24,6 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECK = ROOT / ".github" / "workflows" / "check.yml"
 KEY = "0123456789abcdef"
 HEAD = "a" * 40
+WORK = "b" * 40  # the work pull request's head, which a landing's description links
+LANDED = "c" * 40  # the commit a landing pushed to main
+PULL_ACTIONS = ("edited", "labeled", "unlabeled", "opened", "synchronize", "reopened")
 REPORT = ("Fixes https://github.com/alice/project/issues/7\n\n**Component kinds:** {kinds}\n\n"
           "<!-- se:field-report -->\n## Summary\n\nreport\n")
 
@@ -37,11 +40,12 @@ def edit(action: str = "edited", attempt: int = 1, event: str = "pull_request") 
 
 def earlier(run_id: int, *, key: str = KEY, suite: str = "success", vet: str = "success",
             legs: str = "success", conclusion: str | None = None, head: str = HEAD,
-            status: str = "completed") -> tuple[dict, list[dict]]:
+            status: str = "completed", showcase: str = "success") -> tuple[dict, list[dict]]:
     """An earlier run of check, as the runs API lists it, and its jobs as the jobs API answers:
     the trust job's decision step named with its reuse key, the check job's Go and suite steps and
-    the kern-platforms leg; `skipped` everywhere is a run that reused or stopped before them."""
-    failed = "failure" in (suite, vet, legs)
+    the kern-platforms leg and showcase; `skipped` everywhere is a run that reused or stopped
+    before them."""
+    failed = "failure" in (suite, vet, legs, showcase)
     run = {"id": run_id, "status": status, "head_sha": head, "event": "pull_request",
            "conclusion": conclusion or ("failure" if failed else "success"),
            "html_url": f"https://github.com/alice/project/actions/runs/{run_id}"}
@@ -49,6 +53,7 @@ def earlier(run_id: int, *, key: str = KEY, suite: str = "success", vet: str = "
                 {"name": "Set up job", "conclusion": "success"},
                 {"name": f"{ci_reuse.DECIDE_STEP} (reuse key {key})", "conclusion": "success"}]},
             {"name": "kern-platforms (windows-2025)", "conclusion": legs},
+            {"name": "showcase", "conclusion": showcase},
             {"name": "check", "conclusion": "failure" if failed else "success", "steps": [
                 {"name": "The pull request's field report follows the template",
                  "conclusion": "success"},
@@ -59,23 +64,24 @@ def earlier(run_id: int, *, key: str = KEY, suite: str = "success", vet: str = "
 
 
 def decide(*runs: tuple[dict, list[dict]], event: ci_reuse.Event | None = None,
-           trusted: bool = False) -> ci_reuse.Decision:
+           trusted: bool = False, heads: tuple[str, ...] = ()) -> ci_reuse.Decision:
     jobs = {run["id"]: listed for run, listed in runs}
     return ci_reuse.decide(event or edit(), KEY, [run for run, _ in runs],
-                           lambda run: jobs[run["id"]], trusted)
+                           lambda run: jobs[run["id"]], trusted, heads)
 
 
-# Acceptance: an edit without a new commit takes the earlier result and names its run.
+# Acceptance: a run of a tree already checked takes the earlier result and names its run.
 
 
-@pytest.mark.parametrize("action", ci_reuse.REUSE_ACTIONS)
+@pytest.mark.parametrize("action", PULL_ACTIONS)
 def test_an_edit_or_label_change_takes_the_passed_result_of_the_tree_and_names_its_run(
         action: str) -> None:
     decision = decide(earlier(100), event=edit(action))
     assert (decision.suite, decision.result) == ("reused", "success")
     assert decision.source == "https://github.com/alice/project/actions/runs/100"
     assert decision.why == ("the run https://github.com/alice/project/actions/runs/100 of this "
-                            "tree passed the Go checks, the suite, kern-platforms (windows-2025)")
+                            "tree passed the Go checks, the suite, kern-platforms (windows-2025), "
+                            "showcase")
 
 
 def test_an_edit_after_a_reusing_run_takes_the_result_that_run_took() -> None:
@@ -94,6 +100,7 @@ def test_an_edit_after_a_reusing_run_takes_the_result_that_run_took() -> None:
     ({"legs": "failure"}, "kern-platforms (windows-2025)"),
     # kern-platforms runs beside check: a leg that failed in a run whose report failed counts too.
     ({"legs": "failure", "vet": "skipped", "suite": "skipped"}, "kern-platforms (windows-2025)"),
+    ({"showcase": "failure"}, "showcase"),
 ])
 def test_a_failed_earlier_result_keeps_check_failed_naming_its_run(part: dict, failed: str) -> None:
     decision = decide(earlier(100, **part))
@@ -124,7 +131,7 @@ def test_without_an_earlier_result_of_the_tree_everything_runs(runs, named) -> N
     decision = decide(*runs)
     assert decision.suite == "run" and decision.source == ""
     assert named in decision.why
-    assert decision.why.endswith(": the suite, the Go checks and kern-platforms run")
+    assert decision.why.endswith(": the suite, the Go checks, kern-platforms and showcase run")
 
 
 def test_the_run_itself_is_never_its_own_earlier_run() -> None:
@@ -133,16 +140,33 @@ def test_the_run_itself_is_never_its_own_earlier_run() -> None:
 
 
 @pytest.mark.parametrize(("event", "named"), [
-    (edit("opened"), "a pull_request opened run checks its tree"),
-    (edit("synchronize"), "a pull_request synchronize run checks its tree"),
-    (edit("reopened"), "a pull_request reopened run checks its tree"),
-    (edit("", event="push"), "a push run checks its tree"),
     (edit("", event="schedule"), "a schedule run checks its tree"),
     (edit("edited", attempt=2), "attempt 2 is a re-run"),
+    (edit("", event="push", attempt=2), "attempt 2 is a re-run"),
 ])
-def test_every_other_event_and_a_re_run_run_everything(event, named) -> None:
+def test_the_safety_net_and_a_re_run_run_everything(event, named) -> None:
     decision = decide(earlier(100), event=event)
     assert decision.suite == "run" and named in decision.why
+
+
+def test_a_landing_takes_the_result_of_its_work_pull_requests_run_of_the_same_tree() -> None:
+    decision = decide(earlier(100, head=WORK), event=edit("opened"), heads=(HEAD, WORK))
+    assert (decision.suite, decision.result, decision.source) == (
+        "reused", "success", "https://github.com/alice/project/actions/runs/100")
+
+
+def test_a_push_takes_the_result_of_the_pull_request_that_landed_it() -> None:
+    push = ci_reuse.Event("push", "", "9000", 1, LANDED, "")
+    decision = decide(earlier(100), earlier(101, head=WORK, key="fedcba9876543210"),
+                      event=push, heads=(HEAD, WORK))
+    assert (decision.suite, decision.result) == ("reused", "success")
+    assert decision.source.endswith("/runs/100")
+
+
+def test_a_cancelled_run_of_another_head_is_passed_over() -> None:
+    decision = decide(earlier(100), earlier(101, head=WORK, conclusion="cancelled"),
+                      heads=(HEAD, WORK))
+    assert (decision.suite, decision.source) == ("reused", "https://github.com/alice/project/actions/runs/100")
 
 
 def test_a_trusted_record_answers_before_any_earlier_run() -> None:
@@ -164,8 +188,14 @@ def test_the_kinds_are_the_ones_checks_field_report_step_gives_the_suite(body, k
 
 def test_another_tree_or_other_kinds_is_another_key() -> None:
     keys = {ci_reuse.reuse_key(tree, kinds) for tree in ("1" * 40, "2" * 40)
-            for kinds in (None, "", "se=patch")}
-    assert len(keys) == 6 and all(re.fullmatch(r"[0-9a-f]{16}", key) for key in keys)
+            for kinds in (None, "se=patch")}
+    assert len(keys) == 4 and all(re.fullmatch(r"[0-9a-f]{16}", key) for key in keys)
+
+
+def test_no_kinds_stated_and_none_set_are_one_key() -> None:
+    # kern's release guard skips empty entries, so "" refuses as unset does: a work pull request
+    # that states no kinds and its landing, which sets none, check the same thing.
+    assert ci_reuse.reuse_key("1" * 40, "") == ci_reuse.reuse_key("1" * 40, None)
 
 
 def test_unreadable_kinds_are_no_key() -> None:
@@ -207,12 +237,14 @@ def checkout(tmp_path: Path) -> Path:
     return root
 
 
-def step_env(tmp_path: Path, action: str, port: int, name: str) -> dict[str, str]:
+def step_env(tmp_path: Path, action: str, port: int, name: str, *, event_name: str = "pull_request",
+             body: str = REPORT.format(kinds="se patch"), head: str = HEAD) -> dict[str, str]:
     """The environment of the trust job's step `name` as the runner gives it."""
-    event = tmp_path / "event.json"
-    event.write_text(json.dumps({"action": action, "pull_request": {
-        "head": {"sha": HEAD}, "body": REPORT.format(kinds="se patch")}}), encoding="utf-8")
-    return {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event),
+    event = tmp_path / f"{name}.json"
+    payload = ({"action": action, "pull_request": {"head": {"sha": head}, "body": body}}
+               if event_name == "pull_request" else {"after": head})
+    event.write_text(json.dumps(payload), encoding="utf-8")
+    return {"GITHUB_EVENT_NAME": event_name, "GITHUB_EVENT_PATH": str(event), "GITHUB_SHA": head,
             "GITHUB_RUN_ID": "9000", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_REPOSITORY": "alice/project",
             "GITHUB_TOKEN": "token", "GITHUB_OUTPUT": str(tmp_path / f"{name}.out"),
             "GITHUB_API_URL": f"http://127.0.0.1:{port}"}
@@ -263,10 +295,55 @@ def test_the_decision_runs_everything_where_github_cannot_be_read(checkout: Path
         capsys.readouterr().out
 
 
-def test_a_synchronize_run_reads_no_earlier_run(checkout: Path, tmp_path: Path) -> None:
-    env = step_env(tmp_path, "synchronize", 9, "decide")  # a read would fail: nothing listens
+def test_a_scheduled_run_reads_no_earlier_run(checkout: Path, tmp_path: Path) -> None:
+    env = step_env(tmp_path, "", 9, "decide", event_name="schedule")  # a read would fail: nothing listens
     assert ci_reuse.main(["decide", "--worktree", str(checkout)], env) == 0
     assert outputs(env)["suite"] == "run"
+
+
+# Acceptance: a landing whose tree has a passing verdict runs the suite zero more times on its pull
+# request and on main. The work pull request 12 (head WORK) passed the tree; the landing pull
+# request 20 (head HEAD) links it, and the push of LANDED to main was landed by it.
+
+
+def test_a_landing_of_a_passed_tree_runs_no_suite_on_its_pull_request_or_on_main(
+        checkout: Path, tmp_path: Path) -> None:
+    landing_body = "Refs https://github.com/alice/project/issues/7\n\n<!-- se:field-report-in 12 -->\n"
+    key = ci_reuse.reuse_key(ci_reuse.ci_trust.tree(checkout), None)  # the landing sets no kinds
+    work_run, work_jobs = earlier(100, key=key, head=WORK)
+    landing_run, landing_jobs = earlier(101, key=key, suite="skipped", vet="skipped",
+                                        legs="skipped", showcase="skipped")  # it reused 100
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), LocalGitHub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    decided = {}
+    try:
+        LocalGitHub.answers = {
+            "/repos/alice/project/actions/runs/9000": {"id": 9000, "workflow_id": 77},
+            "/repos/alice/project/pulls/12": {"number": 12, "head": {"sha": WORK}},
+            f"/repos/alice/project/commits/{LANDED}/pulls": [
+                {"number": 20, "merged_at": "2026-11-27T12:00:00Z", "head": {"sha": HEAD},
+                 "body": landing_body}],
+            "/repos/alice/project/actions/workflows/77/runs": {"workflow_runs": [work_run]},
+            "/repos/alice/project/actions/runs/100/jobs": {"jobs": work_jobs},
+            "/repos/alice/project/actions/runs/101/jobs": {"jobs": landing_jobs}}
+        LocalGitHub.asked = []
+        for where, env in (("pull request", step_env(tmp_path, "opened", port, "pull",
+                                                     body=landing_body)),
+                           ("main", step_env(tmp_path, "", port, "push", event_name="push",
+                                             head=LANDED))):
+            if where == "main":  # by then the landing's own run, which reused 100, is listed too
+                LocalGitHub.answers["/repos/alice/project/actions/workflows/77/runs"] = {
+                    "workflow_runs": [work_run, landing_run]}
+            assert ci_reuse.main(["decide", "--worktree", str(checkout)], env) == 0
+            decided[where] = outputs(env)
+    finally:
+        server.shutdown()
+    for where, answered in decided.items():
+        assert (answered["suite"], answered["result"]) == ("reused", "success"), where
+        assert answered["source"] == "https://github.com/alice/project/actions/runs/100", where
+    asked = [path.split("?")[1] for path in LocalGitHub.asked if "/workflows/77/runs?" in path]
+    assert f"head_sha={WORK}&event=pull_request&per_page=100" in asked  # the work pull request's runs
 
 
 # The workflow: the trust job decides, every gate reads its answer, check acts on a reused one.

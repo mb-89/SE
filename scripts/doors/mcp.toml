@@ -1,6 +1,8 @@
 # The MCP door: the scripts that start the se binary's MCP server, whose code is kern's (held in kern's
-# own repository). Read by scripts/door_report.py, whose docstring owns the keys.
+# own repository). Read by scripts/door_report.py, whose docstring owns the keys. At warn while the
+# self-tests and tests that speak JSON-RPC themselves move behind the door.
 door = "mcp"
+level = "warn"
 files = [
     "scripts/se_mcp.sh",
     "scripts/se_mcp.ps1",
@@ -14,13 +16,3 @@ commands = []
 imports = ["github.com/modelcontextprotocol/go-sdk"]
 calls = []
 literals = ["jsonrpc"]
-
-[baseline]
-"components/cmd/se/launcher_test.go" = { count = 1, reason = "the launcher's test speaks to the se binary's MCP server through the SDK's client" }
-"components/cmd/se/mcp_surface_test.go" = { count = 1, reason = "contract test" }
-"components/cmd/se/mcp_test.go" = { count = 1, reason = "contract test" }
-"scripts/copilot.py" = { count = 1, reason = "the self-test speaks to the MCP server as Copilot spawns it, writing its own JSON-RPC messages" }
-"scripts/se_doctor.py" = { count = 1, reason = "the doctor's MCP check sends its own initialize message" }
-"tests/test_host_size.py" = { count = 1, reason = "host_size's test hands it a tools/list answer as the server writes it" }
-"tests/test_se_doctor.py" = { count = 1, reason = "the doctor's test plants a server that answers initialize" }
-"tests/test_se_mcp.py" = { count = 6, reason = "contract test" }
