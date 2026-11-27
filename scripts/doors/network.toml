@@ -1,0 +1,10 @@
+# The network: SE's HTTP reaches. It has no door's code yet, so `files` is empty and every reach
+# counts; tests/network_guard.py is the tests' guard that refuses a real connection at runtime.
+# Read by scripts/door_report.py, whose docstring owns the keys. At warn while the scripts that open
+# URLs themselves move behind one door.
+door = "network"
+level = "warn"
+files = []
+contract_tests = []
+imports = ["urllib.request", "http.client", "socket", "ssl", "requests", "httpx", "urllib3", "aiohttp"]
+calls = ["urlopen"]

@@ -387,6 +387,48 @@ def gathered(checkout: Path, given: dict[str, object] | None = None,
     return found
 
 
+class WindowDoor(FakeDoor):
+    """The same reads server-side (retro.WINDOW_READS), as GitHub answers them: the closed issues
+    by label, or updated (here: closed) since a time; records the issues it hands over."""
+
+    def __init__(self, given: dict[str, object]) -> None:
+        super().__init__(given)
+        self.handed: list[int] = []
+
+    def closed_issues_labelled(self, label):
+        return [item for item in self.given["issues.json"] if label in retro.label_names(item)]
+
+    def closed_issues_since(self, since):
+        found = [item for item in self.given["issues.json"]
+                 if since is None or retro.when(item["closed_at"]) >= retro.when(since)]
+        self.handed += [item["number"] for item in found]
+        return found
+
+    def pulls_until(self, stop):
+        raise AssertionError("an overhaul reads no pull requests")
+
+    def pull(self, number):
+        raise AssertionError("an overhaul reads no pull requests")
+
+
+def test_the_read_takes_only_the_closed_issues_since_the_last_overhaul(checkout):
+    """A door that reads server-side hands over the runs by their labels and then only the
+    closed issues since overhaul #40 closed, not #41 before it: the draft of the whole read. With
+    no labelled overhaul to start from, every closed issue is read, as nothing bounds the window."""
+    given = answers()
+    given["issues.json"][0]["labels"] = [{"name": "discovery"}]
+    rules, facts = overhaul.book_rules(ROOT), overhaul.find(overhaul.read(checkout))
+    door = WindowDoor(given)
+    found = overhaul.gather(THIS, door, rules, facts, NOW, show)
+    whole = overhaul.gather(THIS, FakeDoor(given), rules, facts, NOW, show)
+    assert found is not None and whole is not None and found.data() == whole.data()
+    assert sorted(door.handed) == [40, 42, 43, 44, 46, 47] and "issues.json" not in door.reads
+
+    door = WindowDoor(answers())
+    assert overhaul.gather(THIS, door, rules, facts, NOW, show).data() == gathered(checkout).data()
+    assert sorted(door.handed) == [40, 41, 42, 43, 44, 46, 47]
+
+
 def test_the_draft_names_every_rule_with_what_checks_it(checkout):
     found = gathered(checkout)
     text = overhaul.draft(found)

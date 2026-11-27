@@ -11,7 +11,8 @@ from: every rule of the rule book with what checks it (a test, a check, or judgm
 closed since the last closed overhaul, from their reports' blocks; the previous overhaul's findings
 and the state of the issues that name them (`overhaul #<n> finding <k>`), too early to score where
 one is still open and the countdown (`[overhaul]` `due_after` or `days`) is on; the pruning facts;
-then the questions the judge answers, the standing questions (templates/standing-questions.md,
+then the questions the judge answers (its GitHub reads, as `retro.py collect`'s, scale with the
+window: the runs by their labels, then the closed issues updated since the last overhaul closed), the standing questions (templates/standing-questions.md,
 which the retro and every field report ask too) and the overhaul's own
 (templates/overhaul-questions.md), each a section of the overhaul template (TEMPLATE_NAME,
 QUESTION_FIELDS). It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
@@ -822,6 +823,14 @@ class Gathered:
                 "findings": [], "went_well": []}
 
 
+def last_overhaul(issues: list, number: int):
+    """The last closed overhaul among `issues` other than `number`; None where none closed."""
+    when = sibling("retro").when
+    overhauls = [issue for issue in issues if is_overhaul(issue) and issue.number != number
+                 and when(issue.closed_at)]
+    return max(overhauls, key=lambda issue: when(issue.closed_at), default=None)
+
+
 def gather(number: int, door, rules: list, facts: Facts, now: datetime,
            show, too_early: bool = False) -> Gathered | None:
     """Overhaul `number`'s draft data, read through `door`, each retro's block from the retro doc
@@ -829,7 +838,18 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
     to score set apart with `too_early` (the countdown on, `countdown_on`); None while the door is
     still missing answers (`door.missing`)."""
     retro = sibling("retro")
-    closed = [retro.issue_of(item) for item in door.closed_issues()]
+    if retro.windowed(door):
+        # Server-side: the overhauls and retros by their labels, then only the closed issues
+        # updated since the last overhaul closed, as retro.read_window reads a retro's window.
+        def start(runs: list) -> str | None:
+            last = last_overhaul(runs, number)
+            return last.closed_at if last else None
+
+        closed = retro.closed_since(door, (OVERHAUL_LABEL, retro.RETRO_LABEL), start)
+        if closed is None:
+            return None
+    else:
+        closed = [retro.issue_of(item) for item in door.closed_issues()]
     opened = [retro.issue_of(item) for item in door.open_issues()]
     if door.missing:
         return None
@@ -840,9 +860,7 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
             issue.body = issue.body or read.body
     if door.missing:
         return None
-    overhauls = [issue for issue in closed if is_overhaul(issue) and issue.number != number
-                 and retro.when(issue.closed_at)]
-    last = max(overhauls, key=lambda issue: retro.when(issue.closed_at), default=None)
+    last = last_overhaul(closed, number)
     since = retro.when(last.closed_at) if last else None
     window = sorted((issue for issue in closed if retro.is_retro(issue)
                      and retro.when(issue.closed_at)

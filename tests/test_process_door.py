@@ -135,3 +135,31 @@ def test_a_program_no_handler_answers_fails_the_test_naming_it(pytester: pytest.
     assert "no fake answers `gh pr list`" in result.stdout.str()
     assert "fake_processes.on('gh', <handler>)" in result.stdout.str()
 
+
+
+@pytest.mark.spawns("contract: processes, a program that runs beside its caller")
+def test_start_answers_the_running_program_as_popen_does() -> None:
+    child = process_door.start([sys.executable, "-c", "import sys; print(sys.stdin.read().upper())"],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    out, _ = child.communicate("given", timeout=60)
+    assert (child.returncode, out) == (0, "GIVEN\n")
+
+
+def test_start_refuses_a_shell_which_runs_through_the_shell_door() -> None:
+    with pytest.raises(ValueError, match="shell_door.run"):
+        process_door.start(["bash", "-c", "true"])
+
+
+def test_the_fake_starts_no_program_and_fails_the_test_naming_it(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_planted=f"""\
+        import sys
+        sys.path[:0] = [{str(Path(__file__).parent)!r}, {str(Path(__file__).parents[1] / 'scripts')!r}]
+        import fake_processes, process_door
+
+        def test_starts_a_server():
+            with process_door.use(fake_processes.FakeProcesses()):
+                process_door.start(["server", "--stdio"])
+        """)
+    result = pytester.runpytest_inprocess("-p", "no:cacheprovider")
+    result.assert_outcomes(failed=1)
+    assert "starts no program that runs beside the test (`server --stdio`" in result.stdout.str()

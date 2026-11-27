@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import tomllib
 import urllib.error
 import urllib.parse
@@ -43,6 +44,10 @@ TOPIC = "component"
 #: `<host>/<owner>` to the names listed or to the reason the owner cannot be listed (the tests').
 LISTING_VARIABLE = "SE_COMPONENT_LISTING"
 LISTING_TIMEOUT = 20
+# The seconds github_listing waits before each retry of a listing github.com refused for its rate
+# limits (HTTP 403 or 429), which lift within a minute.
+LISTING_WAITS = (10, 30)
+sleep = time.sleep
 
 
 def kern_dir(root: Path) -> Path:
@@ -766,11 +771,15 @@ class NoListing(Exception):
 def github_listing(owner: str) -> dict[str, str]:
     """The repositories of `owner` on github.com that carry the topic `component`, by lowercase
     name, through GitHub's search with the person's login where the environment holds one
-    (`GH_TOKEN`, `GITHUB_TOKEN`); a refused login is retried without it."""
+    (`GH_TOKEN`, `GITHUB_TOKEN`); a refused login is retried without it, and a rate limit's answer
+    (HTTP 403 or 429) after each of `LISTING_WAITS`, then named."""
     query = urllib.parse.quote(f"topic:{TOPIC} user:{owner}")
     url = f"https://api.github.com/search/repositories?q={query}&per_page=100"
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    for login in ([token, None] if token else [None]):
+    waits = list(LISTING_WAITS)
+    logins = [token, None] if token else [None]
+    while logins:
+        login = logins[0]
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "se-modules"}
         if login:
             headers["Authorization"] = f"Bearer {login}"
@@ -780,7 +789,17 @@ def github_listing(owner: str) -> dict[str, str]:
                 data = json.load(response)
         except urllib.error.HTTPError as error:
             if error.code == 401 and login:
+                logins.pop(0)
                 continue
+            if error.code in (403, 429) and waits:
+                wait = waits.pop(0)
+                print(f"se_modules: github.com answered HTTP {error.code} listing {owner}'s components; "
+                      f"trying again in {wait} s", file=sys.stderr)
+                sleep(wait)
+                continue
+            if error.code in (403, 429):
+                raise NoListing(f"github.com answered HTTP {error.code} after {len(LISTING_WAITS) + 1} "
+                                "attempts (a rate limit)") from None
             if error.code in (404, 422):
                 raise Unlisted(f"github.com knows no owner {owner} it can list (HTTP {error.code})") from None
             raise NoListing(f"github.com answered HTTP {error.code}") from None

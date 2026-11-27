@@ -33,6 +33,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
+import process_door
 import se_script
 
 EXIT_PASSED, EXIT_REFUSED, EXIT_NOT_RUN = 0, 1, 2
@@ -197,8 +198,8 @@ def run_process(argv: Sequence[str], cwd: Path, timeout: float) -> Answer:
     if tool is None:
         return Answer(absent=True)
     try:
-        done = subprocess.run([tool, *argv[1:]], cwd=cwd, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=timeout, check=False)
+        done = process_door.run([tool, *argv[1:]], cwd=cwd, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=timeout, check=False)
     except subprocess.TimeoutExpired:
         return Answer(timed_out=True)
     except OSError:

@@ -1,22 +1,28 @@
 #!/usr/bin/env -S uv run python
 # se:template se/python-script 1.0.0
-"""Every reach outside a declared door, counted per file against a baseline that may only shrink.
+"""Every reach outside a declared door, refused: a check with no baseline and no shrink-only allowance.
 
 Each door declares in a data file (`scripts/doors/<door>.toml`) what it guards: `door` (its name),
-`files` (its own files), `contract_tests`, the reach patterns `commands`, `imports`, `calls` and
-`literals`, and a `[baseline]` table of `"path" = { count = n, reason = "..." }` (rule book des-004,
-one door per outside thing).
+`level`, `files` (its own files), `contract_tests`, `ground` (the scanned folders it checks, default
+all of them), and the reach patterns `commands`, `imports`,
+`calls`, `names` and `literals` (rule book des-004, one door per outside thing). Every key but
+`door` and `level` may be left out.
 
-`uv run python scripts/door_report.py [--root DIR] [--doors DIR]` reads the declarations (default:
-SE's `scripts/doors`) and scans the `.py` and `.go` files under scripts, tests, components and kern
-of the root (default: SE's checkout), skipping .venv, testdata and __pycache__: the ground hygiene's
-git-door check scans. A door's own `files` are not scanned for that door; its contract tests are
-scanned like any other file.
+The level is the rule's day-one path (no grandfathering): a new door starts at `warn` while the
+reaches it finds move behind it, and is set to `error` once they are gone.
 
-For each door it prints each reach outside it as `path:line: kind word`, then the ratchet's new and
-gone in report mode (scripts/ratchet.py), then one line with the reach, baseline, new and gone counts.
-A source file that cannot be read or parsed is printed as `path: not read (reason)` and counts no
-reaches. It exits 0 whatever it finds, and 2 only when a declaration cannot be read, naming it.
+- `error`: each reach outside the door is printed and refused.
+- `warn`: the door's reaches are counted on one warning line (each one printed under `--list`), and
+  pass; a `warn` door that finds no reach is refused, naming the step left, `level = "error"`, so
+  no door stays a warning once its reaches are gone.
+
+`uv run python scripts/door_report.py [--root DIR] [--doors DIR] [--list]` reads the declarations
+(default: SE's `scripts/doors`) and scans the `.py` and `.go` files under scripts, tests and
+components of the root (default: SE's checkout), skipping .venv, testdata and __pycache__: the
+ground hygiene's git-door check scans. A door's own `files` and its `contract_tests` are not
+scanned for that door. A source file that cannot be read or parsed is refused, as nothing in it can
+be checked. Exit code 0 passed, 1 refused, 2 a declaration cannot be read, naming it. hygiene.py
+(its check `doors`) and the commit hook (se.toml `[commit_checks]`) run the same check.
 
 What a reach is (`reaches`, pure: a path, its text and a declaration in, reach lines out):
 
@@ -24,11 +30,14 @@ What a reach is (`reaches`, pure: a path, its text and a declaration in, reach l
   word, unless it is an argument of a call named `reading`, or a `run`, `Popen`, `check_output`,
   `check_call` or `call` whose first argument is a string that starts with the word and a space; an
   import is `import x` or `from x import`, at the name or below it; a call is a call of the name,
-  bare or as an attribute; a literal is a string constant that contains the text.
+  bare or as an attribute, and a dotted name (`subprocess.run`) matches a call whose dotted callee
+  is it or ends with it; a name is a dotted reference (`os.environ`) used anywhere, called or not,
+  matched the same way; a literal is a string constant that contains the text.
 - Go, read by line: `exec.Command` or `exec.CommandContext` of the word, a quoted import path at or
-  below the name, and a quoted string that contains the literal. Calls are matched in Python only.
+  below the name, and a quoted string that contains the literal. Calls and names are matched in
+  Python only.
 
-It reads files only: no git, no network, no subprocess, and nothing from hygiene.py.
+It reads files only: no git, no network, no subprocess.
 """
 
 from __future__ import annotations
@@ -39,10 +48,9 @@ import re
 import sys
 import tomllib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-import ratchet
 import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,12 +60,11 @@ SCANNED = ("scripts", "tests", "components")
 SUFFIXES = (".py", ".go")
 SKIPPED = frozenset({".venv", "testdata", "__pycache__"})
 SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
-PATTERNS = ("commands", "imports", "calls", "literals")
-LISTS = ("files", "contract_tests", *PATTERNS)
-KEYS = ("door", *LISTS, "baseline")
-ENTRY_KEYS = ("count", "reason")
-# The kind each pattern list gives its reaches.
-KIND = {"commands": "command", "imports": "import", "calls": "call", "literals": "literal"}
+PATTERNS = ("commands", "imports", "calls", "names", "literals")
+LISTS = ("files", "contract_tests", "ground", *PATTERNS)
+KEYS = ("door", "level", *LISTS)
+ERROR, WARN = "error", "warn"
+LEVELS = (ERROR, WARN)
 GO_STRING = re.compile(r'"(?:[^"\\]|\\.)*"|`[^`]*`')
 
 
@@ -68,14 +75,15 @@ class DeclarationError(Exception):
 @dataclass(frozen=True)
 class Declaration:
     door: str
+    level: str = ERROR
     files: tuple[str, ...] = ()
     contract_tests: tuple[str, ...] = ()
+    ground: tuple[str, ...] = SCANNED
     commands: tuple[str, ...] = ()
     imports: tuple[str, ...] = ()
     calls: tuple[str, ...] = ()
+    names: tuple[str, ...] = ()
     literals: tuple[str, ...] = ()
-    # path -> (count, reason)
-    baseline: Mapping[str, tuple[int, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, order=True)
@@ -93,39 +101,29 @@ class Reach:
 
 
 def declaration(name: str, data: Mapping[str, object]) -> Declaration:
-    """The declaration `data` holds, as read from the file `name`; refuses an unknown key, a list that
-    is not a list of strings, a baseline entry without a reason and a count below 1."""
+    """The declaration `data` holds, as read from the file `name`; refuses an unknown key (a
+    `baseline` among them: there is none), a level that is not `warn` or `error`, and a list that is
+    not a list of strings."""
     for key in data:
         if key not in KEYS:
-            raise DeclarationError(f"{name}: unknown key {key!r}")
+            hint = ": a door keeps no baseline; set level = \"warn\" while its reaches move" if key == "baseline" else ""
+            raise DeclarationError(f"{name}: unknown key {key!r}{hint}")
     door = data.get("door")
     if not isinstance(door, str) or not door.strip():
         raise DeclarationError(f"{name}: key 'door' must name the door")
+    level = data.get("level")
+    if level not in LEVELS:
+        raise DeclarationError(f"{name}: key 'level' must be one of {', '.join(LEVELS)}")
     lists = {}
     for key in LISTS:
         value = data.get(key, [])
         if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
             raise DeclarationError(f"{name}: key {key!r} must be a list of non-empty strings")
         lists[key] = tuple(value)
-    table = data.get("baseline", {})
-    if not isinstance(table, Mapping):
-        raise DeclarationError(f"{name}: key 'baseline' must be a table")
-    baseline = {}
-    for path, entry in table.items():
-        where = f"baseline.{path!r}"
-        if not isinstance(entry, Mapping):
-            raise DeclarationError(f"{name}: key {where} must be a table of count and reason")
-        for key in entry:
-            if key not in ENTRY_KEYS:
-                raise DeclarationError(f"{name}: unknown key {where}.{key}")
-        reason = entry.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            raise DeclarationError(f"{name}: key {where}.reason is missing: every baseline entry says why")
-        count = entry.get("count")
-        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
-            raise DeclarationError(f"{name}: key {where}.count must be a whole number of at least 1")
-        baseline[path] = (count, reason)
-    return Declaration(door=door, baseline=baseline, **lists)
+    if unknown := [folder for folder in lists["ground"] if folder not in SCANNED]:
+        raise DeclarationError(f"{name}: key 'ground' names {', '.join(unknown)}, not one of {', '.join(SCANNED)}")
+    lists["ground"] = lists["ground"] or SCANNED
+    return Declaration(door=door, level=level, **lists)
 
 
 def load(path: Path) -> Declaration:
@@ -153,6 +151,25 @@ def called_name(call: ast.Call) -> str:
     return function.id if isinstance(function, ast.Name) else getattr(function, "attr", "")
 
 
+def dotted(node: ast.AST) -> str:
+    """The dotted name of a chain of names and attributes (`os.environ`), else its last attribute."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def matches(value: str, word: str) -> bool:
+    """Whether the dotted `value` is the pattern `word`: a dotted word is the value or its end, a
+    plain word the value's last part."""
+    if "." in word:
+        return value == word or value.endswith("." + word)
+    return value.rsplit(".", 1)[-1] == word
+
+
 def at_or_below(module: str, name: str) -> bool:
     return module == name or module.startswith(name + ".")
 
@@ -160,13 +177,17 @@ def at_or_below(module: str, name: str) -> bool:
 def python_features(tree: ast.AST) -> list[tuple[str, int, str]]:
     """The nodes of a parsed Python file a reach can be, walked once for every door, as `(feature,
     line, value)`: `head`, the first element of a list or tuple literal not passed to `reading`;
-    `run`, the string a subprocess call starts with; `call`, a called name; `import`, an imported
-    module; `string`, a string constant."""
+    `run`, the string a subprocess call starts with; `call`, a called dotted name; `name`, a dotted
+    reference that is not a call's callee; `import`, an imported module; `string`, a string constant."""
     nodes = list(ast.walk(tree))
     announced = {id(argument) for node in nodes
                  if isinstance(node, ast.Call) and called_name(node) == "reading" for argument in node.args}
+    callees = {id(node.func) for node in nodes if isinstance(node, ast.Call)}
+    inner = {id(node.value) for node in nodes if isinstance(node, ast.Attribute)}
     features = []
     for node in nodes:
+        if isinstance(node, (ast.Attribute, ast.Name)) and id(node) not in callees and id(node) not in inner:
+            features.append(("name", node.lineno, dotted(node)))
         if isinstance(node, (ast.List, ast.Tuple)) and node.elts and isinstance(node.elts[0], ast.Constant) \
                 and isinstance(node.elts[0].value, str) and id(node) not in announced:
             features.append(("head", node.lineno, node.elts[0].value))
@@ -174,7 +195,7 @@ def python_features(tree: ast.AST) -> list[tuple[str, int, str]]:
             name = called_name(node)
             if name in SUBPROCESS_CALLS and node.args and isinstance(node.args[0], ast.Constant):
                 features.append(("run", node.lineno, str(node.args[0].value)))
-            features.append(("call", node.lineno, name))
+            features.append(("call", node.lineno, dotted(node.func) or name))
         elif isinstance(node, ast.Import):
             features += [("import", node.lineno, alias.name) for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and node.module:
@@ -193,7 +214,10 @@ def python_reaches(path: str, features: Sequence[tuple[str, int, str]], door: De
         elif feature == "run":
             found += [Reach(path, line, "command", word) for word in door.commands if value.startswith(word + " ")]
         elif feature == "call":
-            found += [Reach(path, line, "call", word) for word in door.calls if value == word]
+            found += [Reach(path, line, "call", word) for word in door.calls if matches(value, word)]
+            found += [Reach(path, line, "name", word) for word in door.names if "." in word and matches(value, word)]
+        elif feature == "name":
+            found += [Reach(path, line, "name", word) for word in door.names if matches(value, word)]
         elif feature == "import":
             found += [Reach(path, line, "import", word) for word in door.imports if at_or_below(value, word)]
         else:
@@ -224,30 +248,40 @@ def reaches(path: str, text: str, door: Declaration) -> list[Reach]:
     return python_reaches(path, python_features(ast.parse(text, path)), door)
 
 
-# The report (pure: texts and declarations in, lines out)
+# The check (pure: texts and declarations in, lines out)
 
 
 @dataclass
 class DoorResult:
     door: Declaration
     reaches: list[Reach]
-    new: list[str]
-    gone: list[str]
 
     @property
-    def lines(self) -> list[str]:
-        baseline = sum(count for count, _ in self.door.baseline.values())
-        return [f"door {self.door.door}",
-                *(f"{reach}" for reach in self.reaches),
-                *(f"new: {path}" for path in self.new),
-                *(f"gone: {path}" for path in self.gone),
-                f"{self.door.door}: {len(self.reaches)} reaches, {baseline} baseline, "
-                f"{len(self.new)} new, {len(self.gone)} gone"]
+    def refused(self) -> list[str]:
+        """What this door refuses: each reach at `error`, its own clean state at `warn`."""
+        if self.door.level == ERROR:
+            return [f"{reach} outside the {self.door.door} door" for reach in self.reaches]
+        if not self.reaches:
+            return [f"{self.door.door}: no reach left outside the door at level warn: set level = \"error\" "
+                    f"in scripts/doors/{self.door.door}.toml"]
+        return []
+
+    def lines(self, listed: bool = False) -> list[str]:
+        """The door's report: what it refuses, then at `warn` its count (and, `listed`, each reach)."""
+        lines = [f"door_report: {line}" for line in self.refused]
+        if self.door.level == WARN and self.reaches:
+            files = len({reach.path for reach in self.reaches})
+            lines.append(f"door_report: warning: {self.door.door}: {len(self.reaches)} reach(es) in {files} "
+                         f"file(s) outside the door, level warn while they move behind it "
+                         f"(door_report.py --list names each)")
+            if listed:
+                lines += [f"door_report: warning: {reach}" for reach in self.reaches]
+        return lines
 
 
 def scan(texts: Mapping[str, str], doors: Sequence[Declaration]) -> tuple[list[DoorResult], dict[str, str]]:
-    """Each door's reaches outside it in `texts` (path -> text), with the ratchet's new and gone in
-    report mode, and the Python texts that did not parse (path -> reason)."""
+    """Each door's reaches outside it in `texts` (path -> text), and the Python texts that did not
+    parse (path -> reason)."""
     features, unread = {}, {}
     for path, text in texts.items():
         if path.endswith(".py"):
@@ -259,16 +293,26 @@ def scan(texts: Mapping[str, str], doors: Sequence[Declaration]) -> tuple[list[D
     for door in doors:
         found = []
         for path in sorted(texts):
-            if path in door.files or path in unread:
+            if path in door.files or path in door.contract_tests or path in unread \
+                    or path.split("/", 1)[0] not in door.ground:
                 continue
             found += (python_reaches(path, features[path], door) if path in features
                       else go_reaches(path, texts[path], door))
-        counts: dict[str, int] = {}
-        for reach in found:
-            counts[reach.path] = counts.get(reach.path, 0) + 1
-        new, gone = ratchet.compare(counts, {path: count for path, (count, _) in door.baseline.items()}, "report")
-        results.append(DoorResult(door, sorted(found), new, gone))
+        results.append(DoorResult(door, sorted(found)))
     return results, unread
+
+
+def check(texts: Mapping[str, str], unread: Mapping[str, str], doors: Sequence[Declaration],
+          listed: bool = False) -> tuple[list[str], list[str]]:
+    """The check's printed lines and its refusals: each file not read or parsed, then each door's."""
+    results, unparsed = scan(texts, doors)
+    not_read = [f"{name}: not read ({reason}), so no door can check it"
+                for name, reason in sorted({**unread, **unparsed}.items())]
+    refused = [*not_read, *(line for result in results for line in result.refused)]
+    lines = [f"door_report: {line}" for line in not_read]
+    for result in results:
+        lines += result.lines(listed)
+    return lines, refused
 
 
 # Wiring
@@ -296,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = se_script.parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", type=Path, default=ROOT, help="the checkout to scan (default: SE's)")
     parser.add_argument("--doors", type=Path, default=DOORS, help="the declarations' folder (default: SE's)")
+    parser.add_argument("--list", action="store_true", help="also name each reach of a door at level warn")
     args = parser.parse_args(argv)
     try:
         doors = load_all(args.doors)
@@ -303,11 +348,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"door_report: {error}", file=sys.stderr)
         return 2
     texts, unread = read(args.root)
-    results, unparsed = scan(texts, doors)
-    for name, reason in sorted({**unread, **unparsed}.items()):
-        print(f"{name}: not read ({reason})")
-    for result in results:
-        print("\n".join(result.lines))
+    lines, refused = check(texts, unread, doors, args.list)
+    print("\n".join(lines)) if lines else None
+    if refused:
+        print(f"door_report: refused ({len(refused)} finding(s)) in {args.root}")
+        return 1
+    print(f"door_report: passed ({len(doors)} doors) in {args.root}")
     return 0
 
 

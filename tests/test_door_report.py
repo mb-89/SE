@@ -1,4 +1,4 @@
-"""scripts/door_report.py: every reach outside a declared door, against a baseline that may only shrink.
+"""scripts/door_report.py: every reach outside a declared door, refused at its door's level, with no baseline.
 
 Planted reaches are text written into fixture trees; the words that would make this file a reach of
 SE's own doors are spelled in halves, as scripts/hygiene.py spells its markers, so neither hygiene nor
@@ -22,12 +22,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DOORS = ROOT / "scripts" / "doors"
 GIT = "gi" + "t"
 GITHUB_API = "api.git" + "hub.com"
-NEW_FILES = ("scripts/ratchet.py", "scripts/door_report.py", "tests/positive_control.py",
-             "tests/test_ratchet.py", "tests/test_door_report.py")
+NEW_FILES = ("scripts/door_report.py", "tests/positive_control.py", "tests/test_door_report.py")
+SUBPROCESS = "sub" + "process"
 
 # One planted reach of each kind, for a made-up door.
 WIDGET = Declaration(door="widget", commands=("tool",), imports=("widget", "example.com/widget"),
-                     calls=("reach_out",), literals=("example.com/endpoint",))
+                     calls=("reach_out", "clock.read"), names=("vault.secrets",),
+                     literals=("example.com/endpoint",))
 PYTHON = (
     "import subprocess\n"
     "from widget.part import piece\n"
@@ -37,6 +38,10 @@ PYTHON = (
     "URL = 'https://example.com/endpoint/v1'\n"
     "feedback.reading('the tool', ['tool', 'y'])\n"
     "import widgetry\n"
+    "when = my.clock.read()\n"
+    "token = vault.secrets['key']\n"
+    "read()\n"
+    "secrets = 1\n"
 )
 GO = (
     "package tool\n"
@@ -58,8 +63,8 @@ def write(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-def toml(door: str, **lists: list[str]) -> str:
-    return f'door = "{door}"\n' + "".join(f"{key} = {value!r}\n" for key, value in lists.items())
+def toml(door: str, level: str = "error", **lists: list[str]) -> str:
+    return f'door = "{door}"\nlevel = "{level}"\n' + "".join(f"{key} = {value!r}\n" for key, value in lists.items())
 
 
 def run(capsys, *argv: str) -> tuple[int, str, str]:
@@ -78,6 +83,8 @@ def test_one_planted_reach_of_each_kind_is_listed_with_its_kind_word_and_line():
         Reach("scripts/tool.py", 4, "command", "tool"),
         Reach("scripts/tool.py", 5, "call", "reach_out"),
         Reach("scripts/tool.py", 6, "literal", "example.com/endpoint"),
+        Reach("scripts/tool.py", 9, "call", "clock.read"),
+        Reach("scripts/tool.py", 10, "name", "vault.secrets"),
     ]
     assert reaches("components/tool.go", GO, WIDGET) == [
         Reach("components/tool.go", 4, "import", "example.com/widget"),
@@ -93,67 +100,99 @@ def test_a_reach_prints_as_path_line_kind_word():
 # The command on fixture trees
 
 
-def test_a_git_list_outside_the_door_is_listed_and_new_and_inside_the_door_it_is_not(tmp_path, capsys):
-    planted = f"import subprocess\nsubprocess.run(['{GIT}', 'status'])\n"
+def test_a_git_list_outside_the_door_is_refused_and_inside_the_door_it_is_not(tmp_path, capsys):
+    planted = f"import {SUBPROCESS}\n{SUBPROCESS}.run(['{GIT}', 'status'])\n"
     write(tmp_path, {"scripts/tool.py": planted, "scripts/git_door.py": planted})
     code, out, _ = run(capsys, "--root", str(tmp_path))
-    assert code == 0
-    section = out.split("door github")[0]
-    assert section.splitlines() == [
-        f"door {GIT}",
-        f"scripts/tool.py:2: command {GIT}",
-        "new: scripts/tool.py",
-        f"{GIT}: 1 reaches, 0 baseline, 1 new, 0 gone",
-    ]
+    assert code == 1
+    assert f"door_report: scripts/tool.py:2: command {GIT} outside the {GIT} door" in out.splitlines()
+    assert "scripts/git_door.py" not in out
+    assert out.splitlines()[-1].startswith("door_report: refused (")
 
 
-def test_a_baseline_path_with_fewer_reaches_is_gone(tmp_path, capsys):
-    doors = write(tmp_path / "doors", {"a.toml": toml("a", commands=["tool"]) +
-                                        '[baseline]\n"scripts/tool.py" = { count = 2, reason = "why" }\n'})
-    write(tmp_path / "root", {"scripts/tool.py": "subprocess.run(['tool'])\n"})
+def test_a_program_started_outside_the_process_door_is_refused_and_through_it_passes(tmp_path, capsys):
+    """The class the overhaul found (a script starting a program itself), held by one instance."""
+    doors = write(tmp_path / "doors", {"process.toml": (DOORS / "process.toml").read_text(encoding="utf-8")})
+    write(tmp_path / "root", {"scripts/tool.py": f"import {SUBPROCESS}\n{SUBPROCESS}.run(['go', 'build'])\n",
+                              "scripts/fine.py": "import process_door\nprocess_door.run(['go', 'build'])\n",
+                              "tests/test_tool.py": f"import {SUBPROCESS}\n{SUBPROCESS}.run(['go', 'build'])\n"})
+    code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors))
+    assert code == 1
+    assert [line for line in out.splitlines() if " outside the " in line] == [
+        f"door_report: scripts/tool.py:2: call {SUBPROCESS}.run outside the process door"], \
+        "a test's start is the spawn guard's, so the process door's ground is the code that runs"
+
+
+def test_a_door_at_warn_counts_its_reaches_on_one_line_and_passes_and_list_names_each(tmp_path, capsys):
+    doors = write(tmp_path / "doors", {"a.toml": toml("a", "warn", commands=["tool"])})
+    write(tmp_path / "root", {"scripts/tool.py": "x = ['tool']\ny = ['tool']\n", "scripts/two.py": "z = ['tool']\n"})
     code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors))
     assert code == 0
-    assert out.splitlines() == ["door a", "scripts/tool.py:1: command tool", "gone: scripts/tool.py",
-                                "a: 1 reaches, 2 baseline, 0 new, 1 gone"]
+    assert out.splitlines() == [
+        "door_report: warning: a: 3 reach(es) in 2 file(s) outside the door, level warn while they move behind it "
+        "(door_report.py --list names each)",
+        f"door_report: passed (1 doors) in {tmp_path / 'root'}"]
+    code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors), "--list")
+    assert code == 0
+    assert "door_report: warning: scripts/tool.py:2: command tool" in out.splitlines()
 
 
-def test_the_ground_is_hygienes_and_a_contract_test_is_scanned(tmp_path, capsys):
+def test_a_door_at_warn_with_no_reach_left_is_refused_naming_the_step_to_error(tmp_path, capsys):
+    doors = write(tmp_path / "doors", {"a.toml": toml("a", "warn", commands=["tool"])})
+    write(tmp_path / "root", {"scripts/tool.py": "x = 1\n"})
+    code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors))
+    assert code == 1
+    assert out.splitlines()[0] == ('door_report: a: no reach left outside the door at level warn: '
+                                   'set level = "error" in scripts/doors/a.toml')
+
+
+def test_the_ground_is_hygienes_and_a_contract_test_is_its_doors(tmp_path, capsys):
     doors = write(tmp_path / "doors", {"a.toml": toml("a", files=["scripts/door.py"], literals=["needle"],
                                                        contract_tests=["tests/test_door.py"])})
     needle = "x = 'needle'\n"
     write(tmp_path / "root", {name: needle for name in (
-        "scripts/door.py", "tests/test_door.py", "components/c.py", "components/k.go", "scripts/notes.md",
-        "scripts/.venv/v.py", "tests/testdata/t.py", "scripts/__pycache__/p.py", "docs/d.py",
+        "scripts/door.py", "tests/test_door.py", "tests/test_other.py", "components/c.py", "components/k.go",
+        "scripts/notes.md", "scripts/.venv/v.py", "tests/testdata/t.py", "scripts/__pycache__/p.py", "docs/d.py",
         "kern/k.go", ".se/modules/kern/k.go")})
     write(tmp_path / "root", {"components/k.go": 'var x = "needle"\n'})
     code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors))
-    assert code == 0
+    assert code == 1
     assert [line for line in out.splitlines() if ": literal " in line] == [
-        "components/c.py:1: literal needle", "components/k.go:1: literal needle",
-        "tests/test_door.py:1: literal needle"], "kern's code is kern's repository's to scan"
+        "door_report: components/c.py:1: literal needle outside the a door",
+        "door_report: components/k.go:1: literal needle outside the a door",
+        "door_report: tests/test_other.py:1: literal needle outside the a door"], "kern's code is kern's repository's to scan"
 
 
-def test_a_file_that_does_not_parse_or_is_not_utf8_is_not_read_and_the_exit_is_0(tmp_path, capsys):
-    write(tmp_path, {"scripts/broken.py": "def (:\n", "scripts/fine.py": f"x = ['{GIT}', 'log']\n"})
+def test_a_doors_ground_narrows_the_folders_it_checks(tmp_path, capsys):
+    doors = write(tmp_path / "doors", {"a.toml": toml("a", ground=["scripts"], literals=["needle"])})
+    write(tmp_path / "root", {"scripts/s.py": "x = 'needle'\n", "tests/t.py": "x = 'needle'\n"})
+    code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors))
+    assert code == 1
+    assert [line for line in out.splitlines() if ": literal " in line] == [
+        "door_report: scripts/s.py:1: literal needle outside the a door"]
+
+
+def test_a_file_that_does_not_parse_or_is_not_utf8_is_refused_as_no_door_can_check_it(tmp_path, capsys):
+    write(tmp_path, {"scripts/broken.py": "def (:\n", "scripts/fine.py": "x = 1\n"})
     (tmp_path / "scripts" / "latin.py").write_bytes(b"x = '\xe9'\n")
     code, out, _ = run(capsys, "--root", str(tmp_path))
-    assert code == 0
+    assert code == 1
     lines = out.splitlines()
-    assert lines[0].startswith("scripts/broken.py: not read (SyntaxError")
-    assert lines[1].startswith("scripts/latin.py: not read (UnicodeDecodeError")
-    assert f"scripts/fine.py:1: command {GIT}" in lines
-    assert not any(line.startswith(("scripts/broken.py:", "scripts/latin.py:")) for line in lines[2:])
+    assert lines[0].startswith("door_report: scripts/broken.py: not read (SyntaxError")
+    assert lines[0].endswith("so no door can check it")
+    assert lines[1].startswith("door_report: scripts/latin.py: not read (UnicodeDecodeError")
 
 
 # Declarations
 
 
 @pytest.mark.parametrize(("text", "key"), [
-    ('door = "a"\nwords = ["x"]\n', "'words'"),
-    ('door = "a"\n[baseline]\n"scripts/x.py" = { count = 1 }\n', "baseline.'scripts/x.py'.reason"),
-    ('door = "a"\n[baseline]\n"scripts/x.py" = { count = 0, reason = "why" }\n', "baseline.'scripts/x.py'.count"),
-    ('door = "a"\n[baseline]\n"scripts/x.py" = { count = 1, reason = "why", until = 2 }\n',
-     "baseline.'scripts/x.py'.until"),
+    ('door = "a"\nlevel = "warn"\nwords = ["x"]\n', "'words'"),
+    ('door = "a"\nlevel = "warn"\n[baseline]\n"scripts/x.py" = { count = 1, reason = "why" }\n',
+     "a door keeps no baseline"),
+    ('door = "a"\n', "'level'"),
+    ('door = "a"\nlevel = "report"\n', "'level'"),
+    ('door = "a"\nlevel = "error"\nground = ["docs"]\n', "'ground'"),
 ])
 def test_a_bad_declaration_is_refused_with_its_file_and_key_and_the_command_exits_2(tmp_path, capsys, text, key):
     doors = write(tmp_path / "doors", {"bad.toml": text})
@@ -172,26 +211,30 @@ def test_a_folder_without_declarations_and_a_file_that_is_not_toml_exit_2(tmp_pa
     assert code == 2 and "a.toml: not read" in err
 
 
-def test_ses_declarations_load_name_existing_paths_and_give_every_baseline_entry_a_reason():
+def test_ses_declarations_load_and_name_existing_paths():
     doors = {door.door: door for door in load_all(DOORS)}
-    assert sorted(doors) == [GIT, "github", "mcp"]
+    assert sorted(doors) == ["clock", "environment", GIT, "github", "mcp", "network", "process", "shell"]
     for door in doors.values():
-        named = [*door.files, *door.contract_tests, *door.baseline]
+        named = [*door.files, *door.contract_tests]
         assert [path for path in named if not (ROOT / Path(path)).is_file()] == [], door.door
-        assert all(reason.strip() for _, reason in door.baseline.values()), door.door
+
+
+def test_ses_tree_passes_the_door_check(capsys):
+    """Every door at error finds no reach on SE's own tree, and every door at warn still finds one."""
+    assert run(capsys, "--root", str(ROOT))[0] == 0
 
 
 def test_the_git_declaration_is_hygienes_git_door():
     git = load(DOORS / f"{GIT}.toml")
     assert sorted(git.files) == sorted(hygiene.GIT_DOOR)
     assert git.commands == (GIT,)
-    assert dict(git.baseline) == dict(hygiene.GIT_ALLOWED) == {}
+    assert git.level == "error" and hygiene.GIT_ALLOWED == {}
     assert sorted(git.contract_tests) == ["tests/test_git_door.py"]
 
 
 def test_the_declaration_refuses_a_list_that_is_not_strings():
     with pytest.raises(DeclarationError, match="'files'"):
-        declaration("x.toml", {"door": "a", "files": "scripts/a.py"})
+        declaration("x.toml", {"door": "a", "level": "warn", "files": "scripts/a.py"})
 
 
 # The same reaches as hygiene
@@ -302,10 +345,9 @@ def imported(source: str) -> set[str]:
     return names
 
 
-@pytest.mark.parametrize("module", ["door_report", "ratchet"])
-def test_the_report_and_the_ratchet_import_nothing_that_reaches_outside(module):
-    names = imported((ROOT / "scripts" / f"{module}.py").read_text(encoding="utf-8"))
-    assert names & {"hygiene", "git_door", "subprocess", "urllib", "socket", "http", "requests"} == set()
+def test_the_check_imports_nothing_that_reaches_outside():
+    names = imported((ROOT / "scripts" / "door_report.py").read_text(encoding="utf-8"))
+    assert names & {"hygiene", "git_door", SUBPROCESS, "urllib", "socket", "http", "requests"} == set()
 
 
 def test_the_import_check_finds_an_import():
