@@ -97,6 +97,13 @@ template, which carries the fill's corrections; the verb `fill` takes either.
   `drop`, `missing`, `with`, `none`, `text_as`, `title_as` and `result`. An adapter written wrong
   for its checker fails the check with the Python engine's error. The cases hold each adapter's
   texts: what its writer writes and every refusal.
+- **The command line's door.** `se template fill|check` (`cli.go`) answers one verb: the request's
+  JSON on stdin, its answer's JSON on stdout. A Python script asks the Go engine through
+  [scripts/template_door.py](../scripts/template_door.py) and keeps no engine of its own; where the
+  session's binary is older than the verb, the door runs it with `go run` from `components/`.
+  `accept` stays on the bus, as a filled template's seal holds only in the process that made it.
+  `retro_deck.py` fills the deck so; hygiene's check `template-engine` warns at each script that
+  still imports the Python engine (work issue go-template-engine-only).
 - **Where Go answers otherwise.** Python keeps a lone surrogate of a JSON string, Go reads it as
   U+FFFD.
 
