@@ -69,6 +69,8 @@ gate = "refuse"
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
 # (docs/tests.md "Test budget").
 [tests]
+# The se binary the setup tests run, built once per tree outside the budget (tests/se_binary.py).
+setup = ["uv", "run", "python", "tests/se_binary.py"]
 command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
 limit_seconds = 120
@@ -193,3 +195,9 @@ skills = []
 
 [roles.worker]
 skills = []
+
+# The overhaul's rule on tests that add no line of their own (docs/work-commands.md "Work
+# commands", overhaul.py coverage): the groups that run the same lines are pruned; the tests whose
+# lines another test runs warn while each overhaul prunes them, file by file, the slowest first.
+[overhaul]
+subset_tests = "warn"

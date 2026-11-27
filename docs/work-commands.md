@@ -138,10 +138,11 @@ finding's disposition, and due says whether a retro or an overhaul is due or ope
 
 `components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
 report, a deck, from the judged draft, file checks the judged draft and closes the issue with its
-report, and facts lists a checkout's pruning facts.
+report, facts lists a checkout's pruning facts, and coverage measures the suite per test for them.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `overhaul.py coverage` | `overhaul.py coverage [--repo REPO] [--source SOURCE]` | measure the suite's coverage per test for the facts |
 | `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
 | `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
@@ -513,6 +514,24 @@ and its neighbours. It lists:
 - the lines of code and of tests per script, a test file counting for the script it imports or runs;
 - the ten longest functions, files and parameter lists, and the ten files untouched longest (git);
 - each script command (argparse's and `work_tickets.py`'s registry) that no line of the authored
-  text (`se.toml` `authored_content`) names after its script.
+  text (`se.toml` `authored_content`) names after its script;
+- where `overhaul.py coverage` kept a run, the tests that add no line of their own, each with the
+  seconds pruning it saves, slowest first: the groups of tests that run exactly the same lines,
+  one kept and the others to prune, and the tests whose lines another single test runs, by file.
 
 `--json` prints the same facts as data.
+
+`overhaul.py coverage` runs the suite once under coverage with a context per test (pytest-cov,
+for that run only) and keeps the run in `.se/overhaul/coverage/`, which `facts` and `read` list;
+each overhaul measures and prunes from the list
+([tst-002](../src/skills/work-model/references/rules.md#tst-002-fast-tests)).
+
+- A test is a test function, its parametrized cases together, and its lines are those its call
+  runs in `scripts/` (`--source`).
+- A line half the tests run is the harness's, not the test's. A test that started a process is
+  left out, as coverage does not see its child's lines.
+- A test that runs another's lines yet asserts another answer stays, marked
+  `@pytest.mark.distinct("<the answer it adds>")`, and is left out too.
+- Each class has its level in `se.toml` `[overhaul]`, `repeated_tests` and `subset_tests`:
+  `error`, built in, fails the run, naming the class and the remedy; `warn` names it and passes,
+  while the existing cases are pruned. There is no baseline.

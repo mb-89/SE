@@ -6,7 +6,8 @@ Reader: whoever writes a slow test, measures the bound again, or changes the wir
 counts over setup, call and teardown, so a hanging fixture is caught too. A test whose fixtures
 include `obs` (the tests of tests/test_deck.py count through `decks`) gets the obs fixture's wait for
 its lock on top: on a fresh checkout its setup clones and builds obs over the network, which no
-measurement on one host bounds. A test that carries its own `timeout` mark keeps it. A test in
+measurement on one host bounds. One that takes `se_binary` gets the wait of its build the same way:
+a cold Go cache builds the se binary, toolchain and modules fetched, past any measured bound. A test that carries its own `timeout` mark keeps it. A test in
 `tests/beside_*.py` gets none: those files run under their own `se.toml` `[tests.beside.*]` limit,
 or only where the owner adds them (docs/applications.md "Host validators").
 
@@ -37,13 +38,15 @@ def beside(item: pytest.Item) -> bool:
     return path.parent.name == "tests" and path.name.startswith("beside_") and path.suffix == ".py"
 
 
-def mark(items: Iterable[pytest.Item], obs_wait: float, bound: float = BOUND) -> None:
-    """Give each of `items` its timeout mark: `bound`, plus `obs_wait` for a test that takes `obs`;
-    none for a test that has its own or lives in a `tests/beside_*.py` file."""
+def mark(items: Iterable[pytest.Item], obs_wait: float, bound: float = BOUND, build_wait: float = 0) -> None:
+    """Give each of `items` its timeout mark: `bound`, plus `obs_wait` for a test that takes `obs`
+    and `build_wait` for one that takes `se_binary`, the se binary built once per tree
+    (tests/conftest.py); none for a test that has its own or lives in a `tests/beside_*.py` file."""
     for item in items:
         if item.get_closest_marker("timeout") is not None or beside(item):
             continue
-        seconds = bound + (obs_wait if "obs" in getattr(item, "fixturenames", ()) else 0)
+        names = getattr(item, "fixturenames", ())
+        seconds = bound + (obs_wait if "obs" in names else 0) + (build_wait if "se_binary" in names else 0)
         item.add_marker(pytest.mark.timeout(seconds))
 
 

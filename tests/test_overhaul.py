@@ -227,6 +227,119 @@ def test_facts_on_se_record_their_time_against_the_budget(capsys, tmp_path: Path
     assert {row["script"] for row in found["sizes"]} >= {"scripts/work_tickets.py"}
 
 
+# A coverage run (overhaul.py coverage) of the fixture: each case's lines in its call, its seconds
+# and whether it started a process, or was skipped. Line 9 every test runs, the harness's, and the text tests
+# run no other; case[a] and case[b] are
+# one test, whose lines together hold those of only_five.
+RUN = {
+    "tests/test_app.py::test_first": ({1, 2, 3, 9}, 0.5, False),
+    "tests/test_app.py::test_again": ({1, 2, 3, 9}, 0.25, False),
+    "tests/test_app.py::test_wider": ({1, 2, 3, 4, 9}, 1.0, False),
+    "tests/test_app.py::test_a_child_runs_it": ({1, 2, 3, 9}, 2.0, True),
+    "tests/test_app.py::test_skipped": ({1, 2, 3, 9}, 0.0, "skipped"),
+    "tests/test_app.py::test_another_answer": ({1, 2, 3, 9}, 0.1, False),
+    "tests/test_app.py::test_case[a]": ({5, 9}, 0.2, False),
+    "tests/test_app.py::test_case[b]": ({6, 9}, 0.2, False),
+    "tests/test_app.py::test_only_five": ({5, 9}, 0.125, False),
+    **{f"tests/test_app.py::test_text_{number}": ({9}, 0.1, False) for number in range(6)},
+}
+
+MARKED = '''\
+import pytest
+
+
+@pytest.mark.distinct("asserts the other answer")
+def test_another_answer():
+    pass
+'''
+
+
+def numbits(lines: set[int]) -> bytes:
+    found = bytearray(max(lines) // 8 + 1)
+    for line in lines:
+        found[line // 8] |= 1 << line % 8
+    return bytes(found)
+
+
+def measured(root: Path, run: dict) -> None:
+    """Write `run` where overhaul.py coverage keeps its run: coverage's data file with per-test
+    contexts and a JUnit report of the xunit1 family."""
+    import sqlite3
+    folder = root / overhaul.COVERAGE_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    database = sqlite3.connect(folder / overhaul.COVERAGE_DATA)
+    database.executescript("create table context (id integer primary key, context text);"
+                           "create table line_bits (file_id integer, context_id integer, numbits blob);")
+    cases = []
+    for number, (node, (lines, seconds, spawns)) in enumerate(run.items(), start=1):
+        for phase, phase_lines in (("setup", {7}), ("run", lines)):
+            database.execute("insert into context values (?, ?)", (2 * number + (phase == "run"), f"{node}|{phase}"))
+            database.execute("insert into line_bits values (1, ?, ?)", (2 * number + (phase == "run"), numbits(phase_lines)))
+        name = node.split("::", 1)[1]
+        cases.append(f'<testcase classname="tests.test_app" name="{name}" file="tests/test_app.py" '
+                     f'time="{seconds}"><properties><property name="spawns" '
+                     f'value="{1 if spawns is True else 0}:kept:0" /></properties>'
+                     f'{"<skipped />" if spawns == "skipped" else ""}</testcase>')
+    database.commit()
+    database.close()
+    (folder / overhaul.JUNIT).write_text(f"<testsuites><testsuite>{''.join(cases)}</testsuite></testsuites>",
+                                         encoding="utf-8")
+
+
+def test_facts_name_the_tests_that_repeat_anothers_lines_with_their_seconds(checkout, capsys):
+    assert overhaul.main(["facts", "--repo", str(checkout)]) == 0
+    assert "not measured: run `overhaul.py coverage`" in capsys.readouterr().out
+    marked = MARKED.split("\n", 2)[2]
+    blank = marked.replace('"asserts the other answer"', '" "').replace("test_another_answer", "test_first")
+    (checkout / "tests" / "test_app.py").write_text(f"{TEST}\n\n{marked}\n\n{blank}", encoding="utf-8")
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "Marked")
+    measured(checkout, RUN)
+    found = facts(checkout, capsys)["repeats"]
+    assert found["groups"] == [{"keep": "tests/test_app.py::test_again",
+                                "prune": ["tests/test_app.py::test_first"], "seconds": 0.5}]
+    assert found["subsets"] == [
+        {"test": "tests/test_app.py::test_first", "within": "tests/test_app.py::test_wider", "seconds": 0.5},
+        {"test": "tests/test_app.py::test_again", "within": "tests/test_app.py::test_wider", "seconds": 0.25},
+        {"test": "tests/test_app.py::test_only_five", "within": "tests/test_app.py::test_case", "seconds": 0.125}]
+    assert found["levels"] == {"repeated_tests": "error", "subset_tests": "warn"}
+    assert overhaul.main(["facts", "--repo", str(checkout)]) == 0
+    report = capsys.readouterr().out
+    assert ("## Tests that run the same lines as another (1 in 1 groups, 0.5 s; repeated_tests: error)\n\n"
+            "- 0.50 s: keep tests/test_app.py::test_again, prune tests/test_app.py::test_first") in report
+    assert "## Tests whose lines another test runs (3, 0.9 s; subset_tests: warn)\n\n- tests/test_app.py: 3 tests, 0.88 s" in report
+
+
+def test_coverage_measures_the_suite_once_and_fails_where_a_class_is_at_error(checkout, capsys, fake_processes):
+    asked = []
+
+    def suite(invocation):
+        asked.append(invocation)
+        measured(invocation.cwd, RUN)
+        return 0
+
+    fake_processes.on("uv", suite)
+    assert overhaul.main(["coverage", "--repo", str(checkout)]) == 1
+    printed = capsys.readouterr()
+    assert asked[0].words[:5] == ["uv", "run", "--with", "pytest-cov", "pytest"]
+    assert "--cov=scripts" in asked[0].words and "--cov-context=test" in asked[0].words
+    assert asked[0].env["COVERAGE_FILE"] == str(checkout / overhaul.COVERAGE_DIR / overhaul.COVERAGE_DATA)
+    assert ("keep tests/test_app.py::test_again, prune tests/test_app.py::test_another_answer, "
+            "tests/test_app.py::test_first") in printed.out
+    assert "error: repeated_tests: 2 tests add no line of their own" in printed.err
+    assert "warn: subset_tests: 4 tests add no line of their own" in printed.err
+    (checkout / "se.toml").write_text('[overhaul]\nrepeated_tests = "warn"\n', encoding="utf-8")
+    assert overhaul.main(["coverage", "--repo", str(checkout)]) == 0
+    assert "warn: repeated_tests" in capsys.readouterr().err
+    (checkout / "se.toml").write_text('[overhaul]\nsubset_tests = "off"\n', encoding="utf-8")
+    assert overhaul.main(["coverage", "--repo", str(checkout)]) == 2
+    assert "overhaul.subset_tests in" in capsys.readouterr().err
+    fake_processes.on("uv", lambda invocation: 1)
+    (checkout / "se.toml").unlink()
+    assert overhaul.main(["coverage", "--repo", str(checkout)]) == 2
+    assert "the suite under coverage exited 1" in capsys.readouterr().err
+
+
 # Methods, decorators, a string over several lines and a body ending on a closing bracket's line:
 # where a function's first and last lines hold tokens of its neighbours.
 EDGES = f'''\
@@ -430,6 +543,7 @@ def test_the_read_takes_only_the_closed_issues_since_the_last_overhaul(checkout)
     assert sorted(door.handed) == [40, 41, 42, 43, 44, 46, 47]
 
 
+@pytest.mark.distinct("asserts each rule with what checks it")
 def test_the_draft_names_every_rule_with_what_checks_it(checkout):
     found = gathered(checkout)
     text = overhaul.draft(found)
@@ -469,6 +583,7 @@ def test_the_draft_holds_the_retros_since_the_last_overhaul_and_its_findings(che
     assert "### Reached by nothing but tests" in text
 
 
+@pytest.mark.distinct("asserts too early to score")
 def test_with_the_countdown_on_a_finding_still_open_is_too_early_to_score(checkout):
     """Overhaul #40's finding 2, which open #45 takes, had no time to land: too early to score,
     not open; each retro row counts the previous findings it found too early apart from those it

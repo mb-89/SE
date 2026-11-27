@@ -544,17 +544,19 @@ def test_guard_leaves_out_a_file_the_build_generates_whole(worktree: Path) -> No
     assert work_tickets.deleted_authored_sentences(repository, "remove-generated-file") == []
 
 
-def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
-    repository, guide = authored_repository(
-        worktree.parent / "rewrapped-content-case", "rewrap-prose",
-        "This paragraph has the same words after it is rewrapped for Markdown readability.\n",
-    )
-    guide.write_text(
-        "This paragraph has the same words after it is rewrapped for Markdown\n"
-        "readability.\n",
-        encoding="utf-8",
-    )
-    assert git(repository, "commit", "-am", "rewrap authored prose").returncode == 0
+@pytest.mark.parametrize("branch, before, after", [
+    ("rewrap-prose",
+     "This paragraph has the same words after it is rewrapped for Markdown readability.\n",
+     "This paragraph has the same words after it is rewrapped for Markdown\nreadability.\n"),
+    # A section moved to another page keeps its words; its links point from there (SE#1796).
+    ("retarget-links", "Read [the rule book](rules.md#use) before you start.\n",
+     "Read [the rule book](../rules.md#use) before you start.\n"),
+], ids=["rewrapped", "links-elsewhere"])
+def test_guard_ignores_a_rewrapped_sentence_and_one_whose_links_only_point_elsewhere(
+        worktree: Path, branch: str, before: str, after: str) -> None:
+    repository, guide = authored_repository(worktree.parent / f"{branch}-case", branch, before)
+    guide.write_text(after, encoding="utf-8")
+    assert git(repository, "commit", "-am", branch).returncode == 0
     report = repository / "field-report.md"
     report.write_text(
         "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
@@ -562,31 +564,11 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     )
 
     guarded = run_helper(
-        "guard", "--branch", "rewrap-prose", "--pr-description", str(report),
+        "guard", "--branch", branch, "--pr-description", str(report),
         "--worktree", str(repository),
     )
     assert guarded.returncode == 0, guarded.stderr
     assert "No removed protected content found." in guarded.stdout
-
-
-def test_guard_ignores_a_sentence_whose_links_only_point_elsewhere(worktree: Path) -> None:
-    """A section moved to another page keeps its words; its links point from there (SE#1796)."""
-    repository, guide = authored_repository(
-        worktree.parent / "retargeted-content-case", "retarget-links",
-        "Read [the rule book](rules.md#use) before you start.\n",
-    )
-    guide.write_text("Read [the rule book](../rules.md#use) before you start.\n", encoding="utf-8")
-    assert git(repository, "commit", "-am", "retarget a link").returncode == 0
-    report = repository / "field-report.md"
-    report.write_text(
-        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
-        encoding="utf-8",
-    )
-    guarded = run_helper(
-        "guard", "--branch", "retarget-links", "--pr-description", str(report),
-        "--worktree", str(repository),
-    )
-    assert guarded.returncode == 0, guarded.stderr
     assert work_tickets.prose_key("See [it](a.md#x) and [that](<b c.md>).") == "See [it]() and [that](<b c.md>)."
 
 
@@ -704,6 +686,7 @@ def test_guard_rebases_a_moved_folder_to_its_as_path(worktree: Path) -> None:
     assert "test_renders_a_page, test_renders_a_link," in str(refused.value)
 
 
+@pytest.mark.distinct("asserts the refusal naming the missing test")
 def test_guard_refuses_a_moved_folder_whose_destination_lacks_a_deleted_test(
     worktree: Path,
 ) -> None:
@@ -1105,21 +1088,6 @@ def test_done_validation_checks_every_acceptance_section(worktree: Path) -> None
     assert complete.returncode == 0, complete.stderr
 
 
-def test_done_validation_lists_unchecked_acceptance_items(worktree: Path) -> None:
-    initialize(worktree)
-    ticket = create(worktree)
-    ticket.write_text(
-        ticket.read_text(encoding="utf-8") + "\nEvidence: focused test passed.\n",
-        encoding="utf-8",
-    )
-    held = move(worktree, "T-1", "held")
-    assert held.returncode == 0, held.stderr
-
-    incomplete = move(worktree, "T-1", "done")
-    assert incomplete.returncode != 0
-    assert "Add a checkable acceptance criterion." in incomplete.stderr
-
-
 def test_done_validation_allows_tickets_without_checklists(worktree: Path) -> None:
     initialize(worktree)
     ticket = create(worktree)
@@ -1188,6 +1156,7 @@ def test_done_refusing_placeholder_names_file_line_and_remedy(worktree: Path) ->
     refused = move(worktree, "T-1", "done")
     assert refused.returncode != 0
     assert f".se/work/held/T-1.md:{line}" in refused.stderr
+    assert "Add a checkable acceptance criterion." in refused.stderr
     assert "create --acceptance" in refused.stderr
     assert f"edit line {line}" in refused.stderr
 
@@ -1445,6 +1414,7 @@ def test_close_remove_requires_explicit_target_and_removes_normally(worktree: Pa
     assert not worker.exists()
 
 
+@pytest.mark.distinct("asserts SE's own ignore rules")
 def test_se_is_ignored_in_full(tmp_path: Path) -> None:
     # SE's own .gitignore, asked in a repository of the fake, whose ignore rules test_git_door.py holds to git's.
     repository = fake_git.init(tmp_path / "se", "-b", "main")
@@ -1456,6 +1426,7 @@ def test_the_command_reference_is_what_docs_writes():
     assert work_tickets.main(["docs", "--check"]) == 0
 
 
+@pytest.mark.distinct("asserts the reference page rewritten around its prose")
 def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, monkeypatch, capsys):
     readme = tmp_path / work_tickets.REFERENCE_PAGE
     readme.parent.mkdir()
@@ -1475,7 +1446,6 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
     assert "work_tickets.py backlog list --worktree WORKTREE" in written
     assert "OUTDATED REFERENCE" not in written
     assert work_tickets.main(["docs", "--check"]) == 0
-
 
 
 def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_nothing(
@@ -2177,6 +2147,7 @@ def fake_pull_requests(monkeypatch, root: Path, body: str | None) -> list[list[s
     return calls
 
 
+@pytest.mark.distinct("asserts the refusal's reason and commands")
 def test_stop_check_refuses_a_worker_without_a_pull_request_naming_the_commands(
         tmp_path, monkeypatch, capsys):
     root = stop_checkout(tmp_path, monkeypatch)

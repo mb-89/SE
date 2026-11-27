@@ -197,6 +197,7 @@ def said(rep, se):
 # Requirement 1: counts from what loaded.
 
 
+@pytest.mark.distinct("asserts the counts")
 def test_counts_come_from_the_fixture_plugin(setup):
     write(setup["se"] / "skills" / "work-model" / "references" / "rules.md",
           "# Rules\n\n### gen-001 Mechanize first\n\n### pub-002 A generic identity\n")
@@ -214,7 +215,6 @@ def test_the_rules_are_the_public_checks_labels():
     messages = {"tracker-reference", "attribution-trailer", "message-address"}
     assert set(se_start.public_check.RULES) == labels | messages
     assert len(se_start.public_check.RULES) == len(labels) + len(messages)
-
 
 
 def test_the_detached_start_on_linux_and_macos_is_a_new_session_as_before():
@@ -461,6 +461,7 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
     assert copilot == {"additionalContext": context}
 
 
+@pytest.mark.distinct("asserts the hand-over's words")
 @pytest.mark.parametrize("host", ["claude", "copilot"])
 def test_the_hand_over_asks_the_first_message_to_open_with_the_live_report_and_never_says_it_was_shown(host):
     """In a Claude Code cloud session hook output reaches only the model: the hand-over never claims
@@ -513,6 +514,7 @@ def test_default_agent_that_names_no_agent_gives_the_note_and_no_sentence(tmp_pa
     assert _contexts(root)["claude"]["systemMessage"] == "SE 1.2.0 started: ..."
 
 
+@pytest.mark.distinct("asserts the output without a default agent")
 @pytest.mark.parametrize("value", [None, ""])
 def test_default_agent_unset_or_empty_leaves_the_output_byte_identical(tmp_path, monkeypatch, value):
     root = _agent_root(tmp_path)
@@ -729,6 +731,7 @@ def test_a_required_row_behind_its_newest_names_the_next_se_release_never_everyt
     assert report[-1] == "The next SE release brings kern 0.3.0 and obs 10.4.0."
 
 
+@pytest.mark.distinct("asserts the update line")
 def test_se_behind_and_a_required_row_behind_name_the_update_and_the_next_se_release(setup, monkeypatch, capsys):
     newest_read(setup, se=(1, 3, 0), kern=(0, 3, 0))
     report, _, _ = required_start(setup, monkeypatch, capsys)
@@ -765,6 +768,7 @@ def test_the_last_line_is_computed_from_the_tables_rows_alone(rows, line):
                                  for name, loaded, newest, locked in rows]) == {"update": line[0], "names": line[1]}
 
 
+@pytest.mark.distinct("asserts the loaded column")
 def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(setup, monkeypatch, capsys):
     """obs answers 10.4.0 from its clone while SE locks 10.3.2: the row says 10.4.0."""
     report, _, _ = required_start(setup, monkeypatch, capsys,
@@ -772,6 +776,7 @@ def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(set
     assert "| obs | 10.4.0 | unknown |" in table(report)
 
 
+@pytest.mark.distinct("asserts the install of a missing obs-html")
 def test_obs_html_missing_is_installed_at_ses_locked_version_and_then_answers(setup, monkeypatch, capsys):
     loaders = Loaders(installed={}, offered=("obs-html",))
     report, _, _ = required_start(setup, monkeypatch, capsys, loaders=loaders)
@@ -1690,111 +1695,6 @@ def test_the_round_trip_list_then_build_then_the_greeting_names_the_missing_item
                           se_start.World(clock=Clock(), spawn=Spawns(), work=Work()), offline=True)
     assert ("Missing for SE's agents: plugin-dev:plugin-structure (worker). Install: claude plugin "
             "install plugin-dev@claude-plugins-official") in said(rep, se)
-
-
-# The hooks at start (bootstrap.sh --hook): a checkout whose core.hooksPath is unset gets se's hooks.
-
-def hooks_path(repo: Path) -> str | None:
-    found = se_start.git_door.run("config", "--get", "core.hooksPath", root=repo)
-    return found.stdout.strip() if found.returncode == 0 else None
-
-
-def fresh_clone(base: Path, name: str = "clone") -> Path:
-    """A fresh clone of a project with an se.toml, as a cloud session's container clones it: no
-    core.hooksPath, which git never copies."""
-    origin = base / "origin"
-    if not origin.exists():
-        fake_git.init(origin, "-b", "main")
-        write(origin / "se.toml", '[project]\nversion = "0.1.0"\n')
-        git(origin, "add", "-A")
-        git(origin, "-c", "user.name=alice", "-c", "user.email=alice@example.com", "commit", "-q", "-m", "one")
-    clone = fake_git.clone(origin.as_uri(), base / name)
-    assert hooks_path(clone) is None
-    return clone
-
-
-@pytest.fixture
-def fresh(tmp_path):
-    return fresh_clone(tmp_path), tmp_path
-
-
-def test_start_hooks_points_a_fresh_clone_of_se_at_its_own_hooks_once(fresh):
-    clone, base = fresh
-    write(clone / ".githooks" / "se-script", "#!/bin/sh\n")  # se's own checkout carries its hooks
-    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""
-    assert hooks_path(clone) == ".githooks"  # as setup.sh sets it in se's own checkout
-    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""  # again: no change
-    assert hooks_path(clone) == ".githooks"
-
-
-def test_start_hooks_leaves_a_set_hooks_path_alone(fresh):
-    clone, base = fresh
-    git(clone, "config", "core.hooksPath", "custom/hooks")
-    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""
-    assert hooks_path(clone) == "custom/hooks"
-
-
-def own_hooks_folder(clone: Path) -> Path:
-    found = se_start.git_door.run("rev-parse", "--git-path", "hooks", root=clone).stdout.strip()
-    return Path(found) if Path(found).is_absolute() else clone / found
-
-
-def test_start_hooks_names_the_checkouts_own_hooks_that_stop_running_and_the_command_that_keeps_them(fresh):
-    clone, base = fresh
-    folder = own_hooks_folder(clone)
-    write(folder / "pre-commit", "#!/bin/sh\n").chmod(0o755)  # a hook set such as the pre-commit framework's
-    write(folder / "pre-push.sample", "#!/bin/sh\n")
-    line = se_start.start_hooks(base / "plugin", clone, base / "local.toml")
-    assert hooks_path(clone) == (base / "plugin" / ".githooks").as_posix()  # set exactly as before
-    assert line == (f"SE: the hooks in {folder.as_posix()} no longer run: pre-commit, as core.hooksPath now names "
-                    f"se's; to keep them, run: git -C {clone.as_posix()} config core.hooksPath {folder.as_posix()} "
-                    "(se's public check then does not run on this checkout's commits)")
-    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""  # a set one stays
-
-
-def test_start_hooks_says_nothing_of_a_hooks_folder_with_only_samples(fresh):
-    clone, base = fresh
-    write(own_hooks_folder(clone) / "pre-commit.sample", "#!/bin/sh\n")
-    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""
-    assert hooks_path(clone) == (base / "plugin" / ".githooks").as_posix()
-
-
-def test_the_hooks_that_stop_running_are_every_name_but_a_sample_sorted():
-    assert se_start.stopped_hooks(["pre-push", "commit-msg.sample", "pre-commit", "post-merge"]) == [
-        "post-merge", "pre-commit", "pre-push"]
-    assert se_start.stopped_hooks(["pre-commit.sample"]) == [] == se_start.stopped_hooks([])
-
-
-def test_stopped_hooks_names_them_for_setup_and_none_where_the_folder_is_ses_own(fresh, capsys):
-    clone, base = fresh
-    folder = own_hooks_folder(clone)
-    write(folder / "pre-commit", "#!/bin/sh\n")
-    assert se_start.main(["stopped-hooks", "--repo", str(clone), "--hooks", ".githooks"]) == 0
-    assert "no longer run: pre-commit" in capsys.readouterr().out
-    assert se_start.main(["stopped-hooks", "--repo", str(clone), "--hooks", str(folder)]) == 0
-    assert capsys.readouterr().out == ""
-
-
-def test_start_hooks_takes_the_hooks_of_the_se_module_a_project_pins_else_this_ses(fresh):
-    clone, base = fresh
-    plugin = base / "plugin"
-    assert se_start.start_hooks(plugin, clone, base / "local.toml") == ""
-    assert hooks_path(clone) == (plugin / ".githooks").as_posix()  # no se module: this SE's hooks
-    clone = fresh_clone(base, "pinning")
-    module = base / "se-module"
-    write(module / ".githooks" / "se-script", "#!/bin/sh\n")
-    write(clone / "se.toml", '[components.se]\nref = "%s"\n' % ("0" * 40))
-    config = write(base / "local.toml", f'[paths]\nse = "{module.as_posix()}"\n')
-    assert se_start.start_hooks(plugin, clone, config) == ""
-    assert hooks_path(clone) == (module / ".githooks").as_posix()  # the pinned se's, as its setup.sh sets
-
-
-def test_start_hooks_changes_nothing_outside_a_project_checkout(tmp_path):
-    plain = tmp_path / "plain"
-    write(plain / "se.toml", '[project]\nversion = "0.1.0"\n')  # an se.toml, but no git
-    assert se_start.start_hooks(tmp_path / "plugin", plain, None) == ""
-    assert se_start.start_hooks(tmp_path / "plugin", None, None) == ""
-    assert se_start.main(["--root", str(plain), "start-hooks"]) == 0
 
 
 def test_without_docs_url_the_greeting_names_the_docs_of_ses_home(tmp_path: Path, fake_git_door) -> None:

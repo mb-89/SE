@@ -10,6 +10,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 PROJECT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "transcripts"
 
@@ -83,6 +85,7 @@ def test_claude_code_adapter_reads_messages_calls_and_results():
     assert events[3].text == "ls" and events[4].denied and events[4].error
 
 
+@pytest.mark.distinct("asserts the events another adapter reads")
 def test_another_format_needs_only_another_adapter(monkeypatch):
     monkeypatch.setitem(signals.ADAPTERS, "plain", lambda raw, file, line: [
         Event(file, line, "person", "message", text=raw)])
@@ -495,15 +498,6 @@ def test_research_is_written_only_on_request_and_never_printed(tmp_path):
     quiet = research_transcript(tmp_path / "quiet", searches=False)
     assert run(quiet, "--research", "--repo", repo) == (0, "research: 0, no file written\n")
     assert len(list(folder.iterdir())) == 2
-
-
-def test_the_research_folder_is_ignored_in_ses_checkout(fake_git_door, tmp_path):
-    import fake_git
-    import git_door
-    root = fake_git.init(tmp_path / "project", "-b", "main")
-    (root / ".gitignore").write_text((PROJECT / ".gitignore").read_text(encoding="utf-8"),
-                                     encoding="utf-8")
-    assert git_door.run("check-ignore", "-q", ".se/research/probe.jsonl", root=root).returncode == 0
 
 
 def test_under_more_a_file_without_events_is_nothing_read(tmp_path):

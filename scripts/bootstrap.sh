@@ -432,14 +432,6 @@ if $hook && ! $compact && [ -f "$project/se.toml" ]; then
     identity --worktree "$project" >/dev/null 2>&1 ||
     say "setting the commit identity of $project failed; run: uv run python $se_root/scripts/work_tickets.py identity --worktree $project"
 fi
-# The hooks (AGENTS.md "Public safety"): a checkout whose core.hooksPath is unset gets se's hooks
-# at start, as setup.sh sets them, so a fresh clone's first commit already runs the public check; a
-# checkout that has one keeps it (se_start.py start-hooks owns which hooks).
-if $hook && ! $compact && [ -f "$project/se.toml" ]; then
-  line="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
-    --root "$project" start-hooks 2>/dev/null)"
-  [ -n "$line" ] && notes+=("$line")
-fi
 # The file gate's line (docs/templating.md "Templates"): where a template claims a path, the line claimed in
 # <project>/.se/.runtime/templates-files, as kern.path is written, so se_hook.sh guards the file
 # tools with builtins alone; removed otherwise. A template added during a session is guarded from
@@ -473,5 +465,19 @@ if [ -n "$hook_core" ]; then
   kern_args+=(--kern-off "$hook_core")
 elif $hook; then
   kern_step
+fi
+# The hooks (AGENTS.md "Public safety"): a checkout whose core.hooksPath is unset gets se's hooks
+# at start, as setup.sh sets them, so a fresh clone's first commit already runs the public check; a
+# checkout that has one keeps it. The `se` binary's start-hooks owns which hooks (components/start),
+# so the step runs after the kern step put it in place; where it is not in place yet, the step
+# says so in one line and the next start sets them.
+if $hook && ! $compact && [ -f "$project/se.toml" ]; then
+  [ -n "${bin:-}" ] || kern_locate || bin=""
+  if [ -n "${bin:-}" ] && [ -x "$bin" ]; then
+    line="$("$bin" start-hooks --se "$se_root" --root "$project" 2>/dev/null)"
+    [ -n "$line" ] && notes+=("$line")
+  else
+    say "core.hooksPath of $project not set at this start: the se binary${bin:+ $bin} is not in place yet; the next start sets it, or run: sh $se_root/scripts/setup.sh $project"
+  fi
 fi
 finish 0

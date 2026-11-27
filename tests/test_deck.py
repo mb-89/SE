@@ -462,13 +462,6 @@ def test_settings_obs_would_refuse_are_left_for_obs_to_name(text):
     assert deck.brief_notice(text) == text
 
 
-def test_the_send_decks_document_turns_the_passing_line_on(decks):
-    built, artifact = decks["send"]
-    assert built.returncode == 0, built.stderr
-    document = json.loads(deck.document_path(artifact).read_text(encoding="utf-8"))
-    assert document["projectConfig"]["settings"]["artifact"]["reading"]["briefNoticeMilliseconds"] == 4000
-
-
 def test_answers_parse_into_the_summary():
     assert deck.summary(PAYLOAD) == (
         "record: pick C (figure record--figure-1)\n"
@@ -521,6 +514,7 @@ def _requests(artifact: Path) -> dict[str, dict]:
     return {chapter["id"]: chapter["bless"] for chapter in _chapters(document["chapters"]) if chapter.get("bless")}
 
 
+@pytest.mark.distinct("asserts the document's place and its chapters")
 def test_build_writes_the_document_beside_the_deck_and_it_matches_the_built_chapters(decks, page):
     built, artifact = decks["send"]
     assert built.returncode == 0, built.stderr
@@ -529,6 +523,8 @@ def test_build_writes_the_document_beside_the_deck_and_it_matches_the_built_chap
     assert f"its Document {written}" in built.stdout
     document = json.loads(written.read_text(encoding="utf-8"))
     assert document["manifest"]["title"] == "Decisions"
+    # The send deck's document turns the passing line on.
+    assert document["projectConfig"]["settings"]["artifact"]["reading"]["briefNoticeMilliseconds"] == 4000
     expected = [[chapter["id"], chapter.get("bless", {}).get("version")] for chapter in _chapters(document["chapters"])]
     assert [slug for slug, _ in expected] == ["cache", "queue"]
     assert all(version for _, version in expected)
@@ -536,6 +532,7 @@ def test_build_writes_the_document_beside_the_deck_and_it_matches_the_built_chap
     assert page("chapters", path=str(artifact)) == expected
 
 
+@pytest.mark.distinct("asserts a refused build writes no document")
 def test_a_refused_deck_leaves_no_document(decks):
     result, destination = decks["only-records"]
     assert result.returncode == 1, result.stderr

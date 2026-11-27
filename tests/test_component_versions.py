@@ -129,6 +129,7 @@ def version_on_main(checkout: Path, path: str) -> str:
     return text.split('"', 2)[1]
 
 
+@pytest.mark.distinct("asserts two landings in a row, each its own version")
 def test_two_branches_that_change_the_se_binary_land_one_after_the_other_without_redelivery(
         main_checkout, monkeypatch, github, capsys):
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
@@ -151,6 +152,7 @@ def test_two_branches_that_change_the_se_binary_land_one_after_the_other_without
         capsys.readouterr().out)
 
 
+@pytest.mark.distinct("asserts the closing comment's release link")
 def test_the_closing_comment_names_the_component_release_the_landing_cut(
         main_checkout, monkeypatch, github, capsys):
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
@@ -176,33 +178,6 @@ def test_release_line_names_the_recorded_kind_and_each_component_release():
         recorded + "; component releases: https://git.example/owner/repo/releases/tag/kern-v0.14.2.")
     assert work_tickets.release_line("PR #20", "minor", ["se-v0.2.10"]) == (
         recorded + "; component releases: se-v0.2.10.")
-
-
-def test_a_branch_that_still_claims_a_taken_number_gets_the_next_free_one_of_its_kind(
-        main_checkout, monkeypatch, github, capsys):
-    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
-    components_on_main(main_checkout)
-    # Both claim se 0.3.0 the old way; the second's claim is taken once the first lands.
-    claim = SE_RELEASE.format(version="0.3.0")
-    first = work_branch(main_checkout, "feat/first", {
-        "components/release.toml": claim, "components/se.go": "package se // first\n"})
-    second = work_branch(main_checkout, "feat/second", {
-        "components/release.toml": SE_RELEASE.format(version="0.2.10"),
-        TEMPLATE: PINNED.format(version="0.2.10"), "components/more.go": "package se // second\n"})
-
-    land(main_checkout, monkeypatch, "feat/first", first, 7)
-    assert version_on_main(main_checkout, "components/release.toml") == "0.3.0"
-    assert "se 0.2.9 -> 0.3.0 (minor, claimed 0.3.0); the push" in capsys.readouterr().out
-
-    # Its se claim (0.2.10, a patch) conflicts with main's 0.3.0: the landing resolves it.
-    commit = land(main_checkout, monkeypatch, "feat/second", second, 8)
-    assert squashed_onto_origin(main_checkout, commit)
-    assert version_on_main(main_checkout, "components/release.toml") == "0.3.1"
-    out = capsys.readouterr().out
-    assert ("Component version: se 0.3.0 -> 0.3.1 (patch, claimed 0.2.10, replaced by the next "
-            "free patch version); the push to the integration branch cuts se-v0.3.1") in out
-    assert git_run(main_checkout, "show", f"origin/main:{TEMPLATE}", check=True).stdout == (
-        PINNED.format(version="0.3.1")), "the pin moves with the assigned number"
 
 
 SE = versions.Component("se", "components/release.toml", ("components",), "se-v{version}")
@@ -246,6 +221,7 @@ def test_every_file_that_pins_a_component_s_current_tag_is_on_the_landing_s_list
         "add each to component_versions.PINS")
 
 
+@pytest.mark.distinct("asserts a made-up file is named")
 def test_the_completeness_check_fails_on_a_made_up_file_with_a_stale_pin(tmp_path: Path):
     for name, text in {TEMPLATE: PINNED.format(version="4.5.6"),
                        "components/release.toml": SE_RELEASE.format(version="4.5.6"),

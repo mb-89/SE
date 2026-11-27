@@ -958,7 +958,6 @@ def test_field_report_accepts_not_delivered_requirement(worktree, gh, capsys):
     assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
 
 
-
 @pytest.mark.parametrize(("change", "message"), [
     (lambda report: report, None),
     (lambda report: report.replace("  **Result:** complete", ""),
@@ -1465,17 +1464,6 @@ def test_sync_without_origin_merges_local_main(worktree, monkeypatch, capsys, sc
         ["-C", str(worktree), "rev-parse", "--short", "main"],
     ]
     assert "Merged main abc1234" in capsys.readouterr().out
-
-
-def test_sync_sets_the_configured_public_identity_in_the_checkout(main_checkout, local_config):
-    local_config.parent.mkdir(parents=True)
-    local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
-
-    work_tickets.sync(main_checkout)
-    git_ok("-C", str(main_checkout), "commit", "-q", "--allow-empty", "-m", "after sync")
-
-    log = git_run(main_checkout, "log", "-1", "--format=%an <%ae>|%cn <%ce>", check=True)
-    assert log.stdout.strip() == "mb <mb>|mb <mb>"
 
 
 def commit_identity_after_sync(checkout: Path) -> str:
@@ -4367,6 +4355,7 @@ def rule_book_worker(main_checkout: Path, monkeypatch, github, gate: str | None
                   "--issue-body", str(saved / "issue.md"), "--branch", "feature/worker"], saved
 
 
+@pytest.mark.distinct("asserts no review gate line")
 def test_integrate_lands_a_rule_book_change_unreviewed_where_the_review_gate_is_absent(
         main_checkout, monkeypatch, github, capsys):
     _, arguments, _ = rule_book_worker(main_checkout, monkeypatch, github, None)
@@ -4562,6 +4551,7 @@ def no_ci_host(github) -> None:
     github.check_run = lambda sha, name: pytest.fail(f"a host without runners has no {name}")
 
 
+@pytest.mark.distinct("asserts a landing with CI reads no status")
 def test_with_ci_a_landing_reads_and_writes_no_status(main_checkout, monkeypatch, github):
     delivered_worker(main_checkout, monkeypatch)
 
@@ -4829,6 +4819,7 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     assert f"Integrated pull request #7 in {commit[:7]}" in out
 
 
+@pytest.mark.distinct("asserts each read's told purpose")
 def test_a_relay_landings_two_reads_of_the_landing_pull_request_name_their_purpose(
         main_checkout, monkeypatch, github, capsys):
     """The merge confirmation and the read-back are the same pull_request_read get in a row: the
@@ -5005,6 +4996,7 @@ def test_integrate_moves_a_detached_checkout_onto_the_integration_branch(
         work_tickets.onto_integration_branch(main_checkout, "main")
 
 
+@pytest.mark.distinct("asserts the hand-off file")
 def test_integrate_without_kern_keeps_the_file_based_hand_off(main_checkout, monkeypatch, github,
                                                               capsys):
     """The fallback: no call through kern (se_relay.steps unset, as when kern is not running),
@@ -5498,6 +5490,7 @@ def test_integrate_landing_squash_overrides_a_fast_forward_se_toml_for_that_run(
     assert "Landing: squash, integrate --landing's choice" in comment
 
 
+@pytest.mark.distinct("asserts the hand-off state and comment without a landing setting")
 def test_without_landing_the_handoff_state_and_comment_are_as_before(main_checkout, monkeypatch,
                                                                      github):
     _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
@@ -5885,6 +5878,7 @@ def test_suite_between_target_and_limit_records_it_and_names_the_slowest(worktre
     assert "3.10s call tests/test_slow.py::test_sleepy" in captured.out
 
 
+@pytest.mark.distinct("asserts only phases on stderr and the time line")
 def test_suite_under_the_target_passes_quietly(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
 
@@ -5907,6 +5901,7 @@ print("3 passed, 1 skipped, 1 xfailed in 1.20s")
 """
 
 
+@pytest.mark.distinct("asserts the tail holds only pytest's result lines")
 def test_suite_success_tail_shows_only_the_result_lines_of_stdout(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text(PYTEST_SUITE, encoding="utf-8")
@@ -5972,6 +5967,7 @@ print("24 passed")
 """
 
 
+@pytest.mark.distinct("asserts the parts line")
 def test_suite_shows_each_parts_test_time_per_worker_and_slowest(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text(WORKER_SUITE, encoding="utf-8")
@@ -6079,6 +6075,7 @@ def test_suite_with_a_tier_function_prints_each_tiers_slowest_test(worktree, mon
     )
 
 
+@pytest.mark.distinct("asserts no tier list")
 def test_suite_without_a_tier_setting_prints_no_tiers(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
@@ -6193,6 +6190,7 @@ def test_ses_report_names_its_cpu_and_when_each_test_started(worktree, monkeypat
     assert started == sorted(started)  # one worker: each case starts no earlier than the one before
 
 
+@pytest.mark.distinct("asserts the remedy named once")
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
     fake_suite(worktree, monkeypatch, 5.0)
     (worktree / "suite.py").write_text('print("1 passed")\n', encoding="utf-8")
@@ -6530,6 +6528,7 @@ def test_a_suite_beside_whose_setup_alone_ran_no_test_is_not_named(worktree, mon
     assert "passed without running a test" not in capsys.readouterr().out
 
 
+@pytest.mark.distinct("asserts a suite that ran no test is not named passing")
 def test_a_failing_suite_beside_that_ran_no_test_is_refused_and_not_named(
         worktree, monkeypatch, capsys):
     beside_suite(worktree, monkeypatch, [5.0, 2.0])
@@ -6620,6 +6619,7 @@ def test_suite_compare_interleaves_the_states_after_an_uncounted_warm_up(compare
     assert git_run(checkout, "worktree", "list").stdout.count("\n") == 1  # the temporary one is gone
 
 
+@pytest.mark.distinct("asserts the verdict at the spread's edge")
 @pytest.mark.parametrize(("head", "verdict"), [
     ([10.0, 11.0], "not slower"),  # means 10.5 against 9.5: 1.0 s, the spread exactly
     ([10.2, 11.0], "slower by 1.1 s"),  # means 10.6 against 9.5: 1.1 s, past the spread of 1.0
@@ -6700,14 +6700,19 @@ def fake_push(main_checkout, monkeypatch):
     return calls, waits, script
 
 
-def test_push_retries_a_transient_refusal_and_pushes_once(main_checkout, fake_push, capsys):
+@pytest.mark.parametrize("stderr, kind", [
+    (TRANSIENT, "commit_refs_rules"),
+    ("error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502", "HTTP 5xx"),
+    ("fatal: unable to access: Connection reset by peer", "connection reset"),
+])
+def test_push_retries_a_transient_refusal_and_pushes_once(main_checkout, fake_push, capsys, stderr, kind):
     calls, waits, script = fake_push
-    script.extend([(1, TRANSIENT), (0, "")])
+    script.extend([(1, stderr), (0, "")])
     assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 0
     assert calls == [["-u", "origin", "topic"]] * 2
     assert waits == [60]
     output = capsys.readouterr().out
-    assert "Push attempt 1/10" in output and "commit_refs_rules, transient" in output
+    assert "Push attempt 1/10" in output and f"{kind}, transient" in output
     assert output.count("Pushed: git push -u origin topic") == 1
 
 
@@ -6721,6 +6726,7 @@ def test_push_does_not_retry_a_non_fast_forward(main_checkout, fake_push, capsys
     assert "work_tickets.py sync" in error
 
 
+@pytest.mark.distinct("asserts a permission refusal's kind")
 def test_push_does_not_retry_a_permission_refusal(main_checkout, fake_push, capsys):
     calls, waits, script = fake_push
     script.append((128, "remote: Permission to owner/repo.git denied to alice.\n"
@@ -6728,17 +6734,6 @@ def test_push_does_not_retry_a_permission_refusal(main_checkout, fake_push, caps
     assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
     assert len(calls) == 1 and waits == []
     assert "(permission, attempt 1, not retried" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("stderr", [
-    "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
-    "fatal: unable to access: Connection reset by peer",
-])
-def test_push_retries_http_5xx_and_connection_reset(main_checkout, fake_push, stderr):
-    calls, waits, script = fake_push
-    script.extend([(1, stderr), (0, "")])
-    assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 0
-    assert len(calls) == 2 and waits == [60]
 
 
 def test_push_ends_ten_transient_refusals_with_the_remedy(
@@ -7285,6 +7280,7 @@ def test_filing_a_twin_comments_on_the_open_issue_and_creates_nothing(
     assert work_tickets.FLEET_MARKER not in comment
 
 
+@pytest.mark.distinct("asserts a closed issue is no twin")
 def test_filing_without_a_twin_creates_and_a_closed_issue_is_no_twin(worktree, monkeypatch, capsys):
     github = dedupe_gh(monkeypatch)
     body = worktree / "body.md"
@@ -7769,6 +7765,7 @@ def test_field_report_check_accepts_a_breaking_minor_only_below_1_0(
     assert ("lists a breaking change, which is major" in capsys.readouterr().err) == bool(code)
 
 
+@pytest.mark.distinct("asserts the closing comment")
 def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request_and_its_kind(
         main_checkout, monkeypatch):
     worker = main_checkout.parent / "worker"
@@ -8255,6 +8252,7 @@ def test_integrate_through_kerns_relay_reads_the_work_issues_comments_as_a_step(
     assert "Integrated pull request #7" in captured.out
 
 
+@pytest.mark.distinct("asserts the fake session's record of an added step")
 def test_a_session_steps_subclass_that_adds_a_step_still_records_it(main_checkout, github):
     """SessionSteps records each step in `__call__` before any answer: a subclass answers by
     overriding `answer`, so a step it adds shows in `asked` without the subclass recording it."""

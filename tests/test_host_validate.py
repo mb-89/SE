@@ -54,6 +54,7 @@ def run(layout: Path, runner: FakeRunner, skips_pass: bool = False) -> tuple[lis
     return host_validate.report(host_validate.collect(layout, runner), skips_pass)
 
 
+@pytest.mark.distinct("asserts each validator's line")
 def test_every_validator_that_ran_passed(layout):
     lines, code = run(layout, FakeRunner())
     assert code == 0
@@ -64,6 +65,7 @@ def test_every_validator_that_ran_passed(layout):
     assert lines[-1] == "host validators: 4 passed, 0 refused, 0 skipped, 1 without a validator"
 
 
+@pytest.mark.distinct("asserts the runner's arguments")
 def test_the_runner_gets_each_layout_path_after_the_arguments(layout):
     runner = FakeRunner()
     run(layout, runner)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -23,6 +24,7 @@ import fake_processes as fake_programs  # noqa: E402
 import process_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
+import se_binary as se_binary_build  # noqa: E402
 import shell_door  # noqa: E402
 import spawn_guard  # noqa: E402
 import time_bound  # noqa: E402
@@ -304,7 +306,7 @@ def pytest_handlecrashitem(crashitem: str, report: pytest.TestReport, sched) -> 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Every collected test gets its time bound (tests/time_bound.py), one outside tests/ too."""
-    time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
+    time_bound.mark(items, OBS_LOCK_WAIT_SECONDS, build_wait=SE_BUILD_WAIT_SECONDS)
 
 
 @pytest.fixture
@@ -404,6 +406,35 @@ def obs() -> Path:
         return directory
 
 
+# How long the se_binary fixture waits for its build, another worker's included (its lock); a test
+# that takes it gets this on top of its time bound (tests/time_bound.py).
+SE_BUILD_WAIT_SECONDS = 600
+
+
+@pytest.fixture(scope="session")
+def se_binary() -> Path:
+    """The se binary of this tree (tests/se_binary.py), which the complete suite's setup builds
+    (se.toml [tests] setup); a run without that setup builds it here, once per checkout at a time,
+    with the real go in the machine's home, under a lock as the obs fixture's build."""
+    binary = se_binary_build.path()
+    if binary.is_file():
+        return binary
+    if shutil.which("go") is None:
+        pytest.fail("no go to build the se binary from components/ (scripts/setup.sh runs it)")
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(waiting.exclusive(ROOT / ".se" / "se-build.flock", SE_BUILD_WAIT_SECONDS))
+        except TimeoutError as error:
+            pytest.fail(str(error))
+        if binary.is_file():
+            return binary
+        with pytest.MonkeyPatch.context() as patch, process_door.use(process_door.RealProcesses()):
+            use_machine_home(patch)
+            if error := se_binary_build.build(binary):
+                pytest.fail(error)
+    return binary
+
+
 # kern, the Go core, at the pin se.toml [components.kern] reads from components/go.mod (docs/modules.md
 # "Modules"): placed before collection, as tests read its files while they are collected
 # (tests/test_se_home.py TABLE, tests/test_se_components.py's import of kern's SDK).
@@ -490,6 +521,8 @@ def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
 
 @pytest.hookimpl(tryfirst=True)  # before junitxml opens its report
 def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "distinct(answer): this test runs the lines of another yet asserts "
+                                       "another answer, which it names (scripts/overhaul.py coverage)")
     if not hasattr(config, "workerinput"):
         build_plugin_layouts(config)
         place_kern()  # on the controller, before pytest-xdist starts the workers that collect
