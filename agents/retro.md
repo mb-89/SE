@@ -40,7 +40,7 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
 <main checkout>`.
 
 1. **Collect.** A retro: `retro.py collect <issue> --out <draft>`. An overhaul: `overhaul.py coverage --repo
-   <main checkout>`, which measures the suite per test, then `overhaul.py read <issue> --out
+   <main checkout>`, which records each test's coverage, then `overhaul.py read <issue> --out
    <draft>`. Without gh, run each plan they print as the work model says.
 2. **Judge.** Fill the draft's steps and block as its template says
    ([templates/retro.md](../templates/retro.md) for a retro; an overhaul's draft names its

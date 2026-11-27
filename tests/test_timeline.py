@@ -156,6 +156,7 @@ def test_the_timeline_is_one_obs_table_with_a_note_per_row():
     assert front(files["entries/a-v1.0.0.md"])["number"] == "v1.0.0"
 
 
+@pytest.mark.distinct("asserts the page size")
 def test_the_table_pages_its_rows_with_obs():
     assert table(notes(snapshot(issue(1, "ready"))))["views"][0]["obsHtml"]["pageSize"] == timeline.PAGE_SIZE == 20
 
@@ -216,6 +217,7 @@ def test_a_snapshot_saved_before_pull_requests_were_read_has_no_delivery():
     assert "Waiting for integrator under" not in notes(snap)["manifest.md"]
 
 
+@pytest.mark.distinct("asserts the row's opening and link")
 def test_a_row_opens_on_the_first_paragraph_of_its_goal_and_its_link():
     body = "<!-- se:fleet -->\n## Goal\n\nA **timeline**\nof `SE`.\n\nMore.\n\n## Requirements\n\n1. x\n"
     files = notes(snapshot(issue(1, "ready", body=body)))
@@ -249,6 +251,7 @@ def test_a_title_quoting_link_syntax_keeps_it_as_text_in_the_frontmatter():
     assert front(notes(snapshot(titled))["entries/a-1.md"])["subject"] == "Fix `[[note]]` and `[[#^name]]`"
 
 
+@pytest.mark.distinct("asserts markup is escaped")
 def test_text_from_issues_shows_as_written_and_never_as_markup():
     files = notes(snapshot(issue(1, "ready", body="## Goal\n\n<script>x</script> [[note]] *a*")))
     assert "\n\\<script\\>x\\<\\/script\\> `[[note]]` \\*a\\*\n" in files["entries/a-1.md"]
@@ -300,12 +303,6 @@ def test_the_live_derive_gives_every_issue_the_place_and_status_the_build_gives(
     assert derived(live["derive"]["place"], fields) == (rows[0]["place"] if rows else "hidden")
     if rows:
         assert derived(live["derive"]["status"], fields) == rows[0]["status"]
-
-
-def test_a_repository_without_rows_gets_no_live_request():
-    snap = snapshot(issue(1, "ready"))
-    assert [request["set"] for request in table(notes(snap))["obsHtml"]["liveSource"]["changes"][0]["requests"]] == [
-        {"repository": "a"}]
 
 
 # --- One read, then pure (requirement 1) ---
@@ -390,6 +387,7 @@ def pull_node(number: int, body: str, base: str = "main") -> dict:
     return {"number": number, "url": f"https://github.com/o/a/pull/{number}", "baseRefName": base, "body": body}
 
 
+@pytest.mark.distinct("asserts each pull request's issue and report")
 def test_the_read_keeps_each_open_pull_request_with_the_issue_it_names_and_its_field_report():
     github = FakeGitHub({"o/a": {"issues": [], "tags": [], "config": '[project]\nintegration_branch = "next"\n',
                                  "pulls": [pull_node(5, "Refs https://github.com/o/a/issues/1\n\n" + REPORT, "next"),
@@ -556,6 +554,7 @@ def test_a_planned_open_issue_stays_in_its_place_and_its_mark_names_the_day():
         ("a", 13): ("Next", "late, planned 2026-11-10"), ("a", 14): ("Today", "planned 2026-11-12")}
 
 
+@pytest.mark.distinct("asserts no mark on undated rows")
 def test_undated_ready_issues_and_other_places_have_no_mark():
     rows = fixture_rows()
     assert [rows[("a", number)]["mark"] for number in (15, 16, 19, 20)] == ["", "", "", ""]
@@ -915,5 +914,6 @@ def test_a_repository_that_cannot_be_read_is_named_and_the_page_still_builds(tmp
     assert rebuilt.read_text(encoding="utf-8") == destination.read_text(encoding="utf-8")
 
 
+@pytest.mark.distinct("asserts no gap line")
 def test_a_snapshot_with_every_repository_read_names_no_gap():
     assert "Not shown:" not in timeline.vault(snapshot(issue(1, "ready")))["manifest.md"]

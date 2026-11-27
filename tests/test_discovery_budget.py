@@ -150,6 +150,7 @@ def test_the_list_names_each_command_with_its_usage_summary_and_kind(capsys):
     assert "print the guidance a template or a set of tags gets, general first" in line
 
 
+@pytest.mark.distinct("asserts the ad hoc ones come after")
 def test_the_list_reads_the_ad_hoc_components_after_the_tracked_ones(tmp_path, capsys):
     import se_components
 

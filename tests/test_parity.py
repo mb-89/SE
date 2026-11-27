@@ -101,6 +101,7 @@ def test_added_and_removed_paths_fail_naming_the_side_that_holds_them(project: P
     assert "differ in 2 path(s) apart from lockfiles" in out
 
 
+@pytest.mark.distinct("asserts whitespace is a difference")
 def test_whitespace_is_a_difference_not_normalized_away(project: Path, capsys) -> None:
     left = tree(project, BASE)
     right = tree(project, {**BASE, "src/app.py": "print('app')  \n"})

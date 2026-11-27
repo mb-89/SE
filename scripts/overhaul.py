@@ -114,11 +114,13 @@ class Checkout:
 @dataclass
 class Measurement:
     """One coverage run: each test's lines in its call, its seconds (setup, call and teardown),
-    and the tests that started a process, whose child's lines coverage does not see."""
+    the tests that started a process, whose child's lines coverage does not see, and those whose
+    every case was skipped, which ran none of their own."""
 
     lines: dict[str, frozenset]
     seconds: dict[str, float]
     spawning: set[str]
+    skipped: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -547,13 +549,14 @@ def call_lines(data: Path) -> dict[str, frozenset]:
     return {name: frozenset(lines) for name, lines in found.items()}
 
 
-def junit_cases(report: Path) -> tuple[dict[str, float], set[str]]:
-    """Each test's seconds (setup, call and teardown) and the tests that started a process (the
-    spawn guard's `spawns` property), from a JUnit report of the xunit1 family, which names each
-    case's file."""
+def junit_cases(report: Path) -> tuple[dict[str, float], set[str], set[str]]:
+    """Each test's seconds (setup, call and teardown), the tests that started a process (the
+    spawn guard's `spawns` property) and those whose every case was skipped, from a JUnit report
+    of the xunit1 family, which names each case's file."""
     import xml.etree.ElementTree as ElementTree
     seconds: dict[str, float] = defaultdict(float)
     spawning: set[str] = set()
+    ran: set[str] = set()
     try:
         cases = ElementTree.parse(report).getroot().iter("testcase")
     except ElementTree.ParseError as error:
@@ -568,15 +571,17 @@ def junit_cases(report: Path) -> tuple[dict[str, float], set[str]]:
         properties = {item.get("name"): item.get("value") or "" for item in case.iter("property")}
         if properties.get("spawns", "0").split(":", 1)[0] not in ("", "0"):
             spawning.add(name)
-    return dict(seconds), spawning
+        if case.find("skipped") is None:
+            ran.add(name)
+    return dict(seconds), spawning, set(seconds) - ran
 
 
 def measurement(folder: Path) -> Measurement | None:
     """The coverage run `overhaul.py coverage` kept in `folder`, or None where none is kept."""
     if not (folder / COVERAGE_DATA).is_file() or not (folder / JUNIT).is_file():
         return None
-    seconds, spawning = junit_cases(folder / JUNIT)
-    return Measurement(call_lines(folder / COVERAGE_DATA), seconds, spawning)
+    seconds, spawning, skipped = junit_cases(folder / JUNIT)
+    return Measurement(call_lines(folder / COVERAGE_DATA), seconds, spawning, skipped)
 
 
 def repeat_levels(root: Path) -> dict[str, str]:
@@ -618,12 +623,13 @@ def repeats(measured: Measurement, distinct: set[str]) -> dict:
     """The tests that add no line of their own: `groups`, each of tests whose calls run exactly
     the same lines, the first kept and the others to prune; `subsets`, each test whose lines
     another single test also runs, with that test. Lines HARNESS of the tests run are left out,
-    and so are tests that run none else, tests that started a process and tests marked DISTINCT.
+    and so are tests that run none else, tests that started a process or were skipped, and tests
+    marked DISTINCT.
     Each entry carries the seconds pruning it saves; both lists come slowest first."""
     harness = Counter(line for lines in measured.lines.values() for line in lines)
     shared = {line for line, count in harness.items() if count >= HARNESS * len(measured.lines)}
     own = {name: lines - shared for name, lines in measured.lines.items()
-           if name not in measured.spawning and name not in distinct and lines - shared}
+           if not {name} & (measured.spawning | measured.skipped | distinct) and lines - shared}
     seconds = measured.seconds
 
     def took(names) -> float:

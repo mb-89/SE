@@ -33,6 +33,7 @@ class Item:
         return marker.args[0] if marker is not None else None
 
 
+@pytest.mark.distinct("asserts each test's time bound")
 def test_each_test_gets_the_bound_and_one_that_takes_obs_the_wait_on_top():
     plain = Item(TESTS / "test_example.py", ["tmp_path"])
     deck = Item(TESTS / "test_deck.py", ["decks", "obs", "tmp_path"])

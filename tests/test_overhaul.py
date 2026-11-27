@@ -196,7 +196,7 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
 
 
 # A coverage run (overhaul.py coverage) of the fixture: each case's lines in its call, its seconds
-# and whether it started a process. Line 9 every test runs, the harness's, and the text tests
+# and whether it started a process, or was skipped. Line 9 every test runs, the harness's, and the text tests
 # run no other; case[a] and case[b] are
 # one test, whose lines together hold those of only_five.
 RUN = {
@@ -204,11 +204,12 @@ RUN = {
     "tests/test_app.py::test_again": ({1, 2, 3, 9}, 0.25, False),
     "tests/test_app.py::test_wider": ({1, 2, 3, 4, 9}, 1.0, False),
     "tests/test_app.py::test_a_child_runs_it": ({1, 2, 3, 9}, 2.0, True),
+    "tests/test_app.py::test_skipped": ({1, 2, 3, 9}, 0.0, "skipped"),
     "tests/test_app.py::test_another_answer": ({1, 2, 3, 9}, 0.1, False),
     "tests/test_app.py::test_case[a]": ({5, 9}, 0.2, False),
     "tests/test_app.py::test_case[b]": ({6, 9}, 0.2, False),
     "tests/test_app.py::test_only_five": ({5, 9}, 0.125, False),
-    **{f"tests/test_app.py::test_text_{number}": ({9}, 0.1, False) for number in range(4)},
+    **{f"tests/test_app.py::test_text_{number}": ({9}, 0.1, False) for number in range(6)},
 }
 
 MARKED = '''\
@@ -245,7 +246,8 @@ def measured(root: Path, run: dict) -> None:
         name = node.split("::", 1)[1]
         cases.append(f'<testcase classname="tests.test_app" name="{name}" file="tests/test_app.py" '
                      f'time="{seconds}"><properties><property name="spawns" '
-                     f'value="{1 if spawns else 0}:kept:0" /></properties></testcase>')
+                     f'value="{1 if spawns is True else 0}:kept:0" /></properties>'
+                     f'{"<skipped />" if spawns == "skipped" else ""}</testcase>')
     database.commit()
     database.close()
     (folder / overhaul.JUNIT).write_text(f"<testsuites><testsuite>{''.join(cases)}</testsuite></testsuites>",
@@ -467,6 +469,7 @@ def gathered(checkout: Path, given: dict[str, object] | None = None,
     return found
 
 
+@pytest.mark.distinct("asserts each rule with what checks it")
 def test_the_draft_names_every_rule_with_what_checks_it(checkout):
     found = gathered(checkout)
     text = overhaul.draft(found)
@@ -506,6 +509,7 @@ def test_the_draft_holds_the_retros_since_the_last_overhaul_and_its_findings(che
     assert "### Reached by nothing but tests" in text
 
 
+@pytest.mark.distinct("asserts too early to score")
 def test_with_the_countdown_on_a_finding_still_open_is_too_early_to_score(checkout):
     """Overhaul #40's finding 2, which open #45 takes, had no time to land: too early to score,
     not open; each retro row counts the previous findings it found too early apart from those it

@@ -93,6 +93,7 @@ def test_twenty_issues_opened_in_one_session_make_no_retro_due_and_filing_goes_o
     assert filed == []
 
 
+@pytest.mark.distinct("asserts the refusal's text")
 def test_twenty_that_come_back_file_the_retro_first_and_refuse_the_filing(tmp_path, filed):
     with pytest.raises(work_tickets.ReviewDueError) as refused:
         check(tmp_path, Door(**landed(20)))
@@ -171,6 +172,7 @@ def test_a_due_overhaul_is_filed_first_and_a_due_retro_before_it(tmp_path, filed
     assert filed == ["retro"]
 
 
+@pytest.mark.distinct("asserts the reset")
 def test_the_counters_reset_at_the_retros_start(tmp_path, filed):
     """Once the due retro has started (been filed) and closed, what it covered no longer counts:
     the next filing goes on."""

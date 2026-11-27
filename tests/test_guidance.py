@@ -391,6 +391,7 @@ def test_a_second_call_in_a_session_names_the_notes_already_printed(capsys, proj
     assert "already printed" not in other and other.count("## ") == 3
 
 
+@pytest.mark.distinct("asserts nothing is kept between calls")
 def test_without_a_session_every_call_prints_every_note_and_keeps_nothing(capsys, project):
     for _ in range(2):
         code, out, _ = run(capsys, "collect", "--template", "other", "--root", str(project))

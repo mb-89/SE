@@ -122,6 +122,7 @@ def test_a_related_id_and_a_mapped_id_must_exist(tmp_path, capsys):
     assert "principle 1 maps to 'gen-009'" in out
 
 
+@pytest.mark.distinct("asserts the judgment-only list and its count")
 def test_rules_followed_only_by_judgment_are_listed_without_failing(tmp_path, capsys):
     code, out = run(tmp_path, capsys, book(("gen", [
         rule(implementation="by judgment."),

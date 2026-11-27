@@ -16,6 +16,7 @@ def test_report_mode_names_new_and_gone_as_sorted_paths_and_leaves_the_unchanged
     assert gone == ["fewer.py", "vanished.py"]
 
 
+@pytest.mark.distinct("asserts nothing on equal counts")
 def test_report_mode_on_equal_counts_finds_nothing():
     assert compare({"a.py": 2}, {"a.py": 2}, "report") == ([], [])
 
