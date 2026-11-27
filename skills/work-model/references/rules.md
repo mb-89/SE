@@ -203,10 +203,15 @@ door, and a run reads its inputs once, computes, then writes its outputs.
 - **Implementations:**
   - se: git only through [`<se>/scripts/git_door.py`](../../../scripts/git_door.py), which
     [`<se>/scripts/hygiene.py`](../../../scripts/hygiene.py) checks in CI's `check` job, with no
-    other git subprocess allowed;
-    [`<se>/scripts/work_tickets.py`](../../../scripts/work_tickets.py) reaches GitHub only
-    through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
-    ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
+    other git subprocess allowed.
+    - Every door declares its block list in `<se>/scripts/doors/`, and
+      [`<se>/scripts/door_report.py`](../../../scripts/door_report.py) refuses each reach
+      outside one at its door's level in the `check` job and the commit hook.
+    - A door is at `warn` from the day it is declared while its reaches move, then at `error`;
+      there is no baseline.
+    - [`<se>/scripts/work_tickets.py`](../../../scripts/work_tickets.py) reaches GitHub only
+      through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
+      ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
   - kern: git only through its Go door, `kern/git`, which kern's own repository holds to the same
     rule in its CI.
   - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
