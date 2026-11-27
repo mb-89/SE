@@ -217,9 +217,10 @@ What it judges:
 
 A work branch is published only to the repository its work issue is for, never to whatever
 origin happens to be. An explicitly authorized fix with no issue instead requires a checked field
-report declaring `Work issue: none, authorized fix`. `work_tickets.py push`, and `deliver` through
-it, check this before anything is pushed or a pull request opened; the integration branch and
-landing branches keep their own guards.
+report declaring `Work issue: none, authorized fix`.
+
+`work_tickets.py push`, and `deliver` through it, check this before anything is pushed or a pull
+request opened; the integration branch and landing branches keep their own guards.
 
 - The work issue is the one the checkout records (`intake`), titled like the branch.
 - The repository it is for is its one `repo:<name>` label, which every work issue SE files

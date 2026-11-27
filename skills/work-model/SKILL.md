@@ -25,10 +25,10 @@ delivery path below. The same rules apply to local sessions and cloud agents.
   is the same for every package lives in the agent definitions and this skill, never in issues. A
   session prompt names only the agent, the issue or authorized-fix request, and the worktree.
 - **Authorized fix (issue-free)**: only work explicitly authorized without filing an issue may use
-  this path. Its field report says exactly `**Work issue:** none, authorized fix`; the report remains
-  the evidence record, is complete with `None` under "Not delivered", and the pull request still
-  passes the public check, suite, review and landing gates. No other missing or unrecorded issue is
-  accepted; partial work needs a work issue.
+  this path. Its field report says exactly `**Work issue:** none, authorized fix`.
+  - The report remains the evidence record, is complete with `None` under "Not delivered", and the
+    pull request still passes the public check, suite, review and landing gates.
+  - No other missing or unrecorded issue is accepted; partial work needs a work issue.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
   related repository its tests use) is read-only.
   - Everything comes in through its work issue, checked for a change before each ticket so it can
@@ -1074,9 +1074,9 @@ for example:
   description after those retries, open it with the closing line alone, then write the full
   description (`pr-body`'s output) by editing the pull request; the delivery notice names the pull
   request.
-- **The session prompt carries only** the agent, the work issue or explicit authorized-fix request,
-  the branch (the session's outcome
-  branch, which replaces the worktree) and the integrator session to notify; everything else is in
+- **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
+  branch, which replaces the worktree) and the integrator session to notify, an explicit
+  authorized-fix request standing in for the work issue; everything else is in
   the role files, this skill and the project's `AGENTS.md`:
 
   ```text

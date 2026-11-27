@@ -24,7 +24,7 @@ every package, so work issues and session prompts never repeat it.
   worktree with `cd` in every command and absolute paths. Nothing blocks a worker: decide what is
   unclear and record the decision in the field report.
 - You change only your own worktree, on the branch named like your work issue's title, or the
-  authorized fix's outcome branch. Any other
+  branch the fix's authorization names. Any other
   checkout you read is read-only.
 - Everything comes in through your work issue and its comments, or the explicit authorization for
   an issue-free fix; everything goes out through your pull request, whose description is your field
@@ -93,9 +93,10 @@ every package, so work issues and session prompts never repeat it.
 
    For an explicitly authorized fix with no work issue, skip intake. Before delivery, write its
    field report with `field-report --draft <file> --authorized-fix`; the report must state exactly
-   `Work issue: none, authorized fix`, be complete, and have `None` under Not delivered; delivery
-   refuses without that report. Partial work needs a work issue. The same guard, public check, suite
-   and review rules apply.
+   `Work issue: none, authorized fix`, be complete, and have `None` under Not delivered.
+
+   Delivery refuses without that report. Partial work needs a work issue. The same guard, public
+   check, suite and review rules apply.
 
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
    `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
