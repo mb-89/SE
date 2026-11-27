@@ -176,6 +176,13 @@ class = "interactive"
 read-only = true
 mcp = "Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet."
 
+[commands."work_tickets.py leftovers"]
+usage = "work_tickets.py leftovers [--worktree WORKTREE] [--repo REPO] [--sessions FILE]"
+summary = "list what finished work left behind, unchanged for a day: origin's ..."
+group = "Integration"
+help = "list what finished work left behind, unchanged for a day: origin's branches that no open pull request or in-progress issue holds, by kind (unmerged, of a closed pull request, merged, a session's), the checkout's integrated worktrees and, with --sessions, finished sessions not archived; each with its last commit and age, then the one ref-maintenance run that deletes every branch among them under its lease. 'No leftovers' and exit code 0 when there is none, exit code 1 otherwise. It only reads"
+class = "batch"
+
 [commands."work_tickets.py settings-check"]
 usage = "work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]\n                               [--scheduled-tasks FILE] [--environment FILE] [--strict]"
 summary = "compare the fleet's settings the repository records ..."

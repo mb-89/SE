@@ -10989,6 +10989,197 @@ def refs_apply_read_back(root: Path, number: int, triples: list[tuple[str, str, 
 
 
 
+# Leftovers (docs/fleet.md "Leftovers"): what finished work left behind past a day, by kind, for
+# the person to delete in one go. It only reads; branch-cleanup.yml deletes on its own only what
+# nothing can lose.
+
+LEFTOVER_AGE = timedelta(days=1)
+#: Each kind of leftover, in the order they are listed, with its plural.
+LEFTOVER_KINDS = {"unmerged branch": "unmerged branches",
+                  "branch of a closed pull request": "branches of closed pull requests",
+                  "merged branch": "merged branches", "session branch": "session branches",
+                  "integrated worktree": "integrated worktrees",
+                  "finished session": "finished sessions"}
+BRANCH_LEFTOVERS = frozenset(kind for kind in LEFTOVER_KINDS if "branch" in kind)
+#: The branches no listing names a leftover: SE's own, beside the integration branch.
+KEPT_BRANCHES = frozenset({"main", "se", "rehearsal"})
+SESSION_BRANCH_PREFIXES = ("ccr-", "claude/")
+ZERO_SHA = "0" * 40
+
+
+@dataclass(frozen=True)
+class Leftover:
+    """One thing finished work left behind: its kind, its name (a branch, a worktree's path, a
+    session's title), its last commit (a branch's and a worktree's) and when it last changed."""
+
+    kind: str
+    name: str
+    sha: str = ""
+    when: datetime | None = None
+
+
+def leftover_age(when: datetime, now: datetime) -> str:
+    """How long ago `when` was, in whole hours under two days, else days: `5 hours`, `3 days`."""
+    hours = max(0, int((now - when).total_seconds() // 3600))
+    if hours < 48:
+        return "1 hour" if hours == 1 else f"{hours} hours"
+    return f"{hours // 24} days"
+
+
+def finished_sessions(sessions: list[object] | None, now: datetime,
+                      age: timedelta) -> list[Leftover]:
+    """The sessions of SE's work (titled `SE/...`) the session tools list as completed and not
+    archived, unchanged for `age`: each a finished session to archive."""
+    found = []
+    for session in sessions or []:
+        if not isinstance(session, dict):
+            continue
+        title = str(session.get("title") or "")
+        if not title.startswith("SE/") or str(session.get("status") or "") == "archived":
+            continue
+        if str(session.get("status_bucket") or "") != "completed":
+            continue
+        try:
+            when = datetime.fromisoformat(str(session.get("updated_at")).replace("Z", "+00:00"))
+        except ValueError:
+            when = None
+        if when is not None and now - when < age:
+            continue
+        found.append(Leftover("finished session", title, str(session.get("id") or ""), when))
+    return found
+
+
+def find_leftovers(door: object, now: datetime, age: timedelta = LEFTOVER_AGE,
+                   sessions: list[object] | None = None) -> list[Leftover]:
+    """What finished work left behind in what `door` reads, unchanged for `age`, in LEFTOVER_KINDS
+    order and by name within a kind:
+      - origin's branches that no open pull request heads and no open in-progress issue works on
+        (its title), but the integration branch and KEPT_BRANCHES: of a closed pull request whose
+        head is still its tip, merged (its tip on the integration branch), a session's
+        (SESSION_BRANCH_PREFIXES), else unmerged;
+      - the checkout's linked worktrees whose branch is merged or a closed pull request's head,
+        and no open pull request's;
+      - with `sessions`, the session tools' list, the finished sessions (finished_sessions)."""
+    base = door.base
+    open_heads, working = door.open_heads(), door.working()
+    closed = door.closed_heads()
+    candidates = {name: (sha, when) for name, (sha, when) in door.branches().items()
+                  if name not in KEPT_BRANCHES | {base} and name not in open_heads
+                  and name not in working and (when is None or now - when >= age)}
+    kept_by_pull = {name for name, (sha, _) in candidates.items()
+                    if sha in {head for _, head in closed.get(name, [])}}
+    merged = door.merged_shas(sorted({sha for name, (sha, _) in candidates.items()
+                                      if name not in kept_by_pull
+                                      and not name.startswith(SESSION_BRANCH_PREFIXES)}))
+    found: list[Leftover] = []
+    for name, (sha, when) in candidates.items():
+        if name.startswith(SESSION_BRANCH_PREFIXES):
+            kind = "session branch"
+        elif name in kept_by_pull:
+            kind = "branch of a closed pull request"
+        elif sha in merged:
+            kind = "merged branch"
+        else:
+            kind = "unmerged branch"
+        found.append(Leftover(kind, name, sha, when))
+    for path, branch, sha in door.worktrees():
+        if branch in open_heads or branch in working:
+            continue
+        if branch in closed or sha in door.merged_shas([sha]):
+            found.append(Leftover("integrated worktree", path, sha))
+    found += finished_sessions(sessions, now, age)
+    return sorted(found, key=lambda item: (list(LEFTOVER_KINDS).index(item.kind), item.name))
+
+
+def leftover_summary(found: list[Leftover]) -> str:
+    """The leftovers in one line, by kind: `2 unmerged branches (a, b); 1 integrated worktree (x)`."""
+    kinds: dict[str, list[str]] = {}
+    for item in found:
+        kinds.setdefault(item.kind, []).append(item.name)
+    return "; ".join(f"{len(names)} {kind if len(names) == 1 else LEFTOVER_KINDS[kind]} "
+                     f"({', '.join(names)})" for kind, names in kinds.items())
+
+
+def leftover_report(found: list[Leftover], now: datetime) -> str:
+    """Each leftover with its last commit and age, then the one ref-maintenance run that deletes
+    every branch among them, each under its lease, and what removes the rest."""
+    if not found:
+        return "No leftovers"
+    lines = [f"{item.kind}: {item.name}" + (f" at {item.sha[:12]}" if item.sha else "")
+             + (f", {leftover_age(item.when, now)}" if item.when else "") for item in found]
+    branches = [item for item in found if item.kind in BRANCH_LEFTOVERS]
+    if branches:
+        updates = " ".join(f"{item.sha} {ZERO_SHA} refs/heads/{item.name}" for item in branches)
+        lines += ["", "Delete every branch above in one go: run the workflow ref-maintenance "
+                  "(Actions, ref-maintenance, Run workflow) with dry_run off and these updates, "
+                  "each under its lease:", updates]
+    if any(item.kind == "integrated worktree" for item in found):
+        lines += ["", "Remove each worktree: work_tickets.py close --remove --integration-target "
+                  "<integration branch> --worktree <path>"]
+    if any(item.kind == "finished session" for item in found):
+        lines += ["", "Archive each finished session with the session tools (archive_session)"]
+    return "\n".join(lines)
+
+
+class LeftoverDoor:
+    """What find_leftovers reads, through git and gh: origin's branches with their tips and times,
+    which commits are on the integration branch `base` (GitHub's comparison), the open and closed pull requests' heads,
+    the open in-progress issues' titles and the checkout's linked worktrees."""
+
+    def __init__(self, root: Path, repo: str, base: str) -> None:
+        self.root, self.base, self.github = root, base, GitHub(root, repo)
+
+    def branches(self) -> dict[str, tuple[str, datetime | None]]:
+        checked_git(self.root, "fetch", "-q", "--prune", "origin",
+                    "+refs/heads/*:refs/remotes/origin/*")
+        listed = checked_git(self.root, "for-each-ref",
+                             "--format=%(refname:lstrip=3)%09%(objectname)%09%(committerdate:iso-strict)",
+                             "refs/remotes/origin/")
+        found = {}
+        for line in listed.splitlines():
+            name, sha, when = (line.split("\t") + ["", ""])[:3]
+            if name and name != "HEAD":
+                found[name] = (sha, datetime.fromisoformat(when) if when else None)
+        return found
+
+    def merged_shas(self, shas: list[str]) -> set[str]:
+        """The commits among `shas` that are on `base`, by GitHub's comparison: a cloud clone is
+        shallow, and git there finds no ancestor older than its history."""
+        return {sha for sha in shas
+                if self.github.api(f"compare/{self.base}...{sha}").get("ahead_by") == 0}
+
+    def open_heads(self) -> set[str]:
+        return {str(pull["head"]["ref"]) for pull in self.github.api("pulls?state=open&per_page=100")}
+
+    def closed_heads(self) -> dict[str, list[tuple[int, str]]]:
+        heads: dict[str, list[tuple[int, str]]] = {}
+        for page in range(1, FLEET_PAGES + 1):
+            pulls = self.github.api(f"pulls?state=closed&sort=updated&direction=desc&per_page=100"
+                                    f"&page={page}")
+            for pull in pulls:
+                heads.setdefault(str(pull["head"]["ref"]), []).append(
+                    (int(pull["number"]), str(pull["head"]["sha"])))
+            if len(pulls) < 100:
+                break
+        return heads
+
+    def working(self) -> set[str]:
+        return {str(issue["title"]) for issue in
+                self.github.api(f"issues?state=open&labels={IN_PROGRESS_LABEL}&per_page=100")
+                if "pull_request" not in issue}
+
+    def worktrees(self) -> list[tuple[str, str, str]]:
+        found = []
+        blocks = checked_git(self.root, "worktree", "list", "--porcelain").split("\n\n")
+        for block in blocks[1:]:  # the first is the main checkout's
+            fields = dict(line.partition(" ")[::2] for line in block.splitlines())
+            branch = fields.get("branch", "")
+            if fields.get("worktree") and branch.startswith("refs/heads/"):
+                found.append((fields["worktree"], branch.removeprefix("refs/heads/"),
+                              fields.get("HEAD", "")))
+        return found
+
+
 # The fleet check: one read of GitHub and origin's branches that lists every stuck or stray piece
 # of work with its remedy, and says healthy otherwise. It only reads.
 
@@ -13484,6 +13675,35 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     return 1 if any(finding.stuck for finding in found) else 0
 
 
+@command("leftovers", "list what finished work left behind, unchanged for a day: origin's branches "
+                      "that no open pull request or in-progress issue holds, by kind (unmerged, of "
+                      "a closed pull request, merged, a session's), the checkout's integrated "
+                      "worktrees and, with --sessions, finished sessions not archived; each with "
+                      "its last commit and age, then the one ref-maintenance run that deletes every "
+                      "branch among them under its lease. 'No leftovers' and exit code 0 when there "
+                      "is none, exit code 1 otherwise. It only reads",
+         OPTIONAL_WORKTREE, REPO,
+         arg("--sessions", type=Path, metavar="FILE",
+             help="the session tools' answer: the sessions list_sessions lists; adds the finished "
+                  "sessions of SE's work not archived (docs/fleet.md \"Leftovers\")"))
+def run_leftovers(root: Path, args: argparse.Namespace) -> int:
+    sessions = None
+    if args.sessions is not None:
+        try:
+            sessions = tool_items(json.loads(read_file(args.sessions, "the session tools' answer")),
+                                  "data")
+        except json.JSONDecodeError as error:
+            raise QueueError(f"{args.sessions} is not the JSON list of sessions: {error}") from None
+    if hand_off():
+        raise QueueError("leftovers reads GitHub with gh, which this session lacks; the start "
+                         "report names no leftovers here")
+    now = datetime.now(timezone.utc)
+    door = LeftoverDoor(root, resolve_repo(root, args.repo), integration_branch(root))
+    found = find_leftovers(door, now, sessions=sessions)
+    print(leftover_report(found, now))
+    return 1 if found else 0
+
+
 def fleet_home(root: Path, explicit: str | None) -> str:
     """SE's home URL for the recorded setup script: the `--repo` given (`[host/]owner/repo`, host
     github.com by default), else the checkout's origin (se_home.py); "" where neither is known."""
@@ -13713,7 +13933,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "unclaim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
-      "settings-check", "parity", "docs", "format")),
+      "leftovers", "settings-check", "parity", "docs", "format")),
 ))
 #: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.

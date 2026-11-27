@@ -418,7 +418,8 @@ def work_check(root: Path | None) -> dict | None:
     overhaul countdowns (retro.py countdowns; the overhaul's only where its countdown is on,
     overhaul.py countdown_on), each with what it counted, whether it is due and why, and the runs
     of its kind still open; and the fleet check's findings, each part with its error instead where
-    its read failed. None without gh or without a project checkout."""
+    its read failed; and what finished work left behind (work_tickets.find_leftovers). None without
+    gh or without a project checkout."""
     if root is None or not (root / ".git").exists():
         return None
     work_tickets = _load("work_tickets")
@@ -427,6 +428,7 @@ def work_check(root: Path | None) -> dict | None:
     retro = _load("retro")
     failures = (work_tickets.QueueError, OSError, ValueError, subprocess.SubprocessError)
     work: dict[str, dict] = {}
+    now = datetime.now(timezone.utc)  # one reading for every part
     try:
         repo = work_tickets.resolve_repo(root, None)
         branch = work_tickets.integration_branch(root)
@@ -436,7 +438,7 @@ def work_check(root: Path | None) -> dict | None:
     try:
         overhaul_on = _load("overhaul").countdown_on(root)
         door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
-        found = retro.countdowns(door, repo, branch, root, datetime.now(timezone.utc))
+        found = retro.countdowns(door, repo, branch, root, now)
         if found is None:
             raise work_tickets.QueueError("the GitHub reads of the countdowns gave no answer")
         work["retro"] = countdown_part(found["retro"])
@@ -448,12 +450,17 @@ def work_check(root: Path | None) -> dict | None:
             work["overhaul"] = {"error": str(error)}
     try:
         found = work_tickets.fleet_findings(
-            work_tickets.Fleet(root, repo, branch), datetime.now(timezone.utc),
+            work_tickets.Fleet(root, repo, branch), now,
             work_tickets.fleet_lease(root), work_tickets.repository_name(root))
         work["fleet"] = {"findings": [{"kind": f.kind, "issue": f.issue} for f in found
                                       if f.stuck]}
     except failures as error:
         work["fleet"] = {"error": str(error)}
+    try:
+        found = work_tickets.find_leftovers(work_tickets.LeftoverDoor(root, repo, branch), now)
+        work["leftovers"] = {"found": [{"kind": item.kind, "name": item.name} for item in found]}
+    except failures as error:
+        work["leftovers"] = {"error": str(error)}
     return work
 
 
@@ -790,7 +797,8 @@ def component_lines(report: Report, se_root: Path) -> list[str]:
 
 def work_lines(report: Report, se_root: Path) -> list[str]:
     """From the cached work check: one line for a retro that is due or open, one for an overhaul
-    that is due or open and one for the fleet's findings, each with the command to run; a part
+    that is due or open, one for the fleet's findings and one for the leftovers, each with the
+    command to run; a part
     whose read failed is named with the remedy.
     Nothing where no work check ran (no gh)."""
     work = report.work or {}
@@ -829,6 +837,17 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
                      + "; ".join(f"{kind} {', '.join(issues)}" for kind, issues in kinds.items())
                      + f"){live}; see each with its remedy: uv run python {se}/scripts/work_tickets.py "
                      f"fleet-check{where}")
+    leftovers = work.get("leftovers") or {}
+    if "error" in leftovers:
+        lines.append(f"Leftovers not read: {leftovers['error']}; {CHECK_REMEDY.format(se=se)}")
+    elif leftovers.get("found"):
+        work_tickets = _load("work_tickets")
+        found = [work_tickets.Leftover(str(item.get("kind")), str(item.get("name")))
+                 for item in leftovers["found"] if item.get("kind") in work_tickets.LEFTOVER_KINDS]
+        where = f" --worktree {report.root.as_posix()}" if report.root else ""
+        lines.append(f"Leftovers: {work_tickets.leftover_summary(found)}; see each with its last "
+                     "commit and age, and the one ref-maintenance run that deletes the branches: "
+                     f"uv run python {se}/scripts/work_tickets.py leftovers{where}")
     return lines
 
 
