@@ -290,6 +290,7 @@ def test_a_missing_note_fails_the_build(tmp_path, obs_in_process, capsys):
     assert "no-such-note" in result.stderr
 
 
+@pytest.mark.distinct("asserts obs refuses a long paragraph, another lint")
 def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs_in_process, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()

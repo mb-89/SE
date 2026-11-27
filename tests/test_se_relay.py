@@ -65,6 +65,7 @@ def test_a_stale_snapshot_is_read_again(tmp_path: Path) -> None:
     assert fresh.answer_file("comments", "alice", "demo", 7, "work issue comments").is_file()
 
 
+@pytest.mark.distinct("asserts the key's form")
 def test_the_key_is_lower_case_owner_repo_number() -> None:
     assert se_relay.key("Alice", "Demo", 8) == "alice.demo.8"
 

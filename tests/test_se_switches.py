@@ -81,6 +81,7 @@ def anchors(path: Path) -> set[str]:
     return {re.sub(r"[^\w\- ]", "", head.lower()).replace(" ", "-") for head in heads}
 
 
+@pytest.mark.distinct("asserts each table's readers and names")
 def test_every_table_file_parses_names_real_readers_and_no_name_twice():
     assert "core.toml" in {path.name for path in se_switches.TABLE.glob("*.toml")}
     loaded = se_switches.load()  # parse refuses a name used twice, across files too
@@ -159,6 +160,7 @@ def test_wires_answer_from_their_table_or_the_default():
     assert wires == {"a.x": ("off", "default"), "c.x": ("on", "wiring")}
 
 
+@pytest.mark.distinct("asserts each label switched")
 def test_the_local_public_check_list_switches_each_label():
     found = effects(public={"user-path", "email"})
     assert found[("off:<label>", "email")] == ("on", "public-check-local")
@@ -209,6 +211,7 @@ def test_se_git_door_default_is_the_real_git():
 WIRING_GO = se_modules.kern_dir(ROOT) / "index" / "wiring.go"  # kern at its pin (tests/conftest.py)
 
 
+@pytest.mark.distinct("asserts the enabled default")
 def test_an_instance_is_enabled_unless_it_says_otherwise():
     """kern's Go reader (kern's index/wiring_test.go holds it) starts each instance enabled."""
     source = WIRING_GO.read_text(encoding="utf-8")
@@ -317,6 +320,7 @@ why = "values"
 """
 
 
+@pytest.mark.distinct("asserts the drift list")
 def test_the_drift_list_names_what_no_table_file_names():
     texts = ['x = "SE_X"', 'x = "SE_NEW_THING"', 'echo "${SE_SHELL:-}"', "$env:SE_PS",
              'SE_ROOT = Path(".")', 'y = "SE_ROOT"']

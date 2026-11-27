@@ -284,6 +284,7 @@ def test_the_marker_names_the_repository_the_template_its_version_and_its_digest
     assert own.marker_line == f"<!-- se:template project/work 1.2.0 sha256:{nested} -->"
 
 
+@pytest.mark.distinct("asserts the approach field's rules")
 def test_the_work_templates_approach_asks_each_premise_to_name_its_check(catalog):
     for name in ("work", "work-file"):
         approach = catalog[name].field("approach")
@@ -631,6 +632,7 @@ def test_the_templates_accept_exactly_the_titles_checked_name_accepts(catalog):
             assert "yyyymmdd" not in found[0].fix
 
 
+@pytest.mark.distinct("asserts each kind of work is taken")
 @pytest.mark.parametrize("kind, refused", [("fix", False), ("feat", False), ("standard", False),
                                            ("banana", True)])
 def test_the_package_kind_takes_every_kind_of_work(catalog, kind, refused):
@@ -951,6 +953,7 @@ def test_draft_json_gives_each_shape_and_a_schema_its_example_passes(capsys, cat
     assert schema_errors(schema, {"title": 1, "nope": ""})  # the validator does refuse
 
 
+@pytest.mark.distinct("asserts the work template's choices and flags")
 def test_the_work_shape_names_its_choices_and_its_flags(capsys, catalog):
     _, answer = drafted(capsys, "work")
     kind = answer["field_shape"]["package_kind"]
@@ -971,6 +974,7 @@ def test_an_adapter_drafts_no_shape_and_an_empty_schema(capsys):
     assert answer["field_shape"] == {} and answer["schema"]["properties"] == {}
 
 
+@pytest.mark.distinct("asserts the old keys byte for byte")
 def test_draft_json_keeps_its_old_keys_byte_for_byte(capsys, catalog):
     out, _ = drafted(capsys, "work")
     template = catalog["work"]
@@ -1477,6 +1481,7 @@ def parametrized(test, index: int = 0) -> list:
     return list(test.pytestmark[index].args[1])
 
 
+@pytest.mark.distinct("asserts each adapter's checker")
 def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     assert templates.main(["list", "--tree"]) == 0
     lines = {line.split(" ")[0]: line for line in capsys.readouterr().out.splitlines()}
@@ -2297,7 +2302,6 @@ def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkey
     assert templates.counts_file(env).parent == tmp_path / ".se" / "templates"
 
 
-
 def missing_from_readme(readme: str) -> list[str]:
     """The files under `templates/` that docs/templating.md's "Templates" section does not name
     with their `says`."""
@@ -2314,12 +2318,14 @@ def missing_from_readme(readme: str) -> list[str]:
     return missing
 
 
+@pytest.mark.distinct("asserts the page names every template")
 def test_readme_templates_names_every_file_under_templates_with_its_says():
     readme = page("templating")
     assert missing_from_readme(readme) == []
     assert "No command checks with them yet" not in readme
 
 
+@pytest.mark.distinct("asserts the check names a removed file")
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     readme = page("templating")
     start = readme.index("| `templates/retro.md` |")
@@ -3258,7 +3264,6 @@ def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, ob
     assert code == 0, capsys.readouterr().err
     built = parsed.read_text(encoding="utf-8")
     assert '"derived-from"' in built and '"guidance"' not in built and "{{slot}}" not in built
-
 
 
 # Reasons and corrections (SE#1852): every rule says why it holds, and a fill corrects what cannot

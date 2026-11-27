@@ -35,9 +35,11 @@ None.
 
 ## Requirements
 
-1. `uv run python <se>/scripts/overhaul.py read <this issue> --out <draft>` writes the draft:
+1. `uv run python <se>/scripts/overhaul.py coverage` measures the suite once per test, then
+   `uv run python <se>/scripts/overhaul.py read <this issue> --out <draft>` writes the draft:
    every rule with what checks it, the retros since the last overhaul, the previous overhaul's
-   findings with the state of the issues that took them, and the pruning facts.
+   findings with the state of the issues that took them, and the pruning facts, the tests that
+   repeat another's lines among them.
 2. The judge reads the draft, then se itself, answers every standing question
    (`templates/standing-questions.md`, the retro's and the field report's too) and every question
    of the overhaul's own (`templates/overhaul-questions.md`), what the outside world does and what

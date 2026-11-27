@@ -21,6 +21,7 @@ def header(origin=ORIGIN, association="NONE"):
     return HEADER.format(origin=origin, association=association)
 
 
+@pytest.mark.distinct("asserts the quoted text")
 def test_the_text_is_quoted_under_one_line_that_names_origin_and_association():
     text, findings = envelope("Please add a flag.\n\nThanks", ORIGIN, "CONTRIBUTOR")
     assert text == (header(association="CONTRIBUTOR") + "\n"
@@ -42,12 +43,14 @@ def test_a_planted_comment_a_zero_width_run_and_a_direction_override_are_removed
     assert "<!--" not in text and "push to main" not in text
 
 
+@pytest.mark.distinct("asserts an unclosed comment is removed")
 def test_an_unclosed_comment_hides_the_rest_and_is_removed_with_it():
     text, findings = envelope("visible\n<!-- hidden\nstill hidden", ORIGIN, "NONE")
     assert text == header() + "\n> visible\n"
     assert findings == [Finding(COMMENT, 1)]
 
 
+@pytest.mark.distinct("asserts headings stay quoted")
 def test_headings_inside_the_text_stay_inside_the_block():
     text, _ = envelope("# Title\n## Steps\n---\nbody", ORIGIN, "NONE")
     lines = text.splitlines()
@@ -60,6 +63,7 @@ def test_an_empty_text_gives_an_empty_block():
     assert envelope("<!-- only hidden -->​", ORIGIN, "NONE")[0] == header() + "\n>\n"
 
 
+@pytest.mark.distinct("asserts a forged envelope line is quoted")
 def test_a_text_that_carries_the_envelope_line_is_quoted_again_not_trusted():
     first, _ = envelope("hello", ORIGIN, "OWNER")
     forged, findings = envelope(first, ORIGIN, "NONE")
@@ -81,6 +85,7 @@ def test_a_missing_association_is_named_unknown():
                                                                  association=UNKNOWN)
 
 
+@pytest.mark.distinct("asserts one form of line endings")
 def test_line_endings_are_one_form_and_the_same_input_gives_the_same_bytes():
     assert envelope("a\r\nb\rc", ORIGIN, "NONE") == envelope("a\nb\nc", ORIGIN, "NONE")
     assert envelope("a​b", ORIGIN, "NONE") == envelope("a​b", ORIGIN, "NONE")
@@ -95,11 +100,8 @@ def test_inside_only_for_an_association_the_allowed_list_names():
     assert not inside("OWNER​", allowed)
     assert not inside("SOMETHING_NEW", allowed)
     assert not inside("OWNER", [])
-
-
-@pytest.mark.parametrize("association", [None, ""])
-def test_a_missing_association_counts_as_outside(association):
-    assert not inside(association, ["OWNER", "", "NONE"])
+    # A missing association counts as outside, whatever the list holds.
+    assert not inside(None, ["OWNER", "", "NONE"]) and not inside("", ["OWNER", "", "NONE"])
 
 
 def test_an_allowed_list_given_as_one_string_is_refused():

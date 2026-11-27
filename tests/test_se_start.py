@@ -197,6 +197,7 @@ def said(rep, se):
 # Requirement 1: counts from what loaded.
 
 
+@pytest.mark.distinct("asserts the counts")
 def test_counts_come_from_the_fixture_plugin(setup):
     write(setup["se"] / "skills" / "work-model" / "references" / "rules.md",
           "# Rules\n\n### gen-001 Mechanize first\n\n### pub-002 A generic identity\n")
@@ -214,7 +215,6 @@ def test_the_rules_are_the_public_checks_labels():
     messages = {"tracker-reference", "attribution-trailer", "message-address"}
     assert set(se_start.public_check.RULES) == labels | messages
     assert len(se_start.public_check.RULES) == len(labels) + len(messages)
-
 
 
 def test_the_detached_start_on_linux_and_macos_is_a_new_session_as_before():
@@ -461,6 +461,7 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
     assert copilot == {"additionalContext": context}
 
 
+@pytest.mark.distinct("asserts the hand-over's words")
 @pytest.mark.parametrize("host", ["claude", "copilot"])
 def test_the_hand_over_asks_the_first_message_to_open_with_the_live_report_and_never_says_it_was_shown(host):
     """In a Claude Code cloud session hook output reaches only the model: the hand-over never claims
@@ -513,6 +514,7 @@ def test_default_agent_that_names_no_agent_gives_the_note_and_no_sentence(tmp_pa
     assert _contexts(root)["claude"]["systemMessage"] == "SE 1.2.0 started: ..."
 
 
+@pytest.mark.distinct("asserts the output without a default agent")
 @pytest.mark.parametrize("value", [None, ""])
 def test_default_agent_unset_or_empty_leaves_the_output_byte_identical(tmp_path, monkeypatch, value):
     root = _agent_root(tmp_path)
@@ -729,6 +731,7 @@ def test_a_required_row_behind_its_newest_names_the_next_se_release_never_everyt
     assert report[-1] == "The next SE release brings kern 0.3.0 and obs 10.4.0."
 
 
+@pytest.mark.distinct("asserts the update line")
 def test_se_behind_and_a_required_row_behind_name_the_update_and_the_next_se_release(setup, monkeypatch, capsys):
     newest_read(setup, se=(1, 3, 0), kern=(0, 3, 0))
     report, _, _ = required_start(setup, monkeypatch, capsys)
@@ -765,6 +768,7 @@ def test_the_last_line_is_computed_from_the_tables_rows_alone(rows, line):
                                  for name, loaded, newest, locked in rows]) == {"update": line[0], "names": line[1]}
 
 
+@pytest.mark.distinct("asserts the loaded column")
 def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(setup, monkeypatch, capsys):
     """obs answers 10.4.0 from its clone while SE locks 10.3.2: the row says 10.4.0."""
     report, _, _ = required_start(setup, monkeypatch, capsys,
@@ -772,6 +776,7 @@ def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(set
     assert "| obs | 10.4.0 | unknown |" in table(report)
 
 
+@pytest.mark.distinct("asserts the install of a missing obs-html")
 def test_obs_html_missing_is_installed_at_ses_locked_version_and_then_answers(setup, monkeypatch, capsys):
     loaders = Loaders(installed={}, offered=("obs-html",))
     report, _, _ = required_start(setup, monkeypatch, capsys, loaders=loaders)

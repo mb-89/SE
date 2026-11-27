@@ -3,11 +3,14 @@ scripts/hosts.py reads it as a pure module."""
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import hosts  # noqa: E402
 
 
+@pytest.mark.distinct("asserts the table's rows")
 def test_the_table_names_claudes_rows_only_and_the_project_variable():
     """No Copilot variable could be checked against a Copilot run: its hook file names its host."""
     assert hosts.table()["SE_PROJECT_VARIABLES"] == ("CLAUDE_PROJECT_DIR",)
@@ -50,7 +53,6 @@ def test_a_copilot_payload_reads_as_claudes_and_a_claude_payload_is_kept():
     assert hosts.payload(claude) == claude
     assert (hosts.payload_host(copilot), hosts.payload_host(claude)) == ("copilot", "claude")
     assert hosts.payload({"session_id": "snake", "sessionId": "camel"}) == {"session_id": "snake"}
-
 
 
 def test_no_table_line_shadows_a_variable_the_table_names():

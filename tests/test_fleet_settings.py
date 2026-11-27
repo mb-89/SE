@@ -223,6 +223,7 @@ def test_with_gh_the_check_reads_the_ruleset_through_gh_and_a_refusal_is_uncheck
     assert "unchecked: ruleset: gh could not read it: gh: HTTP 403" in capsys.readouterr().out
 
 
+@pytest.mark.distinct("asserts the recorded settings")
 def test_the_repository_records_the_fleet_settings_it_checks():
     """SE's own file loads, and every part the check compares is recorded."""
     settings = fleet_settings.load(PROJECT)
