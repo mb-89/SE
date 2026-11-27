@@ -1,5 +1,5 @@
 ---
-# An overhaul's report, its closing comment: the verdicts, what was looked at, the standing
+# An overhaul's report, a comment on its issue: the verdicts, what was looked at, the standing
 # questions and the overhaul's own (two nested blocks), the findings and what follows, what went
 # well, the facts, then the judged block the next overhaul reads, which is the adapter
 # templates/overhaul-judgment.md. overhaul.py lays the draft's questions out from this note and checks the

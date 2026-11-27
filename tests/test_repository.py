@@ -408,3 +408,28 @@ def test_a_python_twin_of_a_step_the_se_binary_runs_fails_the_ported_check(tmp_p
     assert hygiene.ported_findings(tmp_path) == [
         "scripts/se_start.py start-hooks: the se binary runs this step in Go (components/cmd/se/start.go); "
         "remove its Python and call `se start-hooks` where it is called"]
+
+
+def test_an_import_of_the_python_template_engine_warns_and_at_the_level_error_fails(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The check template-engine (work issue go-template-engine-only): every import of the Python
+    # engine outside its own files is a finding from day one, with no baseline; it warns while the
+    # callers move to the Go engine (scripts/template_door.py), and refuses once its level is error.
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "caller.py").write_text("import json\nimport templates  # noqa: E402\n", encoding="utf-8")
+    (tmp_path / "scripts" / "templates.py").write_text("import se_templates\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("from se_templates import main\nimport template_door\n",
+                                                  encoding="utf-8")
+    assert hygiene.template_engine_findings(tmp_path) == [
+        "scripts/caller.py:2: imports the Python template engine; ask the Go engine through "
+        "scripts/template_door.py (fill, check)",
+        "tests/test_x.py:1: imports the Python template engine; ask the Go engine through "
+        "scripts/template_door.py (fill, check)",
+    ]
+    found = {"template-engine": hygiene.template_engine_findings(tmp_path)}
+    monkeypatch.setattr(hygiene, "checks", lambda root: found)
+    monkeypatch.setattr(hygiene, "home_skip", lambda root: "")
+    assert hygiene.main(["--repo", str(tmp_path)]) == 0
+    monkeypatch.setitem(hygiene.LEVELS, "template-engine", "error")
+    assert hygiene.main(["--repo", str(tmp_path)]) == 1

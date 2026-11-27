@@ -114,6 +114,9 @@
   - It also fails where `scripts/se_start.py` still defines a step of the start the `se` binary
     runs in Go (its check `ported`, `components/cmd/se/start.go`): a ported step leaves no Python
     twin.
+  - It also warns at each import of the Python template engine (`templates`, `se_templates`)
+    outside its own files: a script asks the Go engine through `scripts/template_door.py`; the
+    landing that moves the last caller sets its level to `error` (its check `template-engine`).
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
   - It also fails on a reach outside a declared door (`scripts/door_report.py`, whose docstring owns
