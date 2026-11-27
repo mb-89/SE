@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import process_door
 import shell_door
 from se_modules import ModuleError, version_bounds
 
@@ -126,8 +127,8 @@ class Machine:
             if found is None:
                 continue
             try:
-                answer = subprocess.run([found, *arguments], capture_output=True, text=True,
-                                        timeout=PROBE_TIMEOUT, check=False)
+                answer = process_door.run([found, *arguments], capture_output=True, text=True,
+                                          timeout=PROBE_TIMEOUT, check=False)
             except (OSError, subprocess.TimeoutExpired):
                 continue
             match = re.search(pattern, answer.stdout + answer.stderr)

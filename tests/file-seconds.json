@@ -38,7 +38,6 @@
   "tests/test_pr_issues.py": 0.2,
   "tests/test_public_check.py": 14.2,
   "tests/test_push_guard.py": 15.1,
-  "tests/test_ratchet.py": 0.0,
   "tests/test_recorded_outputs.py": 1.0,
   "tests/test_references.py": 0.0,
   "tests/test_releases.py": 1.0,

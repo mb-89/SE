@@ -1,23 +1,30 @@
 #!/usr/bin/env -S uv run python
 # se:template se/python-script 1.0.0
-"""Whether a run of `check` on a pull request's edit or label change takes the suite's result from
-an earlier run of the same tree instead of running it again (docs/tests.md "Edits reuse the suite").
+"""Whether a run of `check` takes the suite's result from an earlier run of the same tree instead
+of running it again (docs/tests.md "One suite run per tree").
 
-A pull request's description and labels change many times without a new commit: the worker
-corrects its field report, the integrator moves labels. Such a run (`edited`, `labeled`,
-`unlabeled`) checks the field report and the issue rule again, as the description can change
-them, and takes the result of the suite, the Go checks and kern-platforms from the newest
-completed run of `check` for the same head commit that carries one for the same reuse key: the
-tree checked out (the merge of the head into its base, so a moved base is another tree) and the
-Component kinds the description gives the suite's release guard.
+A tree is checked once per landing: the work pull request's run, the landing pull request's and
+the push to the integration branch check the same tree when nothing moved between them, and a pull
+request's description and labels change many times without a new commit. Each such run checks the
+field report and the issue rule again, as the description can change them, and takes the result of
+the suite, the Go checks, kern-platforms and showcase from the newest completed run of `check` that
+carries one for the same reuse key: the tree checked out (on a pull request the merge of the head
+into its base, so a moved base is another tree) and the Component kinds the description gives the
+suite's release guard.
+
+The runs read are those of this landing's own pull requests, on any event but the nightly safety
+net: on a pull request its head and the work pull request its landing description names
+(`<!-- se:field-report-in <n> -->`); on a push the merged pull requests that landed the commit and
+the work pull requests they name. A run of the same reuse key checked out the same tree, so it ran
+the same workflow and the same tests: its result is the tree's.
 
 `key` writes the run's reuse key; the `trust` job names its decision step after it, so a later run
 reads each earlier run's key from that step's name in the jobs API. `decide` answers `suite`: `run`
 (this run runs them), `trusted` (the integrator's record, scripts/ci_trust.py) or `reused`, with
-the earlier run it took the result from and that result, `success` or `failure`. Every other
-event, a re-run attempt, a newest completed run that was cancelled and a head without such a run
-run everything; a failed earlier result is taken as failed. Standard library only: it runs with the
-runner's `python3` and the Actions token; exit code 0 done, 2 a setup error."""
+the earlier run it took the result from and that result, `success` or `failure`. A scheduled run,
+a re-run attempt, a newest completed run of the head that was cancelled and a tree without such a
+run run everything; a failed earlier result is taken as failed. Standard library only: it runs
+with the runner's `python3` and the Actions token; exit code 0 done, 2 a setup error."""
 
 from __future__ import annotations
 
@@ -36,10 +43,10 @@ import ci_trust
 import component_versions
 import se_script
 
-REUSE_ACTIONS = ("edited", "labeled", "unlabeled")  # pull_request actions that change no tree
+REUSE_EVENTS = ("pull_request", "push")  # every event but the nightly safety net (schedule)
 DECIDE_STEP = "Reuse an earlier result of this tree"  # the trust job's step, named with the key
 KEY_NAMED = re.compile(r"\(reuse key ([0-9a-f]{16})\)\s*$")
-CHECK_JOB, TRUST_JOB, PLATFORM_JOB = "check", "trust", "kern-platforms"
+CHECK_JOB, TRUST_JOB, PLATFORM_JOB, SHOWCASE_JOB = "check", "trust", "kern-platforms", "showcase"
 SUITE_STEP = "The complete suite and the suites beside it"
 VET_STEP = "SE's Go components vet"
 REPORT_IN = re.compile(r"(?m)^<!-- se:field-report-in ([0-9]+) -->[ \t\r]*$")
@@ -65,14 +72,17 @@ def stated_kinds(body: str | None) -> str | None:
 
 
 def reuse_key(tree: str, kinds: str | None) -> str:
-    """What decides the suite's result besides the workflow: the tree and the kinds, hashed."""
-    text = json.dumps({"tree": tree, "kinds": kinds}, sort_keys=True)
+    """What decides the suite's result besides the workflow: the tree and the kinds, hashed. No
+    kinds stated and none set are one key: the release guard reads an empty value as unset (kern's
+    tools/release Kinds), so a work pull request that states none and its landing share it."""
+    text = json.dumps({"tree": tree, "kinds": kinds or None}, sort_keys=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(frozen=True)
 class Event:
-    """The run asking: its event and action, its id and attempt, and the pull request's head."""
+    """The run asking: its event and action, its id and attempt, and the pull request's head (on a
+    push the commit pushed) and description."""
 
     name: str
     action: str = ""
@@ -91,9 +101,10 @@ class Event:
                 raise ReuseError(f"the event payload {environ['GITHUB_EVENT_PATH']}: {error}")
         pull = payload.get("pull_request") or {}
         attempt = environ.get("GITHUB_RUN_ATTEMPT", "1")
+        head = (pull.get("head") or {}).get("sha") or environ.get("GITHUB_SHA", "")
         return cls(environ.get("GITHUB_EVENT_NAME", ""), str(payload.get("action") or ""),
                    environ.get("GITHUB_RUN_ID", ""), int(attempt) if attempt.isdigit() else 1,
-                   str((pull.get("head") or {}).get("sha") or ""), str(pull.get("body") or ""))
+                   str(head), str(pull.get("body") or ""))
 
 
 @dataclass(frozen=True)
@@ -105,7 +116,13 @@ class Decision:
 
 
 def run_everything(why: str) -> Decision:
-    return Decision("run", why + ": the suite, the Go checks and kern-platforms run")
+    return Decision("run", why + ": the suite, the Go checks, kern-platforms and showcase run")
+
+
+def work_pull(body: str | None) -> int | None:
+    """The work pull request a landing pull request's description links, or None."""
+    linked = REPORT_IN.search(body or "")
+    return int(linked[1]) if linked else None
 
 
 def job(jobs: list[dict], name: str) -> dict | None:
@@ -124,8 +141,8 @@ def key_of(jobs: list[dict]) -> str | None:
 
 
 def results(jobs: list[dict]) -> dict[str, str]:
-    """What an earlier run concluded for each part this run would take: the Go checks, the suite
-    and each kern-platforms leg; `missing` where it has none."""
+    """What an earlier run concluded for each part this run would take: the Go checks, the suite,
+    each kern-platforms leg and showcase; `missing` where it has none."""
     check = job(jobs, CHECK_JOB)
     found = {part: str((step(check, prefix) or {}).get("conclusion") or "missing")
              for part, prefix in (("the Go checks", VET_STEP), ("the suite", SUITE_STEP))}
@@ -135,30 +152,47 @@ def results(jobs: list[dict]) -> dict[str, str]:
         found[str(leg["name"])] = str(leg.get("conclusion") or "missing")
     if not legs:
         found[PLATFORM_JOB] = "missing"
+    found[SHOWCASE_JOB] = str((job(jobs, SHOWCASE_JOB) or {}).get("conclusion") or "missing")
     return found
 
 
 def decide(event: Event, key: str, runs: list[dict], jobs_of: Callable[[dict], list[dict]],
-           trusted: bool = False) -> Decision:
-    """Whether this run takes the suite's result from one of `runs`, the runs of `check` for its
-    head, as the API lists them; `jobs_of` reads a run's jobs."""
+           trusted: bool = False, heads: tuple[str, ...] = ()) -> Decision:
+    """Whether this run takes the suite's result from one of `runs`, the runs of `check` for the
+    heads of this landing's pull requests (`heads`, the event's head first), as the API lists
+    them; `jobs_of` reads a run's jobs."""
     if trusted:
         return Decision("trusted", "the integrator's record of this tree is trusted "
                                    "(scripts/ci_trust.py)")
-    if event.name != "pull_request" or event.action not in REUSE_ACTIONS:
+    if event.name not in REUSE_EVENTS:
         return run_everything(f"a {event.name} {event.action}".rstrip() + " run checks its tree")
     if event.attempt > 1:
         return run_everything(f"attempt {event.attempt} is a re-run")
-    earlier = sorted((run for run in runs if str(run.get("id")) != event.run_id
-                      and run.get("status") == "completed" and run.get("head_sha") == event.head),
+    return earlier_result(key, runs, jobs_of, heads or (event.head,), event.run_id)
+
+
+def earlier_result(key: str, runs: list[dict], jobs_of: Callable[[dict], list[dict]],
+                   heads: tuple[str, ...], own_run: str = "") -> Decision:
+    """The newest result of the reuse key `key` among the completed `runs` of `heads` but
+    `own_run`: reused, passed or failed, naming its run; else run, naming why. A cancelled newest
+    run of the first head runs everything (a re-run of it runs everything anyway)."""
+    named = ", ".join(head[:12] for head in heads)
+    earlier = sorted((run for run in runs if str(run.get("id")) != own_run
+                      and run.get("status") == "completed" and run.get("head_sha") in heads),
                      key=lambda run: int(run.get("id") or 0), reverse=True)
     if not earlier:
-        return run_everything(f"no completed run of check for the head {event.head[:12]}")
-    skipped = []
+        return run_everything(f"no completed run of check for the head{'s' * (len(heads) > 1)} "
+                              f"{named}")
+    skipped, own_seen = [], False
     for run in earlier:
         url = str(run.get("html_url") or run.get("id"))
+        own = run.get("head_sha") == heads[0]
         if run.get("conclusion") == "cancelled":
-            return run_everything(f"the previous run {url} was cancelled")
+            if own and not own_seen:
+                return run_everything(f"the previous run {url} was cancelled")
+            skipped.append(f"{url} was cancelled")
+            continue
+        own_seen = own_seen or own
         jobs = jobs_of(run)
         if key_of(jobs) != key:
             skipped.append(f"{url} checked another tree or other Component kinds")
@@ -173,8 +207,8 @@ def decide(event: Event, key: str, runs: list[dict], jobs_of: Callable[[dict], l
                                       f"{', '.join(found)}", url, "success")
         skipped.append(f"{url} ran " + ", ".join(
             f"{part} {conclusion}" for part, conclusion in found.items() if conclusion != "success"))
-    return run_everything(f"no earlier run of this tree for the head {event.head[:12]} carries "
-                          f"the result ({'; '.join(skipped)})")
+    return run_everything(f"no earlier run of this tree for the head{'s' * (len(heads) > 1)} "
+                          f"{named} carries the result ({'; '.join(skipped)})")
 
 
 class Api(ci_trust.Api):
@@ -191,6 +225,18 @@ class Api(ci_trust.Api):
                                      f"{urllib.parse.quote(head)}&event=pull_request&per_page={RUNS_READ}") or {}
         return list(listed.get("workflow_runs") or [])
 
+    def pull_head(self, number: int) -> str:
+        """The head commit of pull request `number`."""
+        pull = self.request("GET", f"pulls/{number}") or {}
+        return str((pull.get("head") or {}).get("sha") or "")
+
+    def landed_pulls(self, sha: str) -> list[dict]:
+        """The merged pull requests that landed `sha`: each one's head commit and description."""
+        pulls = self.request("GET", f"commits/{sha}/pulls") or []
+        return [{"head": str(pull["head"]["sha"]), "body": str(pull.get("body") or "")}
+                for pull in pulls if isinstance(pull, dict) and pull.get("merged_at")
+                and isinstance(pull.get("head"), dict) and pull["head"].get("sha")]
+
     def jobs(self, run: dict) -> list[dict]:
         listed = self.request("GET", f"actions/runs/{run['id']}/jobs?per_page=100") or {}
         return list(listed.get("jobs") or [])
@@ -204,7 +250,31 @@ def checked_key(root: Path, event: Event) -> tuple[str, str]:
 
 
 def reads_earlier_runs(event: Event) -> bool:
-    return event.name == "pull_request" and event.action in REUSE_ACTIONS and event.attempt == 1
+    return event.name in REUSE_EVENTS and event.attempt == 1
+
+
+def landing_heads(event: Event, door: Api) -> tuple[str, ...]:
+    """The heads whose runs may hold this tree's result: on a pull request its head and the head
+    of the work pull request its landing description links; on a push the heads of the merged
+    pull requests that landed the commit and of the work pull requests they link."""
+    if event.name == "pull_request":
+        pulls = [{"head": event.head, "body": event.body}]
+    else:
+        pulls = door.landed_pulls(event.head)
+    heads = [pull["head"] for pull in pulls]
+    for pull in pulls:
+        number = work_pull(pull["body"])
+        if number is not None:
+            heads.append(door.pull_head(number))
+    return tuple(dict.fromkeys(head for head in heads if head))
+
+
+def runs_of(door: Api, run_id: str, heads: tuple[str, ...]) -> list[dict]:
+    listed = {}
+    for head in heads:
+        for run in door.workflow_runs(run_id, head):
+            listed.setdefault(run.get("id"), run)
+    return list(listed.values())
 
 
 def api_of(env: dict[str, str]) -> Api:
@@ -224,7 +294,10 @@ def run_decide(root: Path, event: Event, trusted: bool, api: Api | None,
     try:
         key, of = checked_key(root, event)
         door = api or api_of(env)
-        result = decide(event, key, door.workflow_runs(event.run_id, event.head), door.jobs)
+        heads = landing_heads(event, door)
+        if not heads:
+            return run_everything(f"no merged pull request landed {event.head[:12]}")
+        result = decide(event, key, runs_of(door, event.run_id, heads), door.jobs, heads=heads)
     except (ReuseError, ci_trust.TrustError) as error:
         result = run_everything(f"the earlier runs could not be read ({error})")
         print(f"::warning title=se reused check::{result.why}")

@@ -2298,6 +2298,9 @@ class FakeGitHub:
         self.login = "owner"  # the account gh is signed in as: the creator of each status written
         self.status_list: dict[str, list[dict]] = {}  # commit statuses by commit, as written
         self.landed_by: dict[str, list[str]] = {}  # the merged pull request heads that landed a commit
+        self.workflow_runs: dict[str, list[dict]] = {}  # check's pull_request runs by head commit
+        self.jobs: dict[int, list[dict]] = {}  # each run's jobs by run id
+        self.runs_read: list[str] = []  # the heads whose runs of check were read
 
     def __call__(self, root: Path, repo: str) -> "FakeGitHub":
         self.origin = Path(git_run(root, "remote", "get-url", "origin", check=True).stdout.strip())
@@ -2314,6 +2317,13 @@ class FakeGitHub:
             # Its head pushed to its base: GitHub marks the pull request merged at that commit.
             pull.update(state="closed", merged=True, merge_commit_sha=head)
         return pull
+
+    def check_workflow_runs(self, head: str) -> list[dict]:
+        self.runs_read.append(head)
+        return self.workflow_runs.get(head, [])
+
+    def run_jobs(self, run: dict) -> list[dict]:
+        return self.jobs.get(int(run["id"]), [])
 
     def open_pull(self, head: str, base: str) -> dict | None:
         self.calls.append(("open_pull", head, base))
@@ -3871,6 +3881,48 @@ def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
     assert "Check check: not started" in out and "Check check: in_progress" in out
     assert git_run(main_checkout, "rev-parse", "--verify", landing).returncode != 0
     assert git_run(main_checkout.parent / "origin.git", "rev-parse", "--verify", f"refs/heads/{landing}").returncode != 0
+
+
+def passed_check(run_id: int, key: str, head: str) -> tuple[dict, list[dict]]:
+    """A completed run of check on `head` that passed the tree of reuse key `key`, as GitHub's runs
+    and jobs APIs list it (scripts/ci_reuse.py reads the key from the trust job's decision step)."""
+    run = {"id": run_id, "name": "check", "status": "completed", "conclusion": "success",
+           "head_sha": head, "html_url": f"https://git.example/owner/repo/actions/runs/{run_id}"}
+    passed = {"conclusion": "success"}
+    jobs = [{"name": "trust", "steps": [{"name": f"Reuse an earlier result of this tree (reuse key {key})"}]},
+            {"name": "check", "steps": [{"name": "SE's Go components vet", **passed},
+                                        {"name": "The complete suite and the suites beside it", **passed}]},
+            {"name": "kern-platforms (windows-2025)", **passed}, {"name": "showcase", **passed}]
+    return run, jobs
+
+
+@pytest.mark.parametrize("same_tree", [True, False], ids=["passed-tree", "other-tree"])
+def test_integrate_takes_the_work_pull_requests_pass_of_the_landing_tree_instead_of_running_it(
+        main_checkout, monkeypatch, github, capsys, same_tree):
+    # Acceptance (one suite run per tree): the work pull request's check passed exactly the tree the
+    # landing merges, so the integrator records that verdict and runs the suite zero more times.
+    head, _ = delivered_worker(main_checkout, monkeypatch)
+    tree = git_run(main_checkout, "rev-parse", f"{head}^{{tree}}", check=True).stdout.strip()
+    key = work_tickets.sibling("ci_reuse").reuse_key(tree if same_tree else "0" * 40, None)
+    run, jobs = passed_check(300, key, head)
+    github.workflow_runs[head], github.jobs[300] = [run], jobs
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    suites: list[Path] = []
+    real_suite = work_tickets.run_suite
+    monkeypatch.setattr(work_tickets, "run_suite",
+                        lambda root, **kwargs: suites.append(root) or real_suite(root, **kwargs))
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+
+    out = capsys.readouterr().out
+    assert github.runs_read == [head]
+    if same_tree:
+        assert suites == []
+        assert ("Suite verdict taken from https://git.example/owner/repo/actions/runs/300: passed "
+                f"on tree {tree[:12]}") in out
+    else:
+        assert suites == [main_checkout]
+        assert "Suite: runs here, as no run of check passed this tree" in out
 
 
 def test_integrate_runs_the_checks_and_closes_only_the_pull_request_for_an_authorized_fix(
