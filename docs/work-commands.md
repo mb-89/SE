@@ -360,7 +360,7 @@ standing-question matrix and answers, and the judged classes, strongest home fir
 cause, fix, home and state against the tree, and its findings, numbered, each with its home and its
 kind:
 
-- `work`: SE files each with `work_tickets.py file --finding <retro>:<k>`, its work issue naming
+- `work`: SE files each with `work_tickets.py file`'s `--finding`, its work issue naming
   `retro #<n> finding <k>`, and records a finding another takes as merged into it;
 - `decision`: for the owner's decision list.
 
@@ -459,7 +459,7 @@ It files no issue
 it posts the report, opening with `<!-- se:overhaul-report -->`, on the overhaul issue, then its
 report state, as a retro does.
 
-SE files each finding with `work_tickets.py file --finding <overhaul>:<k>` or records it with
+SE files each finding with `work_tickets.py file`'s `--finding` or records it with
 `retro.py outcome`, and the last outcome closes the issue; a report with no finding closes it at
 once ([docs/fleet.md "Retro due"](fleet.md#retro-due)).
 
