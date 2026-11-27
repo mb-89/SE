@@ -1976,6 +1976,8 @@ def intake(
             if relay is None:
                 raise
             issue = relay_issue(relay, root, resolve_repo(root, repo), number)
+    kinds = sibling("issue_kinds")
+    kinds.check(issue, kinds.WORK, "work_tickets.py intake", QueueError)
     existing = [ticket.ticket_id for ticket in tickets]
     created: list[str] = []
     kept: list[str] = []
@@ -2341,6 +2343,8 @@ def refresh(root: Path, number: int | None, repo: str | None) -> dict[str, objec
             raise
         issue = (relay_issue(relay, root, repo, number) if inside is None
                  else relay_issue(relay, root, repo, number, associations=True))
+    kinds = sibling("issue_kinds")
+    kinds.check(issue, kinds.WORK, "work_tickets.py refresh", QueueError)
     if previous is not None and previous["number"] != number:
         previous = None
     feedback.phase("compare it with the last read")

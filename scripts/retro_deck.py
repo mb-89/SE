@@ -5,24 +5,28 @@ Reader: retro.py and overhaul.py, whose `deck` commands build it from their judg
 changes how the deck is laid out. The template, `templates/retro-deck.md` (TEMPLATE_NAME), owns what
 the deck holds; this module owns how its text becomes an obs vault and one HTML file.
 
-- `text(title, subtitle, steps, decisions)` renders the template from the run's parts: each step and
-  each decision a `(heading, body)` pair, the body written as a chapter note's (its own headings `##`
-  and deeper), shifted two levels down under the template's `### <heading>`. It refuses, raising
+- `text(kind, title, subtitle, steps, decisions)` renders the template from the run's parts: each
+  step and each decision a `(heading, body)` pair, then the closing decision its run kind asks for
+  (scripts/issue_kinds.py KINDS, `anything_else`: a retro's, never an overhaul's), the body
+  written as a chapter note's (its own headings `##` and deeper), shifted two levels down under
+  the template's `### <heading>`. It refuses, raising
   DeckError, what breaks the template, and every decision that is no note of the decision template
   (templates/decision.md), naming it: the deck's shape comes from the templates, never from the
-  judge. A subtitle is optional: a retro has none, as its cover's second line is DOCUMENT_TYPE, and
-  `vault` leaves out one that repeats the title or the document type; an overhaul's adds its counts.
+  judge. A subtitle is optional: a retro has none, as its cover's second line is its kind's
+  `document_type`, and `vault` leaves out one that repeats the title or the document type; an
+  overhaul's adds its counts.
 - `decision_note(...)` writes a decision chapter's body as the decision template lays it out, and
-  ANYTHING_ELSE is a retro's last decision, "Nothing else" its single selectable option.
-- `vault(text, folder)` reads that text back through the template and writes it as obs notes: the
-  manifest, whose front matter makes the title page (obs's cover: the title, the subtitle and
-  DOCUMENT_TYPE, `obsHtml.pages` with the cover), one note per step in order, then one note per
-  decision, last, each asking the person for a bless (`obs: {bless: pending}`). The build machine's
+  ANYTHING_ELSE is the last decision of a kind whose `anything_else` is set, "Nothing else" its
+  single selectable option.
+- `vault(kind, text, folder)` reads that text back through the template and writes it as obs notes:
+  the manifest, whose front matter makes the title page (obs's cover: the title, the subtitle and
+  the kind's `document_type`, `obsHtml.pages` with the cover), one note per step in order, then
+  one note per decision, last, each asking the person for a bless (`obs: {bless: pending}`). The build machine's
   home folder in the quoted text is written as `~`, as obs-html refuses to publish it (`homeless`), and
   each ISO time of day as the template states it, `22 Nov 20:16` in UTC (`times`), as obs-html's
   provenance check refuses an ISO timestamp.
-- `build(text, destination, host, answers)` builds that vault with scripts/deck.py's build (the answers
-  bundle for `host`, whose adapter takes the answers back) into `destination`, the run's one report
+- `build(kind, text, destination, host, answers)` builds that vault with scripts/deck.py's build
+  (the answers bundle for `host`, whose adapter takes the answers back) into `destination`, the run's one report
   file: nothing else is written beside it. With `answers` it is the record of the person's answers.
   The deck quotes the draft's facts and the judge's findings as they stand, so it is built `quoted`:
   obs's long-paragraph lint and obs-html's provenance findings of an absolute path refuse nothing in
@@ -49,12 +53,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deck  # noqa: E402
+import issue_kinds  # noqa: E402
 import review  # noqa: E402
 import templates  # noqa: E402
 
 TEMPLATE_NAME = "retro-deck"
-#: The title page's document type (obs's cover metadata).
-DOCUMENT_TYPE = "Retro report"
 #: The chapter notes' level under the template: a step's or a decision's `### <heading>`.
 CHAPTER = 3
 #: What the template's decisions hold where the run brings no finding.
@@ -172,10 +175,14 @@ def _part(heading: str, body: str) -> str:
     return f"{'#' * CHAPTER} {heading}\n\n{review.demoted(body, CHAPTER - 1)}"
 
 
-def text(title: str, subtitle: str, steps: list[tuple[str, str]],
+def text(kind: issue_kinds.Kind, title: str, subtitle: str, steps: list[tuple[str, str]],
          decisions: list[tuple[str, str]]) -> str:
-    """The deck as the retro-deck template writes it: the title page's lines, every step, then the
-    decisions ("None." where there are none); DeckError names what breaks the template."""
+    """The deck of a run of `kind` as the retro-deck template writes it: the title page's lines, every
+    step, then the decisions and the closing one `kind` asks for ("None." where there are none);
+    DeckError names what breaks the template."""
+    if kind.document_type is None:
+        raise DeckError(f"{kind.noun} has no deck: only a run (a retro, an overhaul) writes one")
+    decisions = [*decisions, *([ANYTHING_ELSE] if kind.anything_else else [])]
     if not steps:
         raise DeckError("the deck has no step: write each step the run ran as a chapter")
     for heading, body in decisions:
@@ -224,8 +231,9 @@ def homeless(text: str, home: str) -> str:
     return re.sub(rf"(?<![\w/\\.-]){re.escape(home)}(?=[/\\]|(?![\w.-]))", "~", text)
 
 
-def vault(written: str, folder: Path, home: str | None = None) -> list[str]:
-    """Write the deck `written` (`text`) into `folder` as obs notes: the manifest with the title page,
+def vault(kind: issue_kinds.Kind, written: str, folder: Path, home: str | None = None) -> list[str]:
+    """Write the deck `written` (`text`) of a run of `kind` into `folder` as obs notes, its cover's
+    document type the kind's: the manifest with the title page,
     a note per step, then a note per decision asking for a bless; the ids of the decisions' notes. The
     build machine's home folder (`home`, by default this one's) is written as `~` (`homeless`)."""
     written = times(homeless(written, str(Path.home()) if home is None else home))
@@ -234,32 +242,33 @@ def vault(written: str, folder: Path, home: str | None = None) -> list[str]:
     decisions = [] if fields["decisions"].strip() == NONE else chapters(fields["decisions"])
     folder.mkdir(parents=True, exist_ok=True)
     links, asked = [], []
-    for kind, items in (("step", steps), ("decision", decisions)):
+    for part, items in (("step", steps), ("decision", decisions)):
         for index, (heading, body) in enumerate(items, 1):
-            name = f"{kind}-{index:02d}"
-            front = "---\nobs: {bless: pending}\n---\n" if kind == "decision" else ""
+            name = f"{part}-{index:02d}"
+            front = "---\nobs: {bless: pending}\n---\n" if part == "decision" else ""
             (folder / f"{name}.md").write_text(f"{front}# {heading}\n\n{body}\n", encoding="utf-8", newline="\n")
             links.append(f"- [[{name}|{_label(heading)}]]")
-            if kind == "decision":
+            if part == "decision":
                 asked.append(name)
     subtitle = " ".join(str(fields.get("subtitle") or "").split())
-    if subtitle.casefold() in {" ".join(fields["title"].split()).casefold(), DOCUMENT_TYPE.casefold()}:
+    if subtitle.casefold() in {" ".join(fields["title"].split()).casefold(), kind.document_type.casefold()}:
         subtitle = ""  # a subtitle that repeats the title or the document type says nothing
     manifest = ["---", f"title: {_yaml(fields['title'])}",
                 *([f"subtitle: {_yaml(subtitle)}"] if subtitle else []),
-                f"document type: {_yaml(DOCUMENT_TYPE)}",
+                f"document type: {_yaml(kind.document_type)}",
                 "obsHtml: {layout: paged, pages: [{page: cover}]}", "---", "", *links, ""]
     (folder / "manifest.md").write_text("\n".join(manifest), encoding="utf-8", newline="\n")
     return asked
 
 
-def build(written: str, destination: Path, host: str | None = None, answers: Path | None = None) -> int:
-    """Build the deck `written` into `destination`, its one HTML file, with the answers bundle for
-    `host` (scripts/deck.py HOSTS; None, the host this runs under); with `answers`, the record. Exit
-    code as deck.py build's."""
+def build(kind: issue_kinds.Kind, written: str, destination: Path, host: str | None = None,
+          answers: Path | None = None) -> int:
+    """Build the deck `written` of a run of `kind` into `destination`, its one HTML file, with the
+    answers bundle for `host` (scripts/deck.py HOSTS; None, the host this runs under); with
+    `answers`, the record. Exit code as deck.py build's."""
     with tempfile.TemporaryDirectory() as scratch:
         notes = Path(scratch) / "deck"
-        asked = vault(written, notes)
+        asked = vault(kind, written, notes)
         built = Path(scratch) / "built" / destination.name
         built.parent.mkdir()
         with contextlib.redirect_stdout(io.StringIO()):  # its line names the scratch copy

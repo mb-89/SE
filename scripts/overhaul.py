@@ -772,8 +772,8 @@ BOOK = Path("src") / "skills" / "work-model" / "references" / "rules.md"
 OVERHAUL_TITLE = "overhaul-"
 # An overhaul's name is `overhaul-<yyyymmdd>` (work model, Issues); one filed before the name rule
 # is `docs/overhaul-<yyyymmdd>`, and both count.
-OVERHAUL_NAME = re.compile(r"(?:docs/)?overhaul-\d{8}")
-OVERHAUL_LABEL = "discovery"
+OVERHAUL_NAME = sibling("issue_kinds").OVERHAUL.title
+OVERHAUL_LABEL = sibling("issue_kinds").OVERHAUL.labels[0]
 BLOCK_MARKER = "<!-- se:overhaul-yaml -->"
 REPORT_MARKER = "<!-- se:overhaul-report -->"
 # The overhaul's document template, and its fields the draft asks the judge to answer: the
@@ -863,6 +863,16 @@ def book_rules(root: Path) -> list:
     path = root / BOOK if (root / BOOK).is_file() else rule_book.BOOK
     rules, _, _ = rule_book.parse(sibling("work_tickets").read_file(path, "the rule book"))
     return [rule for rule in rules if rule.retired is None]
+
+
+def checked(door, number: int, command: str) -> None:
+    """Refuse, before `command` writes anything, where overhaul issue `number` read through `door` is
+    another kind of issue (issue_kinds.check); an answer the door does not hold yet is checked on the
+    run that holds it."""
+    issue = door.issue(number) if number else {}
+    if issue:
+        kinds = sibling("issue_kinds")
+        kinds.check(issue, kinds.OVERHAUL, command, sibling("work_tickets").QueueError)
 
 
 def is_overhaul(issue) -> bool:
@@ -1395,15 +1405,16 @@ def run_deck(args: argparse.Namespace) -> int:
     count = len(block["findings"])
     try:
         steps, decisions = deck_parts(text, block, args.overhaul)
-        written = deck.text(f"Overhaul #{args.overhaul}",
+        kind = sibling("issue_kinds").OVERHAUL
+        written = deck.text(kind, f"Overhaul #{args.overhaul}",
                             f"{len(block['verdicts'])} rules judged: {count} finding{'' if count == 1 else 's'}",
                             steps, decisions)
     except deck.DeckError as error:
         raise work_tickets.QueueError(f"Overhaul #{args.overhaul}: {error}") from None
-    code = deck.build(written, args.destination, args.host, args.answers)
+    code = deck.build(kind, written, args.destination, args.host, args.answers)
     if code == 0:
         print(f"Overhaul #{args.overhaul}: the report is the deck {args.destination}, its one file: a "
-              f"title page, {len(steps)} steps and {len(decisions)} decision chapter(s)"
+              f"title page, {len(steps)} steps and {len(decisions) + kind.anything_else} decision chapter(s)"
               + (", the person's answers recorded" if args.answers else ""))
     return code
 
@@ -1415,11 +1426,14 @@ def run_file(args: argparse.Namespace) -> int:
     text = work_tickets.read_file(args.draft, "the overhaul draft")
     block = judged(text, args.overhaul)
     steps = retro.file_steps(tracker, args.overhaul, [report(text, block, args.overhaul)],
-                             findings=0, what="overhaul")
+                             findings=0, kind=sibling("issue_kinds").OVERHAUL)
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")
         print(steps.text())
     else:
+        door = work_tickets.filing_door(root, tracker)
+        if door is not None:
+            checked(door, args.overhaul, "overhaul.py file")
         work_tickets.run_plan(steps, work_tickets.tracker_actions(root, tracker))
         print(f"Posted the report of overhaul #{args.overhaul} as its closing comment and closed it")
     findings = block["findings"]
@@ -1435,6 +1449,7 @@ def run_read(args: argparse.Namespace) -> int:
     work_tickets, retro = sibling("work_tickets"), sibling("retro")
     root = work_tickets.worktree_root(args.worktree)
     door = door_for(retro, work_tickets, args, root)
+    checked(door, args.overhaul, "overhaul.py read")
     found = gather(args.overhaul, door, book_rules(root), find(read(root)),
                    datetime.now(timezone.utc), retro.git_show(root), countdown_on(root))
     if found is None:

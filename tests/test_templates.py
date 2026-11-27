@@ -2025,7 +2025,7 @@ def retro_steps(catalog, monkeypatch) -> list[Case]:
     for text, template, marker, findings in (
             (retro_report(), "retro", retro.REPORT_MARKER, 2),
             (overhaul_report(), "overhaul", overhaul.REPORT_MARKER, 0)):
-        plan = retro.file_steps(REPO, 30, [text], findings, what=template)
+        plan = retro.file_steps(REPO, 30, [text], findings, kind=retro.sibling("issue_kinds").KINDS[template])
         for step in plan.steps:
             body = step.arguments.get("body")
             selected = template if isinstance(body, str) and body.startswith(marker) else FREE

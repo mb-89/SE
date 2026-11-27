@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import issue_kinds
 import retro_deck
 import templates
 from test_docs import obs_in_process
@@ -33,20 +34,20 @@ def note(situation: str) -> str:
 
 
 DECISIONS = [("1. Refuse a landing without a field report", note("#14 closed without a field report.")),
-             ("2. Make the field report a rule", note("The field report is a habit, not a rule.")),
-             retro_deck.ANYTHING_ELSE]
+             ("2. Make the field report a rule", note("The field report is a habit, not a rule."))]
+RETRO, OVERHAUL = issue_kinds.RETRO, issue_kinds.OVERHAUL
 
 
 def deck_text(decisions=DECISIONS) -> str:
-    return retro_deck.text("example: Retro #30", "", STEPS, decisions)
+    return retro_deck.text(RETRO, "example: Retro #30", "", STEPS, decisions)
 
 
 def test_the_cover_names_retro_report_once_as_its_document_type(tmp_path):
     """A project's retro deck: the cover rendered "Retro report" twice, as subtitle and document type."""
-    retro_deck.vault(deck_text(), tmp_path)
+    retro_deck.vault(RETRO, deck_text(), tmp_path)
     front = (tmp_path / "manifest.md").read_text(encoding="utf-8").split("---")[1]
     assert front.count("Retro report") == 1
-    assert f'document type: "{retro_deck.DOCUMENT_TYPE}"' in front and "subtitle" not in front
+    assert f'document type: "{RETRO.document_type}"' in front and "subtitle" not in front
 
 
 @pytest.mark.spawns("tool: the retro's deck builds with the real obs, obs-document in obs's own Python "
@@ -54,7 +55,7 @@ def test_the_cover_names_retro_report_once_as_its_document_type(tmp_path):
 def test_the_built_cover_is_exactly_the_title_and_retro_report_once(tmp_path, obs):
     """Retro #20's cover, checked in a browser: the title and one "Retro report", nothing else."""
     destination = tmp_path / "retro-30.html"
-    assert retro_deck.build(deck_text(), destination, "copilot") == 0
+    assert retro_deck.build(RETRO, deck_text(), destination, "copilot") == 0
     page = destination.read_text(encoding="utf-8")
     cover = json.loads(html.unescape(re.search(r'id="running-header-script" data-header-metadata="([^"]*)"', page)[1]))
     assert cover == {"title": "example: Retro #30", "document type": "Retro report"}  # no subtitle element
@@ -63,13 +64,31 @@ def test_the_built_cover_is_exactly_the_title_and_retro_report_once(tmp_path, ob
 @pytest.mark.parametrize("subtitle", ["Retro report", " example:  Retro #30 ", "retro REPORT"])
 def test_a_subtitle_that_repeats_the_title_or_the_document_type_is_left_out(tmp_path, subtitle):
     """The owner, 26 Nov: "If the document type and the title explain everything, then just don't use a subtitle"."""
-    retro_deck.vault(retro_deck.text("example: Retro #30", subtitle, STEPS, DECISIONS), tmp_path)
+    retro_deck.vault(RETRO, retro_deck.text(RETRO, "example: Retro #30", subtitle, STEPS, DECISIONS), tmp_path)
     front = (tmp_path / "manifest.md").read_text(encoding="utf-8").split("---")[1]
     assert "subtitle" not in front and front.count("Retro report") == 1
 
 
+@pytest.mark.parametrize("kind", [RETRO, OVERHAUL], ids=["retro", "overhaul"])
+def test_the_run_kind_gives_the_cover_and_the_closing_chapter(tmp_path, kind):
+    """Overhaul #1993, finding 2: the overhaul's cover said "Retro report". The person, 27 Nov: the retro
+    asks "Anything else?", as it is about field feedback; the overhaul, about drift, does not."""
+    asked = retro_deck.vault(kind, retro_deck.text(kind, "Run #31", "", STEPS, DECISIONS), tmp_path)
+    front = (tmp_path / "manifest.md").read_text(encoding="utf-8").split("---")[1]
+    assert f'document type: "{kind.document_type}"' in front
+    last = (tmp_path / f"{asked[-1]}.md").read_text(encoding="utf-8")
+    assert ("# Anything else?\n" in last) is (kind is RETRO)
+    assert len(asked) == len(DECISIONS) + (kind is RETRO)
+    assert (RETRO.document_type, OVERHAUL.document_type) == ("Retro report", "Overhaul report")
+
+
+def test_a_work_issue_has_no_deck():
+    with pytest.raises(retro_deck.DeckError, match="a work issue has no deck"):
+        retro_deck.text(issue_kinds.WORK, "Work #3", "", STEPS, DECISIONS)
+
+
 def test_a_subtitle_that_adds_something_stays(tmp_path):
-    retro_deck.vault(retro_deck.text("Overhaul #31", "rule gen-002, 3 findings", STEPS, DECISIONS), tmp_path)
+    retro_deck.vault(OVERHAUL, retro_deck.text(OVERHAUL, "Overhaul #31", "rule gen-002, 3 findings", STEPS, DECISIONS), tmp_path)
     assert 'subtitle: "rule gen-002, 3 findings"' in (tmp_path / "manifest.md").read_text(encoding="utf-8")
 
 
@@ -81,7 +100,7 @@ def test_a_free_form_decision_chapter_is_refused_naming_it():
 
 
 def test_every_decision_page_has_the_same_sections_and_the_pugh_block(tmp_path):
-    asked = retro_deck.vault(deck_text(), tmp_path)
+    asked = retro_deck.vault(RETRO, deck_text(), tmp_path)
     shapes = set()
     for name in asked:
         page = (tmp_path / f"{name}.md").read_text(encoding="utf-8")
@@ -106,25 +125,25 @@ def test_the_deck_is_a_document_of_the_retro_deck_template_steps_first_decisions
 def test_the_chapters_read_back_as_the_parts_were_given():
     fields = templates.parse(retro_deck.template(), deck_text()).fields
     assert retro_deck.chapters(fields["steps"]) == [(heading, body) for heading, body in STEPS]
-    assert retro_deck.chapters(fields["decisions"]) == DECISIONS
+    assert retro_deck.chapters(fields["decisions"]) == [*DECISIONS, retro_deck.ANYTHING_ELSE]
 
 
 def test_a_run_without_a_step_or_with_an_empty_heading_is_refused():
     with pytest.raises(retro_deck.DeckError, match="the deck has no step"):
-        retro_deck.text("Retro #30", "x", [], [])
+        retro_deck.text(RETRO, "Retro #30", "x", [], [])
     with pytest.raises(retro_deck.DeckError, match="has no heading"):
-        retro_deck.text("Retro #30", "x", [(" ", "Body.")], [])
+        retro_deck.text(RETRO, "Retro #30", "x", [(" ", "Body.")], [])
     with pytest.raises(retro_deck.DeckError, match="Title"):
-        retro_deck.text(" ", "", STEPS, [])
+        retro_deck.text(RETRO, " ", "", STEPS, [])
 
 
 def test_the_vault_has_the_title_page_every_step_and_each_decision_last_asking_a_bless(tmp_path):
-    asked = retro_deck.vault(deck_text(), tmp_path)
+    asked = retro_deck.vault(RETRO, deck_text(), tmp_path)
     assert asked == ["decision-01", "decision-02", "decision-03"]
     manifest = (tmp_path / "manifest.md").read_text(encoding="utf-8")
     front = manifest.split("---")[1]
     assert 'title: "example: Retro #30"' in front
-    assert f'document type: "{retro_deck.DOCUMENT_TYPE}"' in front
+    assert f'document type: "{RETRO.document_type}"' in front
     assert "obsHtml: {layout: paged, pages: [{page: cover}]}" in front
     assert re.findall(r"^- \[\[([\w-]+)\|", manifest, re.MULTILINE) == [
         "step-01", "step-02", "decision-01", "decision-02", "decision-03"]
@@ -141,9 +160,9 @@ def test_the_vault_has_the_title_page_every_step_and_each_decision_last_asking_a
 
 
 def test_a_run_without_findings_has_no_decision_chapter(tmp_path):
-    text = deck_text(decisions=[])
+    text = retro_deck.text(OVERHAUL, "Overhaul #31", "", STEPS, [])
     assert templates.parse(retro_deck.template(), text).fields["decisions"] == retro_deck.NONE
-    assert retro_deck.vault(text, tmp_path) == []
+    assert retro_deck.vault(OVERHAUL, text, tmp_path) == []
     assert not list(tmp_path.glob("decision-*.md"))
 
 
@@ -158,8 +177,8 @@ def test_the_build_machines_home_is_written_as_a_tilde(text, home, written):
 
 
 def test_the_vault_writes_the_home_folder_as_a_tilde(tmp_path):
-    text = retro_deck.text("Retro #30", "x", [("1. Collect", "It read /srv/box/.cache.")], [])
-    retro_deck.vault(text, tmp_path, home="/srv/box")
+    text = retro_deck.text(RETRO, "Retro #30", "x", [("1. Collect", "It read /srv/box/.cache.")], [])
+    retro_deck.vault(RETRO, text, tmp_path, home="/srv/box")
     assert "It read ~/.cache." in (tmp_path / "step-01.md").read_text(encoding="utf-8")
 
 
@@ -174,8 +193,8 @@ def test_iso_times_are_written_as_the_template_states_them(text, written):
 
 
 def test_the_vault_writes_times_as_the_template_states_them(tmp_path):
-    text = retro_deck.text("Retro #30", "x", [("Table", "| 1 | 2026-11-02T10:00:00Z | #11 |")], [])
-    retro_deck.vault(text, tmp_path)
+    text = retro_deck.text(RETRO, "Retro #30", "x", [("Table", "| 1 | 2026-11-02T10:00:00Z | #11 |")], [])
+    retro_deck.vault(RETRO, text, tmp_path)
     assert "| 1 | 2 Nov 10:00 | #11 |" in (tmp_path / "step-01.md").read_text(encoding="utf-8")
 
 
@@ -183,7 +202,7 @@ def test_the_real_build_writes_one_file_and_its_data_names_the_host_and_the_deci
     destination = tmp_path / "report" / "retro-30.html"
     long = " ".join(["A finding the judge wrote in one long paragraph."] * 40)
     steps = [*STEPS, ("5. Classes and homes", f"{long}\n\nThe chapter from 2026-11-02T10:00:00Z.")]
-    assert retro_deck.build(retro_deck.text("Retro #30", "x", steps, DECISIONS), destination, "copilot") == 0
+    assert retro_deck.build(RETRO, retro_deck.text(RETRO, "Retro #30", "x", steps, DECISIONS), destination, "copilot") == 0
     assert [path.name for path in destination.parent.iterdir()] == ["retro-30.html"]
     page = destination.read_text(encoding="utf-8")
     data = json.loads(re.search(r"globalThis\.seDeck = Object\.freeze\((\{.*?\})\);", page)[1])
