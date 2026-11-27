@@ -937,6 +937,102 @@ def test_the_relay_and_gh_doors_read_cut_off_and_the_answer_files_whole(tmp_path
                for name in retro.CUT_OFF_READS)
 
 
+def long_history() -> dict[str, list[dict]]:
+    """A history of 2,000 work issues, each with its landing: 1,990 closed before retro #1 closed
+    on 1 Nov, and a window of 10 (#1992 to #2001) closed after it."""
+    old = datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp()
+    stamp = lambda seconds: datetime.fromtimestamp(seconds, timezone.utc).strftime(  # noqa: E731
+        "%Y-%m-%dT%H:%M:%SZ")
+    closed = [run_item(1, "docs/retro-20261001", "2026-10-01T00:00:00Z", "2026-11-01T00:00:00Z",
+                       labels=("retro",))]
+    pulls = []
+    for number in range(2, 2002):
+        at = old + number * 3600 * 3 if number < 1992 else (
+            datetime(2026, 11, 2, tzinfo=timezone.utc).timestamp() + number * 60)
+        closed.append(run_item(number, f"feat/n{number}", stamp(at - 3600), stamp(at)))
+        pulls.append(run_pull(3000 + number, number, stamp(at - 60)))
+    # A landing of the window that names #5, closed long before it merged.
+    pulls.append(run_pull(9000, 5, "2026-11-05T00:00:00Z"))
+    return {"closed": closed, "open": [], "pulls": pulls}
+
+
+class RestGitHub:
+    """GitHub's REST API over `history` as work_tickets.GitHub asks it: the closed issues by
+    label or updated since a time (`since`), the pull requests newest update first, pages of
+    `per_page`; each item, its comments and its check runs. Records every path it answers."""
+
+    def __init__(self, history: dict[str, list[dict]]) -> None:
+        self.history, self.calls = history, []
+
+    def __call__(self, root, repo):
+        return self
+
+    def api(self, path: str):
+        self.calls.append(path)
+        route, _, query = path.partition("?")
+        args = dict(part.split("=", 1) for part in query.split("&") if part)
+        if route == "issues" or route == "pulls":
+            items = self.history["pulls" if route == "pulls" else "closed"]
+            if args.get("state") == "open":
+                items = self.history["open"]
+            if "labels" in args:
+                items = [item for item in items if args["labels"] in retro.label_names(item)]
+            if "since" in args:
+                items = [item for item in items
+                         if retro.when(item["updated_at"]) >= retro.when(args["since"])]
+            if args.get("sort") == "updated":
+                items = newest_first(items)
+            size, page = int(args["per_page"]), int(args["page"])
+            return items[(page - 1) * size:page * size]
+        parts = route.split("/")
+        if parts[0] == "commits":
+            pull = next(item for item in self.history["pulls"] if item["head"]["sha"] == parts[1])
+            return {"check_runs": [{"name": work_tickets.CHECK_NAME, "conclusion": "success",
+                                    "completed_at": pull["merged_at"]}]}
+        if parts[-1] == "comments":
+            return []
+        kind = "pulls" if parts[0] == "pulls" else "closed"
+        return next(item for item in self.history[kind] if item["number"] == int(parts[1]))
+
+
+def test_collect_reads_the_window_not_the_history(checkout, monkeypatch):
+    """A window of 10 work issues in a history of 2,000: gh's door (GhDoor) reads one page of the
+    closed issues GitHub's `since` filter names as updated since retro #1 closed, one page of
+    the pull requests newest update first, and one by one only the 10, their landings and the
+    older #5 a landing names (its rule check needs it); the collect is the whole read's, which
+    pages through all 2,000."""
+    history = long_history()
+    window = list(range(1992, 2002))
+    gh = RestGitHub(history)
+    monkeypatch.setattr(work_tickets, "GitHub", gh)
+    found = retro.collect(checkout, 30, retro.GhDoor(checkout, REPO, REPO), REPO, "main",
+                          "origin/main", NOW)
+    assert found is not None
+    assert [item.number for item in found.issues] == window
+    assert all(item.landed for item in found.issues)
+
+    lists = sorted(path for path in gh.calls if path.startswith(("issues?", "pulls?")))
+    assert lists == [
+        "issues?state=closed&labels=retro&per_page=100&page=1",
+        "issues?state=closed&since=2026-11-01T00:00:00Z&per_page=100&page=1",
+        "pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1"]
+    singles = {int(number) for path in gh.calls if not path.startswith(("issues?", "pulls?"))
+               for number in re.findall(r"^(?:issues|pulls)/(\d+)", path)}
+    checked = {int(path.split("/")[1]) - 3000 for path in gh.calls if path.startswith("commits/")}
+    assert singles == {1, 5, *window} and checked == {6000, *window}
+    broken = {check.name: check.broken for check in found.checks}["work-issue"]
+    assert broken == [{"item": "#9000",
+                       "what": "names #5, closed before the pull request merged"}]
+
+    whole = RestGitHub(long_history())
+    monkeypatch.setattr(work_tickets, "GitHub", whole)
+    monkeypatch.setattr(retro, "WINDOW_READS", (*retro.WINDOW_READS, "a read no door has"))
+    expected = retro.collect(checkout, 30, retro.GhDoor(checkout, REPO, REPO), REPO, "main",
+                             "origin/main", NOW)
+    assert expected is not None and found.data() == expected.data()
+    assert sum(path.startswith("issues?state=closed&per_page") for path in whole.calls) == 21
+
+
 LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a field report",
                 "fix": "`integrate` refuses a landing without one",
                 "home": "scripts/work_tickets.py", "home_kind": "refusal"}

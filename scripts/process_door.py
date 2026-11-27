@@ -11,8 +11,14 @@ for them. git has its own door, scripts/git_door.py, and a shell its own, script
 `run` hands a command that starts a shell (`shell_door.is_shell`), such as a project's suite or
 commit check written as a shell script, to that door, so every shell passes through it.
 
+A program that runs beside SE while SE talks to it or leaves it running (a server spoken to over
+its standard streams, a detached session) starts through `start`, which takes `subprocess.Popen`'s
+arguments and answers its `Popen`; the fake starts none, so a test that needs one is a contract or
+entry-point test. A shell never starts this way: it runs through the shell door.
+
 The door adds nothing to what the program is asked: `run` takes `subprocess.run`'s arguments and
-answers its `CompletedProcess`, each caller keeping its own error type and message.
+answers its `CompletedProcess`, each caller keeping its own error type and message. Its
+declaration, `scripts/doors/process.toml`, makes every other start a reach `door_report.py` refuses.
 """
 
 from __future__ import annotations
@@ -30,12 +36,17 @@ class Backend(Protocol):
 
     def run(self, argv: list[str] | str, options: dict[str, Any]) -> subprocess.CompletedProcess: ...
 
+    def start(self, argv: list[str], options: dict[str, Any]) -> subprocess.Popen: ...
+
 
 class RealProcesses:
     """The program itself, as a child process (`subprocess.run`)."""
 
     def run(self, argv: list[str] | str, options: dict[str, Any]) -> subprocess.CompletedProcess:
         return subprocess.run(argv, **options)
+
+    def start(self, argv: list[str], options: dict[str, Any]) -> subprocess.Popen:
+        return subprocess.Popen(argv, **options)
 
 
 BACKEND: Backend = RealProcesses()
@@ -58,3 +69,12 @@ def run(argv: Sequence[str] | str, **options: Any) -> subprocess.CompletedProces
     if shell_door.is_shell(argv, bool(options.get("shell"))):
         return shell_door.run(argv, **options)
     return BACKEND.run(argv if isinstance(argv, str) else [str(word) for word in argv], options)
+
+
+def start(argv: Sequence[str], **options: Any) -> subprocess.Popen:
+    """Start `argv` as `subprocess.Popen(argv, **options)` would, through the door's backend, and
+    answer the running process; a shell is refused, as it runs through the shell door's `run`."""
+    if shell_door.is_shell(argv, bool(options.get("shell"))):
+        raise ValueError(f"process_door.start: {' '.join(map(str, argv))!r} starts a shell; "
+                         "run it through shell_door.run")
+    return BACKEND.start([str(word) for word in argv], options)

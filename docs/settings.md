@@ -207,6 +207,9 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
    `Integrate <branch>` merge with its `Release-kind` trailer, which records its kind and moves no
    version), runs the complete suite, the output regeneration, the project checks and the public
    check.
+   - Where `gh` is signed in and a run of `check` on the work pull request's head passed exactly
+     the merge's tree, the suite does not run again: that run is its verdict, recorded and named
+     ([One suite run per tree](tests.md#one-suite-run-per-tree)).
    - A fast-forward landing then writes the one landing commit: that tree on the base, as the
      project identity in both roles, with the merge's title and message less each line that
      holds an e-mail address (a `commit_trailer` co-author line, say).
@@ -234,8 +237,9 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
    conclusion other than success merges nothing and escalates. A repository whose host has no
    runners accepts the integrator's status instead ([Landing without CI](tests.md#landing-without-ci)).
-   - The run it waits for and names may be an edit's, which took its suite's result from an
-     earlier run of exactly that tree and names it ([Edits reuse the suite](tests.md#edits-reuse-the-suite)).
+   - The run it waits for and names may have taken its suite's result from an earlier run of
+     exactly that tree, the work pull request's among them, and names it
+     ([One suite run per tree](tests.md#one-suite-run-per-tree)).
 4. It lands that head, once origin's integration branch is still the tested base; where it
    moved while it waited, it merges nothing: integrate again.
    - A squash landing squash-merges at exactly that head with the merge's message as the commit

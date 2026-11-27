@@ -1379,12 +1379,41 @@ def test_a_listing_github_refuses_names_why(monkeypatch, error, kind, message):
     def urlopen(request, timeout):
         raise error
 
+    monkeypatch.setattr(se_modules, "sleep", lambda seconds: None)
     monkeypatch.setattr(se_modules.urllib.request, "urlopen", urlopen)
     monkeypatch.delenv(se_modules.LISTING_VARIABLE)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     with pytest.raises(getattr(se_modules, kind), match=re.escape(message)):
         se_modules.host_listing("github.com", "alice")
+
+
+@pytest.mark.parametrize("code", [403, 429])
+def test_a_rate_limited_listing_is_retried_then_names_its_http_status(monkeypatch, capsys, code):
+    # #2000: github.com refuses a burst of searches for a while; one refusal then an answer lists the
+    # owner's components, a lasting one names the HTTP status.
+    answers: list[object] = [se_modules.urllib.error.HTTPError("u", code, "rate limited", {}, None),
+                             Answer({"items": [{"name": "obs-html"}]})]
+    waits: list[float] = []
+
+    def urlopen(request, timeout):
+        answer = answers.pop(0) if len(answers) > 1 else answers[0]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(se_modules, "sleep", waits.append)
+    monkeypatch.setattr(se_modules.urllib.request, "urlopen", urlopen)
+    monkeypatch.delenv(se_modules.LISTING_VARIABLE)
+    monkeypatch.setenv("GH_TOKEN", "token-value")
+    assert se_modules.host_listing("github.com", "alice") == {"obs-html": "obs-html"}
+    assert waits == [se_modules.LISTING_WAITS[0]]
+    assert f"github.com answered HTTP {code} listing alice's components" in capsys.readouterr().err
+    answers[:] = [se_modules.urllib.error.HTTPError("u", code, "rate limited", {}, None)]
+    waits.clear()
+    with pytest.raises(se_modules.NoListing, match=f"github.com answered HTTP {code} after 3 attempts"):
+        se_modules.host_listing("github.com", "alice")
+    assert waits == list(se_modules.LISTING_WAITS)
 
 
 def test_a_host_se_lists_nothing_of_or_the_listing_off_reads_beside_the_remote(monkeypatch):

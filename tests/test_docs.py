@@ -538,6 +538,44 @@ def test_a_missing_default_style_fails_naming_its_install_before_any_build(obs, 
     assert calls == ["read", "install", "read", "read", "install", "read"]  # no build ran
 
 
+REFUSAL = ("obs-components: warning: remote origin: host github.com cannot list owner alice: HTTP 403: "
+           "API rate limit exceeded; reading its own repository only")
+
+
+def test_an_install_github_com_refused_is_tried_again_then_names_the_http_answer(obs, monkeypatch,
+                                                                                 fake_processes, capsys):
+    # #2000: a 403 while obs reads the components' release marks, then success, installs obs-html; a
+    # lasting 403 fails naming the HTTP answer, not only "no repository offers this component".
+    answers = [Answer(1, "", f"{REFUSAL}\nobs-components: install: obs-html: no repository offers this component\n"),
+               Answer(0, "installed obs-html 0.6.1 (adapter)\n")]
+    asked: list[list[str]] = []
+
+    def uv(call):
+        asked.append(call.words)
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    waits: list[float] = []
+    monkeypatch.setattr(build_docs, "sleep", waits.append)
+    fake_processes.on("uv", uv)
+    assert build_docs.install_adapter(obs) == (0, "installed obs-html 0.6.1 (adapter)")
+    assert len(asked) == 2 and waits == [build_docs.INSTALL_WAITS[0]]
+    assert "github.com refused it (" in capsys.readouterr().err
+    answers[:] = [Answer(1, "", f"{REFUSAL}\nobs-components: install: obs-html: no repository offers this component\n")]
+    waits.clear()
+    code, said = build_docs.install_adapter(obs)
+    assert code == 1 and "no repository offers this component; github.com refused it: " in said
+    assert "HTTP 403: API rate limit exceeded" in said
+    assert waits == list(build_docs.INSTALL_WAITS)
+
+
+def test_an_install_that_fails_for_another_reason_is_not_tried_again(obs, monkeypatch, fake_processes):
+    asked: list[list[str]] = []
+    fake_processes.on("uv", lambda call: asked.append(call.words) or Answer(1, "", "no repository offers it\n"))
+    monkeypatch.setattr(build_docs, "sleep", lambda seconds: pytest.fail("no wait"))
+    assert build_docs.install_adapter(obs) == (1, "no repository offers it")
+    assert len(asked) == 1
+
+
 def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():
     output = ("obs-html: Warning: obs-html (src/obs_html/render.py): generation provenance: cannot resolve the "
               "generator commit, target version, or target commit. Build from a Git checkout\n"
@@ -600,3 +638,18 @@ def test_setup_and_ci_install_html_before_they_build():
         assert text.index("build_docs.py --install-html") < text.index(build_step), workflow
     for setup in ("setup.sh", "setup.ps1"):
         assert "build_docs.py --install-html" in (ROOT / "scripts" / setup).read_text(encoding="utf-8")
+
+
+def test_ci_installs_obs_html_with_the_runners_token_into_the_suites_obs_folder():
+    """#2000: an install with the runner's token is listed within its own rate limit, and check's install
+    lands in the obs folder the suite reads (tests/conftest.py OBS_LOCAL_FOLDER), so the suite's obs
+    fixture finds it installed and reads no github.com to install it again."""
+    workflows = ROOT / ".github" / "workflows"
+    for workflow in ("docs.yml", "check.yml"):
+        text = (workflows / workflow).read_text(encoding="utf-8")
+        step = re.search(r"(?ms)- name: Install obs's adapter component obs-html\n(.*?)\n(?=      - )", text)[1]
+        assert "GH_TOKEN: ${{ github.token }}" in step, workflow
+    check = (workflows / "check.yml").read_text(encoding="utf-8")
+    step = re.search(r"(?ms)- name: Install obs's adapter component obs-html\n(.*?)\n(?=      - )", check)[1]
+    assert "OBS_LOCAL_FOLDER: ${{ github.workspace }}/.se/obs-local" in step
+    assert os.environ["OBS_LOCAL_FOLDER"] == str(ROOT / ".se" / "obs-local")

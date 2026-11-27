@@ -180,8 +180,8 @@ def ignore_se(repo: Path) -> str:
 
 def sync(repo: Path) -> int:
     """`se_modules.py --root <repo> sync se`: SE's module clone at the pin, in `<repo>/.se/modules/se`."""
-    return subprocess.run([sys.executable, str(ROOT / "scripts" / "se_modules.py"), "--root", str(repo),
-                           "sync", "se"], check=False).returncode
+    return process_door.run([sys.executable, str(ROOT / "scripts" / "se_modules.py"), "--root", str(repo),
+                             "sync", "se"], check=False).returncode
 
 
 def install(repo: Path, run_sync=sync) -> int:
@@ -365,9 +365,9 @@ class Door:
             # would be the parent the server sees.
             python = getattr(sys, "_base_executable", sys.executable)
             command, cwd = [python, "-c", PARENT, str(cwd), *command], parent_cwd
-        self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                        text=True, encoding="utf-8", bufsize=1)
+        self.process = process_door.start(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
+                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                          text=True, encoding="utf-8", bufsize=1)
         self.lines: queue.Queue[str] = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
         self.next_id = 0
@@ -487,8 +487,8 @@ def check_cli(cli: str | None, plugin: Path, project: Path, env: dict[str, str],
     env = {**env, "COPILOT_AUTO_UPDATE": "false"}
 
     def read(*arguments: str):
-        done = subprocess.run([cli, f"--plugin-dir={plugin}", *arguments, "--json"], cwd=project, env=env,
-                              capture_output=True, text=True, check=False, timeout=120)
+        done = process_door.run([cli, f"--plugin-dir={plugin}", *arguments, "--json"], cwd=project, env=env,
+                                capture_output=True, text=True, check=False, timeout=120)
         return json.loads(done.stdout) if done.returncode == 0 and done.stdout.strip() else done
 
     plugins = read("plugin", "list")
@@ -529,8 +529,8 @@ def _binary(build: bool, workdir: Path) -> tuple[Path | None, str]:
     if shutil.which("go") is None:
         return None, f"neither se {version} in ~/.se/bin nor Go to build it; run SE's start (bootstrap.sh)"
     target = workdir / f"se{suffix}"
-    done = subprocess.run(["go", "build", "-o", str(target), "./cmd/se"], cwd=ROOT / "components",
-                          capture_output=True, text=True, check=False)
+    done = process_door.run(["go", "build", "-o", str(target), "./cmd/se"], cwd=ROOT / "components",
+                            capture_output=True, text=True, check=False)
     if done.returncode:
         return None, f"go build ./cmd/se failed: {done.stderr.strip()[-300:]}"
     return target, "se built from this tree's components"
@@ -564,8 +564,8 @@ def self_test(build: bool = False, cli: str | None = None, keep: bool = False) -
     finally:
         if binary is not None:
             for root in dict.fromkeys([str(project), *roots]):
-                subprocess.run([str(binary), "stop", "--root", root], capture_output=True, check=False,
-                               timeout=60)
+                process_door.run([str(binary), "stop", "--root", root], capture_output=True, check=False,
+                                 timeout=60)
         if keep:
             print(f"kept {work}")
         else:
