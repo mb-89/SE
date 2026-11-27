@@ -582,6 +582,7 @@ def test_without_ci_the_guard_refuses_any_other_status(checkout, host, capsys, s
     assert named in error
 
 
+@pytest.mark.distinct("asserts the refusal's text")
 def test_with_ci_the_guard_reads_no_status_and_refuses_as_before(checkout, host, capsys):
     head = commit(checkout, name="later.txt")
     host.write(checkout, head)  # a status that would pass where ci were off

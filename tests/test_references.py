@@ -115,6 +115,7 @@ def test_a_section_reference_names_a_heading_or_a_bold_label(documented: Path) -
         'docs/guide.md "Remove"', 'README "Gone"', 'docs/guide.md "Not a heading"']
 
 
+@pytest.mark.distinct("asserts a reference wrapped in comments and strings")
 def test_a_section_reference_wraps_in_comments_and_python_strings(documented: Path) -> None:
     text = ('# the guide (docs/guide.md\n# "Install"), then (docs/guide.md "Pin"\n'
             'raise Error("... (docs/guide.md \\"Pinning "\n            "it\\")")\n'

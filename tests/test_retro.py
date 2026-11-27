@@ -429,6 +429,7 @@ def countdown(closed, opened=(), pulls=(), now=NOW, settings=SETTINGS) -> retro.
                                  settings, now)
 
 
+@pytest.mark.distinct("asserts opened issues count nothing")
 def test_twenty_issues_opened_make_no_retro_due_and_twenty_come_back_do():
     """Opening issues counts nothing: a productive session that files 20 is no retro; 20 that
     come back (landed) make one due, 19 do not."""
@@ -541,6 +542,7 @@ def test_the_countdown_lines_are_the_retro_due_snippet_as_due_printed_them():
     assert retro.sibling("interfaces").read(retro.DUE_TEMPLATE, "\n".join(lines))["overhaul_days"] == "23"
 
 
+@pytest.mark.distinct("asserts the draft's text and block")
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)
@@ -1532,6 +1534,7 @@ def filed(checkout: Path, monkeypatch, text: str) -> list[tuple[str, dict]]:
     return tracker.calls
 
 
+@pytest.mark.distinct("asserts the report's text")
 def test_file_posts_the_report_and_leaves_the_retro_open_for_finding_outcomes(
         checkout, monkeypatch, capsys):
     calls = filed(checkout, monkeypatch, judged_draft(checkout))

@@ -90,6 +90,7 @@ def test_a_reusable_workflow_keeps_only_workflow_call() -> None:
         se_workflows.generate("on:\n  push:\njobs: {}\n", ".github/workflows/release.yml", PIN, PLACE)
 
 
+@pytest.mark.distinct("asserts CRLF is normalized")
 def test_generate_normalizes_windows_line_endings() -> None:
     text = "name: x\non:\n  workflow_call:\njobs:\n  x:\n    runs-on: x\n"
     path = ".github/workflows/release.yml"

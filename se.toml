@@ -195,3 +195,9 @@ skills = []
 
 [roles.worker]
 skills = []
+
+# The overhaul's rule on tests that add no line of their own (docs/work-commands.md "Work
+# commands", overhaul.py coverage): the groups that run the same lines are pruned; the tests whose
+# lines another test runs warn while each overhaul prunes them, file by file, the slowest first.
+[overhaul]
+subset_tests = "warn"

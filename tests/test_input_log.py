@@ -100,6 +100,7 @@ def index_lines(repo: Path) -> list[str]:
 # The adapter and the person rule.
 
 
+@pytest.mark.distinct("asserts the files' names and text")
 def test_a_mixed_transcript_gives_two_files_dated_by_their_times(tmp_path, fake_git_door, capsys):
     repo = ignoring_checkout(tmp_path / "repo")
     assert log.main([str(write_transcript(tmp_path / "t", MIXED)), "--repo", str(repo)]) == 0
@@ -185,6 +186,7 @@ def test_a_queued_prompt_of_an_image_and_a_text_part():
 # The files and the index.
 
 
+@pytest.mark.distinct("asserts UTF-8, LF and one index line per file")
 def test_files_and_index_are_utf8_with_lf_only_and_one_index_line_per_file(
         tmp_path, fake_git_door, capsys):
     repo = ignoring_checkout(tmp_path / "repo")
@@ -206,6 +208,7 @@ def test_files_and_index_are_utf8_with_lf_only_and_one_index_line_per_file(
     assert "Zeile mit Umlaut äöü\nund zweite Zeile\n" in files[turn_files[-2]].decode("utf-8")
 
 
+@pytest.mark.distinct("asserts the same bytes twice")
 def test_the_same_transcript_in_two_fresh_folders_gives_the_same_bytes(
         tmp_path, fake_git_door, capsys):
     transcript = write_transcript(tmp_path / "t", MIXED)
@@ -279,6 +282,7 @@ def test_images_are_written_only_with_the_option(tmp_path, fake_git_door, capsys
 # Only into the ignored folder.
 
 
+@pytest.mark.distinct("asserts git status unchanged")
 def test_an_ignoring_checkout_keeps_its_status(tmp_path, fake_git_door, capsys):
     repo = ignoring_checkout(tmp_path / "repo")
     before = git_door.run("status", "--porcelain", root=repo)

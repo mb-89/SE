@@ -125,6 +125,7 @@ def test_a_made_up_record_shows_a_difference_a_step_beyond_the_dispatch_tools_an
     assert "pass" not in out.lower()
 
 
+@pytest.mark.distinct("asserts the dispatch line")
 @pytest.mark.parametrize("dispatch", ["no", "not run"])
 def test_the_dispatch_result_is_reported_as_recorded(dispatch):
     text = RECORD.read_text(encoding="utf-8").replace('dispatch = ""', f'dispatch = "{dispatch}"')

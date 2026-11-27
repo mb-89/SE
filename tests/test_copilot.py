@@ -265,6 +265,7 @@ def test_the_smoke_helper_fails_naming_what_is_missing(change, reason: str) -> N
     assert reason in detail
 
 
+@pytest.mark.distinct("asserts VS Code's and Claude's tool names")
 def test_the_smoke_helper_reads_vs_codes_and_claudes_tool_names_too() -> None:
     for name in ("se/status", "mcp__se__status"):
         lines = [json.dumps({"type": "assistant.message", "data": {"content": "SE 1.2.3 started\n[1 skills](d)"}}),

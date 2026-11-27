@@ -33,6 +33,12 @@ prints its comment and close as a plan, as the work model's "Without gh" says fo
 the functions and classes in `scripts/` that nothing but tests reaches, duplicate and
 near-duplicate blocks, the lines of code and of tests per script, the longest functions, files and
 parameter lists, the files untouched longest, and each script command that no authored text names.
+Where `overhaul.py coverage [--repo PATH] [--source DIR]` kept a run of the suite under coverage,
+per test, in COVERAGE_DIR, it also lists the tests that add no line of their own, slowest first
+(`repeats`): those that run the same lines as another, and those whose lines another test runs.
+`coverage` fails where a class with cases is at level `error` ([overhaul] repeated_tests,
+subset_tests in se.toml; REPEAT_LEVELS), naming the remedy: prune the test, or mark one that
+asserts another answer `@pytest.mark.distinct("<the answer>")`.
 It only reads and judges nothing: the facts are candidates, the overhaul decides.
 
 Standard library only."""
@@ -46,6 +52,7 @@ import importlib
 import io
 import json
 import keyword
+import os
 import re
 import sys
 import time
@@ -75,6 +82,20 @@ TOP = 10
 # The authored text where se.toml names none: every tracked Markdown file.
 DEFAULT_AUTHORED = ["**/*.md"]
 
+# The coverage measurement (`overhaul.py coverage`): where it is kept, the code it measures, and
+# the share of the tests whose call runs a line that makes the line the harness's (a fixture's,
+# a hook's), not any test's own. A test is a test function, its parametrized cases together.
+COVERAGE_DIR = Path(".se") / "overhaul" / "coverage"
+COVERAGE_DATA = ".coverage"
+JUNIT = "junit.xml"
+SOURCE = "scripts"
+HARNESS = 0.5
+# The mark a test keeps where it repeats another's lines yet asserts another answer.
+DISTINCT = "distinct"
+# The two classes of the rule, each with its built-in level; `[overhaul]` in se.toml sets them.
+LEVELS = ("error", "warn")
+REPEAT_LEVELS = {"repeated_tests": "error", "subset_tests": "warn"}
+
 
 @dataclass
 class Checkout:
@@ -86,6 +107,21 @@ class Checkout:
     # The tracked files, and each one's last change as a Unix time where git has one.
     tracked: list[str]
     changed: dict[str, int]
+    # The coverage measurement where one is kept (`measurement`), and the rule's levels.
+    coverage: Measurement | None = None
+    levels: dict[str, str] = field(default_factory=lambda: dict(REPEAT_LEVELS))
+
+
+@dataclass
+class Measurement:
+    """One coverage run: each test's lines in its call, its seconds (setup, call and teardown),
+    the tests that started a process, whose child's lines coverage does not see, and those whose
+    every case was skipped, which ran none of their own."""
+
+    lines: dict[str, frozenset]
+    seconds: dict[str, float]
+    spawning: set[str]
+    skipped: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -99,6 +135,8 @@ class Facts:
     long_parameters: list[dict] = field(default_factory=list)
     untouched: list[dict] = field(default_factory=list)
     unnamed: list[str] = field(default_factory=list)
+    # Tests that repeat another's lines (`repeats`); None where no measurement is kept.
+    repeats: dict | None = None
 
 
 # Reading the checkout
@@ -156,6 +194,8 @@ def read(root: Path) -> Checkout:
                   if any(pattern.match(path) for pattern in patterns)},
         tracked=present,
         changed=last_changes(root),
+        coverage=measurement(root / COVERAGE_DIR),
+        levels=repeat_levels(root),
     )
 
 
@@ -476,6 +516,161 @@ def unnamed_commands(scripts: dict[str, str], trees: dict[str, ast.Module], auth
     return missing
 
 
+# Tests that repeat another's lines
+
+
+def test_of(node_id: str) -> str:
+    """The test function a pytest node id or coverage context names, its parametrized case and
+    its phase dropped: `tests/test_x.py::test_y[a]|run` is `tests/test_x.py::test_y`."""
+    return node_id.split("|", 1)[0].split("[", 1)[0]
+
+
+def numbits_lines(numbits: bytes) -> list[int]:
+    """The line numbers of coverage's numbits: bit `b` of byte `i` is line `8 * i + b`."""
+    return [index * 8 + bit for index, byte in enumerate(numbits) for bit in range(8) if byte >> bit & 1]
+
+
+def call_lines(data: Path) -> dict[str, frozenset]:
+    """Each test's lines in its call phase (`<node id>|run`), read from coverage's data file,
+    a SQLite database written with per-test contexts (`--cov-context=test`)."""
+    import sqlite3
+    found: dict[str, set] = defaultdict(set)
+    database = sqlite3.connect(f"file:{data}?mode=ro", uri=True)
+    try:
+        contexts = dict(database.execute("select id, context from context"))
+        rows = database.execute("select file_id, context_id, numbits from line_bits").fetchall()
+    except sqlite3.Error as error:
+        raise ValueError(f"{data} is no coverage data file with contexts: {error}") from error
+    finally:
+        database.close()
+    for file_id, context_id, numbits in rows:
+        context = contexts.get(context_id) or ""
+        if context.endswith("|run"):
+            found[test_of(context)].update((file_id, line) for line in numbits_lines(numbits))
+    return {name: frozenset(lines) for name, lines in found.items()}
+
+
+def junit_cases(report: Path) -> tuple[dict[str, float], set[str], set[str]]:
+    """Each test's seconds (setup, call and teardown), the tests that started a process (the
+    spawn guard's `spawns` property) and those whose every case was skipped, from a JUnit report
+    of the xunit1 family, which names each case's file."""
+    import xml.etree.ElementTree as ElementTree
+    seconds: dict[str, float] = defaultdict(float)
+    spawning: set[str] = set()
+    ran: set[str] = set()
+    try:
+        cases = ElementTree.parse(report).getroot().iter("testcase")
+    except ElementTree.ParseError as error:
+        raise ValueError(f"{report} is no JUnit report: {error}") from error
+    for case in cases:
+        path = (case.get("file") or "").replace("\\", "/")
+        module = path[:-3].replace("/", ".")
+        owner = (case.get("classname") or "").removeprefix(module).strip(".")
+        name = test_of("::".join(part for part in (path, owner.replace(".", "::"),
+                                                       case.get("name") or "") if part))
+        seconds[name] += float(case.get("time") or 0)
+        properties = {item.get("name"): item.get("value") or "" for item in case.iter("property")}
+        if properties.get("spawns", "0").split(":", 1)[0] not in ("", "0"):
+            spawning.add(name)
+        if case.find("skipped") is None:
+            ran.add(name)
+    return dict(seconds), spawning, set(seconds) - ran
+
+
+def measurement(folder: Path) -> Measurement | None:
+    """The coverage run `overhaul.py coverage` kept in `folder`, or None where none is kept."""
+    if not (folder / COVERAGE_DATA).is_file() or not (folder / JUNIT).is_file():
+        return None
+    seconds, spawning, skipped = junit_cases(folder / JUNIT)
+    return Measurement(call_lines(folder / COVERAGE_DATA), seconds, spawning, skipped)
+
+
+def repeat_levels(root: Path) -> dict[str, str]:
+    """The rule's level per class, `[overhaul]` of se.toml over REPEAT_LEVELS, each checked."""
+    given = sibling("work_tickets").se_table(root, "overhaul")
+    levels = {}
+    for key, default in REPEAT_LEVELS.items():
+        value = given.get(key, default)
+        if value not in LEVELS:
+            raise ValueError(f"overhaul.{key} in {root / 'se.toml'} must be one of {', '.join(LEVELS)}; "
+                             f"fix it or remove it for the built-in {default}")
+        levels[key] = value
+    return levels
+
+
+def marked_distinct(tests: dict[str, str]) -> set[str]:
+    """The test functions marked `@pytest.mark.distinct("<the answer it adds>")`, by node id; a
+    mark that names no answer marks nothing."""
+    marked = set()
+    for path, source in tests.items():
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            continue
+        nodes = [(node.name, node) for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        nodes += [(f"{owner.name}::{node.name}", node) for owner in tree.body if isinstance(owner, ast.ClassDef)
+                  for node in owner.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        for name, node in nodes:
+            for decorator in node.decorator_list:
+                if (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
+                        and decorator.func.attr == DISTINCT and len(decorator.args) == 1
+                        and isinstance(decorator.args[0], ast.Constant)
+                        and str(decorator.args[0].value).strip()):
+                    marked.add(f"{path}::{name}")
+    return marked
+
+
+def repeats(measured: Measurement, distinct: set[str]) -> dict:
+    """The tests that add no line of their own: `groups`, each of tests whose calls run exactly
+    the same lines, the first kept and the others to prune; `subsets`, each test whose lines
+    another single test also runs, with that test. Lines HARNESS of the tests run are left out,
+    and so are tests that run none else, tests that started a process or were skipped, and tests
+    marked DISTINCT.
+    Each entry carries the seconds pruning it saves; both lists come slowest first."""
+    harness = Counter(line for lines in measured.lines.values() for line in lines)
+    shared = {line for line, count in harness.items() if count >= HARNESS * len(measured.lines)}
+    own = {name: lines - shared for name, lines in measured.lines.items()
+           if not {name} & (measured.spawning | measured.skipped | distinct) and lines - shared}
+    seconds = measured.seconds
+
+    def took(names) -> float:
+        return round(sum(seconds.get(name, 0.0) for name in names), 3)
+
+    alike: dict[frozenset, list[str]] = defaultdict(list)
+    for name in sorted(own):
+        alike[own[name]].append(name)
+    groups = [{"keep": names[0], "prune": names[1:], "seconds": took(names[1:])}
+              for names in alike.values() if len(names) > 1]
+    holders: dict[tuple, list[str]] = defaultdict(list)
+    for name, lines in own.items():
+        for line in lines:
+            holders[line].append(name)
+    subsets = []
+    for name in sorted(own):
+        rarest = min(own[name], key=lambda line: len(holders[line]))
+        wider = sorted(other for other in holders[rarest] if own[name] < own[other])
+        if wider:
+            subsets.append({"test": name, "within": wider[0], "seconds": took([name])})
+    return {"groups": sorted(groups, key=lambda group: (-group["seconds"], group["keep"])),
+            "subsets": sorted(subsets, key=lambda item: (-item["seconds"], item["test"]))}
+
+
+def subset_files(subsets: list[dict]) -> list[dict]:
+    """The strict-subset tests by file, the slowest file first: where pruning starts."""
+    files: dict[str, list[dict]] = defaultdict(list)
+    for item in subsets:
+        files[item["test"].split("::", 1)[0]].append(item)
+    rows = [{"file": path, "tests": len(items), "seconds": round(sum(item["seconds"] for item in items), 3)}
+            for path, items in files.items()]
+    return sorted(rows, key=lambda row: (-row["seconds"], row["file"]))
+
+
+def repeat_counts(found: dict) -> dict[str, int]:
+    """How many tests each class of the rule holds: those to prune from the groups, the subsets."""
+    return {"repeated_tests": sum(len(group["prune"]) for group in found["groups"]),
+            "subset_tests": len(found["subsets"])}
+
+
 def find(checkout: Checkout) -> Facts:
     trees = {}
     for path, source in checkout.scripts.items():
@@ -503,6 +698,8 @@ def find(checkout: Checkout) -> Facts:
         untouched=[{"at": path, "last": time.strftime("%Y-%m-%d", time.gmtime(checkout.changed[path]))}
                    for path in untouched[:TOP]],
         unnamed=unnamed_commands(checkout.scripts, trees, checkout.authored),
+        repeats=(None if checkout.coverage is None else
+                 {**repeats(checkout.coverage, marked_distinct(checkout.tests)), "levels": checkout.levels}),
     )
 
 
@@ -534,7 +731,27 @@ def render(facts: Facts) -> str:
                                         for item in facts.long_parameters])
     section("Untouched longest", [f"{item['at']}: {item['last']}" for item in facts.untouched])
     section("Commands no authored text names", facts.unnamed)
+    out.extend(repeat_sections(facts.repeats))
     return "\n".join(out).rstrip() + "\n"
+
+
+def repeat_sections(found: dict | None) -> list[str]:
+    """The sections of the tests that repeat another's lines, or how to measure them."""
+    if found is None:
+        return ["## Tests that repeat another's lines", "",
+                f"not measured: run `overhaul.py coverage`, which keeps its run in {COVERAGE_DIR.as_posix()}", ""]
+    counts = repeat_counts(found)
+    out = [f"## Tests that run the same lines as another ({counts['repeated_tests']} in {len(found['groups'])} groups, "
+           f"{sum(group['seconds'] for group in found['groups']):.1f} s; "
+           f"repeated_tests: {found['levels']['repeated_tests']})", ""]
+    out += [f"- {group['seconds']:.2f} s: keep {group['keep']}, prune {', '.join(group['prune'])}"
+            for group in found["groups"]] or ["none"]
+    out += ["", f"## Tests whose lines another test runs ({counts['subset_tests']}, "
+                f"{sum(item['seconds'] for item in found['subsets']):.1f} s; "
+                f"subset_tests: {found['levels']['subset_tests']})", ""]
+    out += [f"- {row['file']}: {row['tests']} tests, {row['seconds']:.2f} s"
+            for row in subset_files(found["subsets"])] or ["none"]
+    return out + [""]
 
 
 # The overhaul issue: new, read, file
@@ -761,7 +978,8 @@ def fact_counts(facts: Facts) -> dict:
     return {"unreached": len(facts.unreached), "duplicates": len(facts.duplicates),
             "near": len(facts.near), "lines": sum(row["lines"] for row in facts.sizes),
             "test_lines": sum(row["test_lines"] for row in facts.sizes),
-            "unnamed": len(facts.unnamed)}
+            "unnamed": len(facts.unnamed),
+            **({} if facts.repeats is None else repeat_counts(facts.repeats))}
 
 
 @dataclass
@@ -1251,14 +1469,55 @@ def run_facts(args: argparse.Namespace) -> int:
     return 0
 
 
+def coverage_command(folder: Path, source: str) -> list[str]:
+    """The suite under coverage with per-test contexts and a JUnit report that names each case's
+    file and its whole time, both into `folder`; pytest-cov comes for this run only."""
+    return ["uv", "run", "--with", "pytest-cov", "pytest", "-q", f"--cov={source}",
+            "--cov-context=test", "--cov-report=", f"--junitxml={folder / JUNIT}",
+            "-o", "junit_family=xunit1", "-o", "junit_duration_report=total"]
+
+
+def run_coverage(args: argparse.Namespace) -> int:
+    root = args.repo.resolve()
+    folder = root / COVERAGE_DIR
+    try:
+        levels = repeat_levels(root)
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in (COVERAGE_DATA, JUNIT):
+            (folder / name).unlink(missing_ok=True)
+        print(f"Measuring the suite's coverage per test into {folder} (the suite, under coverage)", flush=True)
+        result = sibling("process_door").run(
+            coverage_command(folder, args.source), cwd=root,
+            env={**os.environ, "COVERAGE_FILE": str(folder / COVERAGE_DATA)})
+        measured = measurement(folder)
+        if result.returncode != 0 or measured is None:
+            print(f"error: overhaul.py coverage: the suite under coverage exited {result.returncode}"
+                  f"{'' if measured else ' and kept no measurement'}; make it pass, then measure again",
+                  file=sys.stderr)
+            return 2
+        found = repeats(measured, marked_distinct(read(root).tests))
+    except (OSError, ValueError) as error:
+        print(f"error: overhaul.py coverage: {error}", file=sys.stderr)
+        return 2
+    print("\n".join(repeat_sections({**found, "levels": levels})).rstrip())
+    failed = False
+    for key, count in repeat_counts(found).items():
+        if count:
+            failed |= levels[key] == "error"
+            print(f"{levels[key]}: {key}: {count} tests add no line of their own; prune each, or "
+                  f"mark one that asserts another answer @pytest.mark.{DISTINCT}(\"<the answer>\")",
+                  file=sys.stderr)
+    return 1 if failed else 0
+
+
 #: overhaul.py's commands as one kern component (docs/start.md "Commands as components"); each command's
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "overhaul", "Overhaul",
     "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, "
-    "from the judged draft, file checks the judged draft and closes the issue with its report, and "
-    "facts lists a checkout's pruning facts.",
-    ("new", "read", "deck", "file", "facts")),)
+    "from the judged draft, file checks the judged draft and closes the issue with its report, "
+    "facts lists a checkout's pruning facts, and coverage measures the suite per test for them.",
+    ("new", "read", "deck", "file", "facts", "coverage")),)
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
 #: the checkout while a person waits; new, read and file write or read GitHub at length.
 INTERACTIVE_COMMANDS = frozenset({"facts"})
@@ -1336,6 +1595,18 @@ def make_parser() -> argparse.ArgumentParser:
     facts_command.add_argument("--repo", type=Path, default=Path("."), help="the checkout (default: .)")
     facts_command.add_argument("--json", action="store_true", help="print the facts as JSON")
     facts_command.set_defaults(run=run_facts)
+    coverage_command_parser = commands.add_parser(
+        "coverage", help="measure the suite's coverage per test for the facts",
+        description=f"Run the suite once under coverage with per-test contexts and keep the run in "
+                    f"{COVERAGE_DIR.as_posix()}, which facts and read then list: the tests that run "
+                    "the same lines as another (repeated_tests) and those whose lines another "
+                    "test runs (subset_tests). Each class fails the run at its level error, "
+                    "warns at warn ([overhaul] in se.toml).")
+    coverage_command_parser.add_argument("--repo", type=Path, default=Path("."),
+                                         help="the checkout (default: .)")
+    coverage_command_parser.add_argument("--source", default=SOURCE,
+                                         help=f"the code coverage measures (default: {SOURCE})")
+    coverage_command_parser.set_defaults(run=run_coverage)
     return top
 
 

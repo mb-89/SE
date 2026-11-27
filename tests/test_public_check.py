@@ -528,6 +528,7 @@ def test_the_machine_list_is_refused_with_its_remedy(repo: Path, tmp_path: Path,
     assert "secret" not in result.stdout.lower() and str(tmp_path) not in result.stdout
 
 
+@pytest.mark.distinct("asserts the retired variable changes nothing")
 def test_the_variable_of_the_retired_cloud_list_is_no_source(
         repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A made-up term, written apart so this file never holds it whole.
@@ -937,6 +938,7 @@ def test_a_digest_entry_without_a_public_label_is_refused(repo: Path, entry: str
     assert f".public-check-allow:1: {error}" in result.stdout
 
 
+@pytest.mark.distinct("asserts an entry path with spaces")
 def test_a_digest_entry_path_may_hold_spaces(repo: Path) -> None:
     commit(repo, {"a dir/t t.txt": f"{LEAK}\n",
                   public_check.ALLOW_FILE: digest_entry("a dir/t t.txt")})
@@ -1066,6 +1068,7 @@ def test_a_committed_entry_covering_only_local_term_hits_is_warned(repo: Path,
     assert term not in result.stdout
 
 
+@pytest.mark.distinct("asserts a file entry without reason is refused")
 def test_allow_entry_needs_a_reason(repo: Path) -> None:
     allow_repo(repo, "docs/*\n")
     result = run_check("--repo", str(repo))
@@ -1552,6 +1555,7 @@ def test_tracker_references(text: str, found: list[str]) -> None:
     assert [match for _, match in public_check.tracker_references(text)] == found
 
 
+@pytest.mark.distinct("asserts a bare reference's refusal and its rule line")
 def test_commit_msg_hook_refuses_a_tracker_reference(hooked: Path) -> None:
     (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
     result = try_commit(hooked, "Worker role (" + "#593)")
@@ -1941,7 +1945,6 @@ def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, mess
     assert result.returncode == (1 if refused else 0), result.stdout
 
 
-
 def test_ci_pull_request_gate_scans_the_merge_it_lands(repo: Path, tmp_path: Path) -> None:
     """Three heads cut before main moved one entry and narrowed a glob: the gate judges the merge
     each would land, by the merge's own allow list."""
@@ -2078,6 +2081,7 @@ def test_ci_gates_only_the_commits_a_work_branch_brings_past_main(
     assert result.returncode == 0, result.stdout
 
 
+@pytest.mark.distinct("asserts only the work branch's own commit is named")
 def test_ci_refuses_a_work_branchs_own_foreign_commit_naming_only_it(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     after = merged_work(repo)
@@ -2164,6 +2168,7 @@ def test_push_range_without_the_integration_ref(
     assert public_check.push_range(clone, "", after, "work", "main") == f"{after} --not"
 
 
+@pytest.mark.distinct("asserts the range where another branch integrates")
 def test_push_range_gates_whole_where_se_toml_names_another_branch(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     git(repo, "switch", "-q", "work")

@@ -301,14 +301,6 @@ def run(w, capsys, *args: str) -> tuple[int, str]:
     return code, captured.out + captured.err
 
 
-def test_sync_clones_at_pin(world, capsys):
-    code, out = run(world, capsys, "sync")
-    assert code == 0, out
-    assert git(world.cache, "rev-parse", "HEAD") == world.shas[0]
-    assert (world.cache / "version.txt").read_text() == "1\n"
-    assert "lib: pinned" in out
-
-
 def test_a_clean_sync_finds_the_component_beside_the_origin_and_clones_it(world, capsys):
     assert not world.cache.exists()
 
@@ -316,6 +308,8 @@ def test_a_clean_sync_finds_the_component_beside_the_origin_and_clones_it(world,
 
     assert code == 0, out
     assert git(world.cache, "rev-parse", "HEAD") == world.shas[0]
+    assert (world.cache / "version.txt").read_text() == "1\n"
+    assert "lib: pinned" in out
     assert Path(git(world.cache, "remote", "get-url", "origin")) == world.upstream
     assert ("origin: the mark of git.example.org/team/lib could not be checked (SE_COMPONENT_LISTING=off); "
             "its repository is read directly") in out
@@ -787,6 +781,7 @@ def test_update_regenerates_the_copies_of_ses_workflows_at_the_new_pin(world, ca
     assert code == 0 and "generated" not in out  # already there: nothing to write
 
 
+@pytest.mark.distinct("asserts the workflows stay")
 def test_update_of_another_module_leaves_the_workflows_alone(world, capsys):
     calls = write(world.root / ".github" / "workflows" / "check.yml", "jobs: {}\n")
     code, out = run(world, capsys, "update", "lib")
@@ -1250,6 +1245,7 @@ def unchanged(hosts):
     return hosts.manifest.read_bytes(), (hosts.root / "se.lock").exists()
 
 
+@pytest.mark.distinct("asserts a direct pin's line and that the check writes nothing")
 def test_the_check_names_a_pin_one_major_behind_with_both_versions(hosts, capsys):
     hosts.release("team", "obs", ["5.0.0", "5.3.0", "10.0.0"])
     hosts.list({"git.example.org/team": ["obs"], "git.example.org/alice": []})
