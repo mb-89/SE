@@ -30,6 +30,7 @@ func main() {
 	cli.About = "se: SE's command line: the SE agent's start, and the core its hosts and hooks run"
 	cli.Add(agentVerb)
 	cli.Add(startHooksVerb)
+	cli.Add(startComponentsVerb)
 	cli.Add(stoppedHooksVerb)
 	cli.Bare = bareVerb
 	os.Exit(cli.Run("se", os.Args[1:], os.Stdout, os.Stderr))

@@ -8,7 +8,8 @@
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
 #   modules  the current project's se.toml components and theirs, resolved from what is placed first
-#            (se_start.py start-components); a required one missing stops the start
+#            by the se binary (`se start-components`), placed for that in the foreground first
+#            (binary_ready); a required one missing stops the start
 #   identity in --hook mode: the project's commit identity, set as setup.sh sets it
 #   hooks    in --hook mode: the project's core.hooksPath where it is unset, set as setup.sh sets it
 #   SE       in --hook mode: an installed SE that is a git checkout behind SE's latest release within
@@ -43,9 +44,10 @@ if [ -n "${UV_NATIVE_TLS:-}" ]; then
   unset UV_NATIVE_TLS
 fi
 
-# --kern-fetch and --kern-build: the background half of kern's first start of a version (below).
+# --kern-fetch and --kern-build: the background half of kern's first start of a version (below);
+# --kern-place, that of the binary's placement before the components step (binary_ready).
 case "${1:-}" in
-  --kern-fetch | --kern-build) kern_mode="$1" ;;
+  --kern-fetch | --kern-build | --kern-place) kern_mode="$1" ;;
   *) kern_mode="" ;;
 esac
 
@@ -238,8 +240,10 @@ kern_build() { # <bin> <build folder> <package>
 # binary builds on: synced where its clone in .se/modules/kern is missing or not at the commit
 # se.lock locks, both read from the files alone, so an SE at its pin starts no process here. Where
 # that fails, the start goes on without it and the greeting names the cause. A project that is SE's
-# own checkout syncs it in the modules step.
+# own checkout syncs it in the modules step. Once per start: binary_ready and the kern step both ask.
 kern_place() {
+  ${kern_placed:-false} && return 0
+  kern_placed=true
   [ -f "$se_root/se.toml" ] && grep -q '^\[components\.kern\]' "$se_root/se.toml" || return 0
   local locked="" head="" inside=false line out
   if [ -f "$se_root/se.lock" ]; then
@@ -269,7 +273,7 @@ kern_step() {
   kern_root="$project"
   kern_checkout || kern_root="$se_root"
   [ "$project" -ef "$se_root" ] || kern_place
-  if ! kern_locate; then
+  if [ -z "${bin:-}" ] && ! kern_locate; then
     kern_args+=(--kern-failed "SE names no application binary for $kern_root (se_modules.py app-binary)")
     return 0
   fi
@@ -305,6 +309,34 @@ kern_step() {
     kern_args+=(--kern-failed "$doing took longer than ${SE_KERN_WAIT:-45} s and goes on in the background; start the session again once $bin is in place")
   fi
 }
+# The binary, in place before the components step, which runs through it (docs/components.md "The
+# one owner"): located, then fetched or built in a background of its own that the start waits for
+# as the kern step does (kern_background), but started never; the kern step then starts it. Its
+# kern placed first, also for SE's own checkout, whose build replaces kern by it. Fails where it is
+# not in place, setting cause.
+binary_ready() {
+  kern_place
+  if ! kern_locate; then
+    cause="SE names no application binary for $project (se_modules.py app-binary)"
+    return 1
+  fi
+  [ -x "$bin" ] && return 0
+  local doing
+  kern_release
+  if [ -z "$cause" ]; then
+    doing="fetching the $name $version release for $platform"
+    kern_background --kern-place "$bin" fetch "$base/$asset" "$sums" "$exe"
+  elif command -v go >/dev/null 2>&1 && [ -f "$pins/$builddir/go.mod" ]; then
+    doing="$cause; building it from $pins/$builddir"
+    kern_background --kern-place "$bin" build "$pins/$builddir" "$package"
+  else
+    cause="$cause, and no go to build it from $pins/$builddir"
+    return 1
+  fi
+  [ -x "$bin" ] && return 0
+  cause="$doing took longer than ${SE_KERN_WAIT:-45} s and goes on in the background"
+  return 1
+}
 # --binary: the binary SE's own checkout pins, placed in the foreground and started never (RUNME's
 # `get se` line): fetched from its release, else built with go, then linked as ~/.se/bin/<name>;
 # its last step writes <se root>/.se/.runtime/runme-se, the version it linked, RUNME's need.
@@ -329,6 +361,11 @@ binary_step() {
   kern_link "$bin"
   mkdir -p "$se_root/.se/.runtime" && printf '%s\n' "$version" >"$se_root/.se/.runtime/runme-se"
 }
+if [ "$kern_mode" = --kern-place ]; then
+  # <bin> fetch <archive url> <SHA256SUMS file> <binary in it>, or <bin> build <build folder> <package>.
+  if [ "$3" = fetch ]; then kern_fetch "$2" "$4" "$5" "$6"; else kern_build "$2" "$4" "$5"; fi
+  exit 0
+fi
 if [ -n "$kern_mode" ]; then
   # <bin> then, for --kern-fetch, <archive url> <SHA256SUMS file> <binary in it> <project> <start>;
   # for --kern-build, <project> <start> <build folder> <package>. The core is handed <start> once
@@ -411,17 +448,20 @@ fi
 
 # Components (docs/components.md "Required and optional at start"): the tree of the project's
 # se.toml [components] resolved before the core starts, from what is placed first, the rest found
-# and placed at its pins (se_start.py start-components). Its lines are shown as they are: an
-# optional component missing is one line and the start goes on; a required one missing stops the
-# start here, its message the greeting's, and nothing after it runs (no identity, hooks or core).
+# and placed at its pins, by the se binary's start-components (components/start), so the binary is
+# put in place first (binary_ready). Its lines are shown as they are: an optional component
+# missing is one line and the start goes on; a required one missing stops the start here, its
+# message the greeting's, and nothing after it runs (no identity, hooks or core); so does a binary
+# that is not in place, as the core could not start either.
 if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[components\.' "$project/se.toml"; then
-  out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
-    --root "$project" start-components 2>/dev/null)"
+  binary_ready ||
+    need "SE cannot start: the se binary${bin:+ $bin}, which resolves the components of $project/se.toml, is not in place: $cause; start the session again once it is, or run: bash $se_root/scripts/bootstrap.sh --binary"
+  out="$("$bin" start-components --se "$se_root" --root "$project" 2>/dev/null)"
   stopped=$?
   while IFS= read -r line; do [ -n "$line" ] && notes+=("$line"); done <<<"$out"
   if [ "$stopped" != 0 ]; then
     [ -n "$out" ] && finish 1
-    need "SE cannot start: checking the components of $project/se.toml failed; run: uv run python $se_root/scripts/se_start.py --root $project start-components"
+    need "SE cannot start: checking the components of $project/se.toml failed; run: $bin start-components --se $se_root --root $project"
   fi
 fi
 # The commit identity (docs/install.md "Install"): at a session's start the project's checkout gets its

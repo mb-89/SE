@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"strings"
 
 	"kern/cli"
 	sestart "se/components/start"
@@ -51,6 +52,33 @@ var stoppedHooksVerb = cli.Verb{
 		}
 		if line := sestart.StoppedHooks(context.Background(), repo, hooks); line != "" {
 			fmt.Fprintln(c.Stdout, line)
+		}
+		return 0
+	},
+}
+
+// startComponentsVerb is the start's components step, bootstrap.sh at the session's start before
+// the core: exit code 1 where the start stops.
+var startComponentsVerb = cli.Verb{
+	Name:  "start-components",
+	Args:  "--se DIR [--root DIR]",
+	Hosts: true,
+	Doc:   "resolve the project's components from what is placed, the rest found and placed at its pins; exit code 1 where the start stops",
+	Flags: func(fs *flag.FlagSet) {
+		fs.String("se", "", "SE's checkout, whose finder places what is missing")
+		fs.String("root", "", "the project; default: $CLAUDE_PROJECT_DIR or the nearest ancestor with se.toml")
+	},
+	Run: func(c *cli.Call) int {
+		if c.String("se") == "" {
+			fmt.Fprintln(c.Stderr, "se start-components: --se names SE's checkout")
+			return 2
+		}
+		said, stopped := sestart.Components(context.Background(), c.String("se"), sestart.Project(c.String("root")), sestart.Program)
+		if len(said) > 0 {
+			fmt.Fprintln(c.Stdout, strings.Join(said, "\n"))
+		}
+		if stopped {
+			return 1
 		}
 		return 0
 	},

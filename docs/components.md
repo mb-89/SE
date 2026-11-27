@@ -269,7 +269,7 @@ belong to (the person's decision of 22 Nov 2026, runtimes blessed).
 
 ## Required and optional at start
 
-SE's start (`scripts/se_start.py start-components`, before the core starts) resolves the tree from
+SE's start (the `se` binary's `se start-components`, before the core starts) resolves the tree from
 the checkout's lists:
 
 - **From what is placed, first**: a component whose clone exists at its locked commit is found
@@ -576,7 +576,8 @@ person takes](#steps-only-the-person-takes)); its package 4, obs's, is package 3
    - Dropping two programs breaks obs's callers, so it is a major release of obs.
 4. **se: `se components`** (se, at kern's and obs's new pins). `se components` is kern's verb, at the
    kern pin of package 1; `se_modules.py` keeps no command and no finder.
-   - `scripts/bootstrap.sh` and `se_start.py start-components` run `se components sync`, as
+   - `se start-components` (components/start), which `scripts/bootstrap.sh` runs with the binary
+     placed first, calls kern's finder in place of `se_modules.py sync --quiet`, as
      [The one owner](#the-one-owner) says.
    - The greeting reads `se components list --json`, and `[project] components` goes.
    - `se.py component add` becomes `se components new`; `build_docs.py` adds the html adapter with

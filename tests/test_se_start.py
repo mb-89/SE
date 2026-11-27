@@ -1707,9 +1707,10 @@ def test_without_docs_url_the_greeting_names_the_docs_of_ses_home(tmp_path: Path
     assert se_start._docs_url(se_root) == "https://docs.example.com/se/"
 
 
-# The components at the session's start (start_components, docs/components.md "Required and optional
-# at start"): the tree resolved from what is placed first, a required component missing stopping the
-# start, an optional one a line.
+# The components at the session's start (docs/components.md "Required and optional at start"): the
+# se binary's start-components (components/start) runs `se_modules.py sync --quiet`, which these
+# tests hold: the tree resolved from what is placed first, a required component missing refused
+# with the message the binary opens with "SE cannot start: ", an optional one a line.
 
 
 @pytest.fixture
@@ -1749,7 +1750,11 @@ def tree(tmp_path, isolated_git, monkeypatch):
             write(root / "se.toml", '[project]\nversion = "1.0.0"\n\n' + text)
 
         def start(self) -> tuple[list[str], bool]:
-            return se_start.start_components(root, local)
+            """What `sync --quiet` says, and whether it refused: its refusal's lines."""
+            try:
+                return se_modules.place_tree(root, se_modules.load_local(local))[1], False
+            except se_modules.ModuleError as error:
+                return str(error).splitlines(), True
 
         def machine(self, have: dict, get: dict | None = None) -> Path:
             """The fake machine the runtime check reads (SE_RUNTIMES=fake:): what it has, what RUNME gets."""
@@ -1768,7 +1773,7 @@ def test_a_required_component_missing_stops_the_start_naming_its_path_the_remote
     lines, stopped = tree.start()
 
     assert stopped
-    assert lines[0] == "SE cannot start: the required component obs is missing (se -> obs)."
+    assert lines[0] == "the required component obs is missing (se -> obs)."
     assert lines[1] == ("No remote's owner offers a repository obs marked as a component with a release its "
                         "pin ^4.0 admits (read: origin).")
     assert "  origin: git.example.org/team marks no repository obs as a component" in lines
@@ -1782,7 +1787,7 @@ def test_a_remote_that_could_not_be_read_is_named_with_gits_message(tree, monkey
 
     lines, stopped = tree.start()
 
-    assert stopped and lines[0] == "SE cannot start: the required component obs is missing (se -> obs)."
+    assert stopped and lines[0] == "the required component obs is missing (se -> obs)."
     unread = [line for line in lines if line.startswith("  origin: ")]
     assert len(unread) == 1 and " could not be read: git ls-remote --tags " in unread[0], lines
     assert unread[0].split(" failed in ", 1)[1].split(": ", 1)[1], "git's own message follows"
@@ -1830,7 +1835,7 @@ def test_a_tree_needing_two_runtimes_one_missing_stops_the_start_before_any_comp
     lines, stopped = tree.start()
 
     assert stopped, "the core never starts"
-    assert lines[0] == ("SE cannot start: the component tree needs 1 runtime this machine lacks; no component "
+    assert lines[0] == ("the component tree needs 1 runtime this machine lacks; no component "
                         "runs until each is present:")
     assert lines[1:] == ["  go ^1.22 (for se -> lib): missing; RUNME.conf names no way to get it: add a line "
                          "get go <way> <what> (RUNME.sh's header), or install go yourself"]
@@ -1879,16 +1884,16 @@ def test_two_ranges_of_one_runtime_that_admit_no_common_version_stop_the_start_n
     lines, stopped = tree.start()
 
     assert stopped
-    assert lines == ["SE cannot start: runtime python: se -> lib needs ^3.12 and se needs ~3.11.2, and no "
+    assert lines == ["runtime python: se -> lib needs ^3.12 and se needs ~3.11.2, and no "
                      "version of python admits both; align the two ranges"]
 
 
 @pytest.mark.parametrize(("table", "refusal"), [
-    ('[runtimes]\ncobol = "^1"\n', "SE cannot start: se.toml: runtime 'cobol' is none SE knows; known: go, node, "
+    ('[runtimes]\ncobol = "^1"\n', "se.toml: runtime 'cobol' is none SE knows; known: go, node, "
                                     "python, uv (se_runtimes.py PROBES adds one)"),
-    ('[runtimes]\ngo = ">=1.22"\n', "SE cannot start: se.toml: runtime go: module go: version must be a semver range "
+    ('[runtimes]\ngo = ">=1.22"\n', "se.toml: runtime go: module go: version must be a semver range "
                                      "such as ^1.4, ~1.4.2 or 1.4.2, got '>=1.22'"),
-    ('[[runtimes]]\ngo = "^1"\n', 'SE cannot start: se.toml: [runtimes] must be a table of <runtime> = "<version range>"'),
+    ('[[runtimes]]\ngo = "^1"\n', 'se.toml: [runtimes] must be a table of <runtime> = "<version range>"'),
 ])
 def test_a_runtimes_table_it_cannot_read_stops_the_start_naming_it(tree, table, refusal):
     tree.components(table)
@@ -1897,20 +1902,20 @@ def test_a_runtimes_table_it_cannot_read_stops_the_start_naming_it(tree, table, 
     assert tree.start() == ([refusal], True)
 
 
-def test_start_components_prints_the_stop_and_exits_1(tree, capsys):
+def test_sync_quiet_prints_only_what_the_run_says_and_its_refusal_with_exit_1(tree, capsys):
     tree.components('[components.obs]\nversion = "^4.0"\n')
 
-    code = se_start.main(["--root", str(tree.root), "--local", str(tree.local), "start-components"])
+    code = se_modules.main(["--root", str(tree.root), "--local", str(tree.local), "sync", "--quiet"])
 
-    out = capsys.readouterr().out
-    assert code == 1
-    assert out.startswith("SE cannot start: the required component obs is missing (se -> obs).\n")
-
-
-def test_start_components_of_a_project_without_components_says_nothing(tmp_path, capsys):
-    write(tmp_path / "plain" / "se.toml", '[project]\nversion = "0.1.0"\n')
-    assert se_start.start_components(tmp_path / "plain", None) == ([], False)
-    assert se_start.start_components(None, None) == ([], False)
+    captured = capsys.readouterr()
+    assert code == 1 and captured.out == ""
+    assert captured.err.startswith("error: the required component obs is missing (se -> obs).\n")
+    lib = tree.release("lib", "1.0.0")
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[components.lib]\nversion = "^1"\n')
+    assert se_modules.main(["--root", str(tree.root), "--local", str(tree.local), "sync", "--quiet"]) == 0
+    assert capsys.readouterr().out == "", "a placed component's line is not the start's"
+    assert git(tree.root / se_modules.MODULES_DIR / "lib", "rev-parse", "HEAD") == lib
 
 
 # The boot (docs/boot.md "The boot"): the checkout current, every dependency listed, upgraded on --upgrade.

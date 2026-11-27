@@ -167,7 +167,7 @@ Components are found by name under the owners of the checkout's remotes
   - Where the repository SE lives in lacks the topic, `sync` names `marks no repository se as a
     component`: until its owner adds it, a machine sets `se = "<se>"` under `[paths]` in
     `~/.se/local.toml`.
-- **Check:** `uv run python <se>/scripts/se_start.py --root . start-components 2>&1 | grep -c 'SE cannot start'`
+- **Check:** `se start-components --se <se> --root . 2>&1 | grep -c 'SE cannot start'`
   prints `0`.
 
 ### Project prose
