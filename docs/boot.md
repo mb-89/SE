@@ -68,6 +68,12 @@ no per-component line appears in the report.
   previous SE session on this machine wrote it
   ([catch-up's Close](../src/skills/catch-up/SKILL.md#procedure)).
 - **The person sees the report alone**, a stop of the start (`SE cannot start`) above it.
+- **SE's first message shows it, live, after every start**: a host may show the person no hook
+  output (a Claude Code cloud session does not), so the hand-over never says the report was shown
+  (`report_request` in `scripts/se_start.py`).
+  - The hook runs on every start, restart and compaction, and each time asks SE to open its first
+    message with the report it runs then, `se_start.py status --greeting`.
+  - Never the hand-over's copy or an earlier start's.
 
 ## Required components
 
