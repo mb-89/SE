@@ -117,8 +117,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          # A worker's pull request carries its field report; it is checked against its work issue,
-          # the issue its first line `Fixes|Refs <issue url>` names. A pull request without the
+          # A work pull request carries its field report; it is checked against its work issue,
+          # the issue its first line `Fixes|Refs <issue url>` names, or is explicitly declared an
+          # authorized fix without one. A pull request without the
           # report's marker (a switch pull request) has none to check. A landing pull request
           # carries `<!-- se:field-report-in <n> -->` instead: the report is the description of the
           # work pull request <n>, read from there (docs/settings.md "Landing on main").
@@ -135,16 +136,22 @@ jobs:
           fi
           # pr_issues.py owns how a description names its issue, for this step and the one above.
           if ! issue=$(python3 scripts/pr_issues.py --work-issue "$body" --repository "$REPOSITORY"); then
-            echo "::error::field-report: the description's first line names no work issue of $REPOSITORY (Fixes|Refs <issue url>, as work_tickets.py pr-body writes it, or Refs #<n>)"
+            echo "::error::field-report: the description's first line must name a work issue (Fixes|Refs <issue url> or Refs #<n>) or say 'Work issue: none, authorized fix' for an authorized fix"
             exit 1
           fi
-          gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"
+          issue_args=()
+          if [ "$issue" = none ]; then
+            echo "field-report: authorized fix without a work issue"
+          else
+            gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"
+            issue_args=(--issue-body "$RUNNER_TEMP/issue-body.md")
+          fi
           # A work pull request's Component kinds reach the suite's release guard, which passes a
           # changed component of a stated kind, as the landing assigns its version (docs/settings.md
           # "Component versions"); a landing's release commit carries the versions, so it sets none.
           kinds=()
           if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
-          uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
+          uv run python scripts/work_tickets.py field-report --check "$body" "${issue_args[@]}" "${kinds[@]}"
       # The changed files a template claims (docs/templating.md "Templates"): the command passes, reading no git,
       # where no template claims a path.
       - name: The changed files a template claims follow their templates

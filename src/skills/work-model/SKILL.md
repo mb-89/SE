@@ -16,25 +16,34 @@ by the project's `AGENTS.md`; see [What the project provides](#what-the-project-
 
 ## Roles and flow
 
-One issue in, one issue out; the same for local sessions and cloud agents.
+One work issue in, one issue out; an explicitly authorized fix may instead use the issue-free
+delivery path below. The same rules apply to local sessions and cloud agents.
 
 - **Work issue (in)**: one GitHub issue per package from `work.md`, carrying only the task. Title
   = branch name, a name as [Issues](#issues) says, labelled as it says. Everything that
   is the same for every package lives in the agent definitions and this skill, never in issues. A
-  session prompt names only the agent, the issue and the worktree.
+  session prompt names only the agent, the issue or authorized-fix request, and the worktree.
+- **Authorized fix (issue-free)**: only work explicitly authorized without filing an issue may use
+  this path. Its field report says exactly `**Work issue:** none, authorized fix`; the report remains
+  the evidence record, is complete with `None` under "Not delivered", and the pull request still
+  passes the public check, suite, review and landing gates. No other missing or unrecorded issue is
+  accepted; partial work needs a work issue.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
   related repository its tests use) is read-only.
   - Everything comes in through its work issue, checked for a change before each ticket so it can
-    change in flight ([Check before rereading](#issues)).
+    change in flight ([Check before rereading](#issues)), or through the explicit authorization for
+    an issue-free fix.
   - Everything goes out through its pull request, whose description is its field report. What it
     needs outside the box goes into the field report.
 - **Out**: a pushed branch, a pull request to the integration branch whose description is the
-  field report, and one notification to the integrator. No field-report issue is filed: one piece
-  of work is one issue, the work issue, which the integrator closes once the work is integrated.
+  field report, and one notification to the integrator. No field-report issue is filed: the
+  integrator closes the work issue once integrated, or closes only the pull request for an
+  authorized issue-free fix.
   - The report's one template is the pull request template,
     [`.github/pull_request_template.md`](../../../.github/pull_request_template.md). The report
     sits between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines.
-  - `field-report --draft` writes it there, and every reader (`field-report --check`, `guard`,
+  - `field-report --draft` writes it there; without an issue use `--authorized-fix` to write the
+    explicit declaration, and every reader (`field-report --check`, `guard`,
     `release-trailer`, `integrate`, `queue`) finds it there. A description without them holds no
     report and is refused.
   - Field-report issues filed before this are history: they keep their `field-report` label and
@@ -289,18 +298,21 @@ Nothing is pushed to it directly: `integrate` lands each integration as a squash
 waits for the required check `check`, as the README's
 [Landing on main](../../../docs/settings.md#landing-on-main) says.
 
-Every pull request into the integration branch names the work it does, so no work is done outside
-the issues dispatch reads:
+Every pull request into the integration branch identifies its work, so no work is done outside the
+issues dispatch reads or an explicitly authorized issue-free delivery:
 
 - Its description names at least one issue of the repository that is open and labelled `work`,
   with `Refs`, `Closes` or `Fixes` and `#<n>` or the issue's URL; it may name several.
+- An authorized fix with no work issue instead has the exact first line `Work issue: none,
+  authorized fix` and the same declaration in its field report header. This is the only issue-free
+  exception; its report is checked without issue-based acceptance items.
 - A landing pull request passes by its `Lands <work pull request>` line, where that work pull
-  request's description names one.
+  request's description names its work issue or explicitly declares the authorized fix.
 - The repository owner's own pull request labelled `housekeeping` is exempt.
 - The job `check` enforces it with `<se>/scripts/pr_issues.py`, through the Actions token.
 - `pr_issues.py` is the one parser of how a description names its issue: the job's field-report
   step reads the work issue from the description's first line with it, so both accept the short
-  and the full form.
+  and the full form, or the exact authorized-fix declaration.
 
 A delivery is against current main: with several workers in parallel each landing makes the other
 branches stale, and against the new main a stale branch reads to `integrate`'s guard as deleting
@@ -476,7 +488,7 @@ The checks that hold it:
 | Part of the rule | Check |
 |---|---|
 | History held only by another remote is never pushed | `work_tickets.py push`, and every command that pushes through it, pushes only a local branch and refuses one carrying commits another remote holds but origin does not; a local tag proves nothing ([docs/settings.md "Project settings"](../../../docs/settings.md#project-settings), `tests/test_push_guard.py`) |
-| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label ([docs/fleet.md "Work publication"](../../../docs/fleet.md#work-publication), `tests/test_push_guard.py`) |
+| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label, or where its checked field report declares an authorized fix without an issue ([docs/fleet.md "Work publication"](../../../docs/fleet.md#work-publication), `tests/test_push_guard.py`) |
 | Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([docs/modules.md "Modules"](../../../docs/modules.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
 | The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
@@ -1016,7 +1028,7 @@ for example:
 | `intake` | `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`, method `get`) and its comments (method `get_comments`) as the tools answered them; it writes the tickets, the snapshot and both read records as `intake --issue` does. Where kern's relay serves the checkout, `intake --issue <n>` reads both from the relay instead (no file). |
 | `refresh` | read the issue and its comments; apply what changed to the tickets; record the comments read with `comments-read --count <n> --newest <id>` and the body read with `body-read --body-file <file>`, from what the GitHub tools read. Where kern's relay serves the checkout, `refresh` reads the issue and its comments from the relay instead. |
 | `intake --outside` | read each `[outside]` repository's open issues and their comments, and keep those [Outside issues](#outside-issues) leaves. |
-| `deliver` | `sync`; `push`; open the pull request to the integration branch, titled like the work issue, with the description `pr-body --issue-body <file> --issue-url <url> --field-report .se/work/field-report.md` prints (the closing line, then the report between its markers); send the notification. No issue is filed. |
+| `deliver` | `sync`; `push`; open the pull request to the integration branch, titled like the work issue, with the description `pr-body --issue-body <file> --issue-url <url> --field-report .se/work/field-report.md` prints; for an authorized issue-free fix, use the report's explicit `Work issue: none, authorized fix` declaration and omit issue arguments; send the notification. No issue is filed. |
 | `start` | start the worker session with the host's session tool, on an outcome branch named like the work issue and based on the integration branch, titled by `session-title` (the `title=` of `start`'s `Launch worker:` line) and tagged `SE` ([Visible sessions](#visible-sessions)). |
 | `integrate`, `refs request` and `refs apply` | [Land](#land). |
 
@@ -1030,7 +1042,8 @@ for example:
     ([docs/fleet.md "Stop hook"](../../../docs/fleet.md#stop-hook)), which judges without gh by that record.
   - The field report comes from `field-report.md`, which `field-report --draft
     .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
-    the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
+    the tools answered it (or from `intake`'s snapshot without `--issue-body`); an authorized
+    issue-free fix uses `--authorized-fix` instead; it refuses
     without `--worktree`.
   - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
     <file> --comment-count <n> --newest-comment <id>` (the work issue's body, or the issue as
@@ -1060,7 +1073,8 @@ for example:
   description after those retries, open it with the closing line alone, then write the full
   description (`pr-body`'s output) by editing the pull request; the delivery notice names the pull
   request.
-- **The session prompt carries only** the agent, the work issue, the branch (the session's outcome
+- **The session prompt carries only** the agent, the work issue or explicit authorized-fix request,
+  the branch (the session's outcome
   branch, which replaces the worktree) and the integrator session to notify; everything else is in
   the role files, this skill and the project's `AGENTS.md`:
 

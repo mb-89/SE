@@ -216,9 +216,10 @@ What it judges:
 ## Work publication
 
 A work branch is published only to the repository its work issue is for, never to whatever
-origin happens to be. `work_tickets.py push`, and `deliver` through it, check origin before
-anything is pushed or a pull request opened; the integration branch and landing branches keep
-their own guards.
+origin happens to be. An explicitly authorized fix with no issue instead requires a checked field
+report declaring `Work issue: none, authorized fix`. `work_tickets.py push`, and `deliver` through
+it, check this before anything is pushed or a pull request opened; the integration branch and
+landing branches keep their own guards.
 
 - The work issue is the one the checkout records (`intake`), titled like the branch.
 - The repository it is for is its one `repo:<name>` label, which every work issue SE files
@@ -226,8 +227,9 @@ their own guards.
   repository is the tracker the checkout routes its issues to.
 - Origin passes where its repository name is that name, in any case: a name, not a host or an
   owner, so the rule holds wherever the project lives.
-- Refused, naming the remedy, with nothing pushed: no recorded work issue, a recorded one titled
-  like another branch, more than one `repo:` label, no origin, and an origin of another name.
+- Refused, naming the remedy, with nothing pushed: no recorded work issue and no such report, a
+  report naming another branch, a recorded issue titled like another branch, more than one
+  `repo:` label, no origin, and an origin of another name.
 
 ## Late push
 

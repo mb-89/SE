@@ -68,7 +68,7 @@ The 73 rules in force: the rule book's 61 and 12 guidance notes, the notes after
 | `pub-007` | One se version per check |
 | `p-go-001` | The rule of five |
 | `discover-cheap-load-late` | Progressive disclosure and lazy loading: what a command or module is comes from its declaration alone, and its code loads on first use. Read it before you add, list or rewrite a command, a component or a module. |
-| `flake-at-base` | How to tell a flake from your own failure: rerun the one test at the integration branch with a high repeat count. Load it before treating a red test as yours. |
+| `flake-at-base` | How to diagnose a failing test without excusing it: repeat the test at the integration branch, then fix the red check before delivery. |
 | `generated-files-are-marked` | Every file a program writes says so in its first line, naming its generator and its source, and generated.yaml declares it. Read it before you write a generator, change what one writes, or edit a file that says DO NOT EDIT. |
 | `go-module-shape` | The one shape of a new Go module: scaffolded from the go-module template, its go.mod marked, one package with its entry Run and its test. Read it before you create or reshape a Go module. |
 | `guidance-comes-first` | How SE guidance reaches you and how to ask for it on a topic. Read it before any work SE guides. |

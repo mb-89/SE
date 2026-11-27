@@ -335,6 +335,26 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert "docs/guide.md: This sentence is removed." in approved.stdout
 
 
+def test_guard_keeps_removed_authored_sentence_that_remains_in_an_unchanged_file(
+    worktree: Path,
+) -> None:
+    repository, guide = authored_repository(
+        worktree.parent / "guard-duplicate-prose-case", "remove-duplicate",
+        "This sentence remains elsewhere.\n",
+    )
+    reference = repository / "docs" / "reference.md"
+    assert git(repository, "checkout", "main").returncode == 0
+    reference.write_text("This sentence remains elsewhere.\n", encoding="utf-8", newline="\n")
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "retain the sentence elsewhere").returncode == 0
+    assert git(repository, "checkout", "remove-duplicate").returncode == 0
+    assert git(repository, "merge", "--ff-only", "main").returncode == 0
+    guide.write_text("", encoding="utf-8", newline="\n")
+    assert git(repository, "commit", "-am", "remove duplicate prose").returncode == 0
+
+    assert work_tickets.deleted_authored_sentences(repository, "remove-duplicate") == []
+
+
 def test_guard_reads_a_branch_behind_main_from_its_merge_base(worktree: Path) -> None:
     """A branch that forked before main gained a sentence, and edits the same file, deletes
     nothing: the guard compares it with its merge base, not with main's tip."""
