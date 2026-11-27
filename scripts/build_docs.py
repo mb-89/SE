@@ -55,10 +55,11 @@ def obs_dir() -> Path:
 
 
 def child_environment() -> dict[str, str]:
-    """This environment without uv's deprecated UV_NATIVE_TLS and the caller's VIRTUAL_ENV, whose notices
-    would read as warnings (obs runs in its own project's environment)."""
+    """Run obs in its own synced project environment, not the caller's uv project context."""
     environment = dict(os.environ)
-    environment.pop("VIRTUAL_ENV", None)
+    for name in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT", "UV_PROJECT",
+                 "UV_WORKING_DIR", "UV_ISOLATED", "UV_ENV_FILE"):
+        environment.pop(name, None)
     if environment.pop("UV_NATIVE_TLS", None):
         environment.setdefault("UV_SYSTEM_CERTS", "1")
     return environment
