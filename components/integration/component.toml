@@ -47,9 +47,9 @@ class = "batch"
 
 [commands."work_tickets.py suite"]
 usage = "work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]\n                      [--record-file-seconds PATH] [--keep-test-reports DIR]"
-summary = "run se.toml's complete suite against its [tests] time budget, as ..."
+summary = "run se.toml's complete suite and measure it against its [tests] time ..."
 group = "Integration"
-help = "run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (docs/tests.md \"Test budget\")"
+help = "run se.toml's complete suite and measure it against its [tests] time budget, as integrate does; exit code 1 when tests fail; a time over the budget is recorded, never refused (docs/tests.md \"Test budget\")"
 class = "batch"
 
 [commands."work_tickets.py suite-shard"]
@@ -63,7 +63,7 @@ class = "batch"
 usage = "work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]"
 summary = "in CI's check job, judge a sharded suite: its time is its slowest ..."
 group = "Integration"
-help = "in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (docs/tests.md \"Test budget\")"
+help = "in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals are error annotations and a time over the target or limit a notice, never refused; exit code 1 when a shard failed or is missing (docs/tests.md \"Test budget\")"
 class = "batch"
 
 [commands."work_tickets.py file-seconds"]

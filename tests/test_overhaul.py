@@ -17,7 +17,6 @@ import retro
 import retro_deck
 import templates
 import fake_git
-import time_bound
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -164,6 +163,38 @@ def test_facts_measure_sizes_lengths_and_the_untouched_and_change_nothing(checko
     assert git_door.run("status", "--porcelain", root=checkout).stdout == ""
 
 
+def test_facts_collect_the_recorded_overruns_and_the_slowest_test_files(
+        checkout, capsys, tmp_path, monkeypatch):
+    """No time budget refuses work (rule tst-003): the overhaul collects what is slow, each
+    overrun the metrics lines record, newest first and once each, and the slowest test files."""
+    lines = tmp_path / "metrics.jsonl"
+    lines.write_text("\n".join(json.dumps(line) for line in [
+        {"command": "integrate", "start": "2026-11-01T10:00:00Z", "suite_seconds": 130.0,
+         "suite_limit_seconds": 120},
+        {"command": "suite", "start": "2026-11-02T10:00:00Z", "suite_seconds": 50.0,
+         "suite_limit_seconds": 120,
+         "measured_over": {"tests.test_app::test_list": [2.5, 1]}},
+        {"command": "integrate", "start": "2026-10-01T10:00:00Z", "suite_seconds": 130.0,
+         "suite_limit_seconds": 120},
+    ]) + "\n", encoding="utf-8")
+    monkeypatch.setenv("SE_METRICS", str(lines))
+    (checkout / "tests" / "file-seconds.json").write_text(
+        json.dumps({"tests/test_app.py": 4.5, "tests/test_lib.py": 9.0, "tests/test_idle.py": 0.0}),
+        encoding="utf-8")
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-q", "-m", "The seconds")
+
+    assert facts(checkout, capsys)["slow"] == [
+        "suite 2026-11-02: test tests.test_app::test_list measured 2.50 s over its budget 1 s",
+        "integrate 2026-11-01: suite 130.0 s over its budget 120 s",
+        "integrate 2026-10-01: suite 130.0 s over its budget 120 s",
+        "tests/test_lib.py: 9 s on CI (tests/file-seconds.json)",
+        "tests/test_app.py: 4.5 s on CI (tests/file-seconds.json)",
+    ]
+    assert overhaul.main(["facts", "--repo", str(checkout)]) == 0
+    assert "## Slow: recorded overruns and the slowest test files" in capsys.readouterr().out
+
+
 def cpu_seconds() -> float:
     """This process's CPU time and its waited-for children's (facts' git reads), user and system."""
     now = os.times()
@@ -174,13 +205,13 @@ def cpu_seconds() -> float:
 SE_PARTS = ("scripts", "tests", "src", "docs", "README.md", "AGENTS.md", "se.toml")
 
 
-def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_door):
-    """The promise is facts' own work on SE in 10 s, judged by CPU time: facts reads no network,
+def test_facts_on_se_record_their_time_against_the_budget(capsys, tmp_path: Path, fake_git_door,
+                                                          measure):
+    """The promise is facts' own work on SE in 10 s, measured by CPU time: facts reads no network,
     and a loaded runner stretches the wall clock (11.1 s with 16 busy processes on 4 cores, for
     2.2 s of work, both on a 4-CPU Linux container, Intel Xeon at 2.30 GHz), not the work. SE's
-    files are committed once in the fake git. A platform that runs the suite slower scales the
-    budget as the time bound does (tests/time_bound.py SCALE): on a loaded Windows host the file
-    reads count as CPU time too."""
+    files are committed once in the fake git. The time is recorded, never asserted
+    (tests/conftest.py `measure`, rule tst-003)."""
     root = tmp_path / "se"
     fake_git.init(root)
     for part in SE_PARTS:
@@ -192,7 +223,7 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
     git(root, "commit", "-q", "-m", "se")
     started = cpu_seconds()
     found = facts(root, capsys)
-    assert cpu_seconds() - started < 10 * time_bound.SCALE
+    measure(cpu_seconds() - started, 10)
     assert {row["script"] for row in found["sizes"]} >= {"scripts/work_tickets.py"}
 
 

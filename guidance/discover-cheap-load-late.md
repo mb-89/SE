@@ -24,8 +24,9 @@ every command.
 
 Each module holds its listings to one budget, with a test over many fixture entries whose code
 trips when it is loaded: each fixture's module records that it ran. The test fails on any record,
-naming the entry, and on a listing slower than the budget. A discovery that loads what it lists
-thus fails, however fast its machine.
+naming the entry, and records the listing's time against the budget, which refuses nothing (rule
+tst-003): the overhaul collects a listing over it. A discovery that loads what it lists thus
+fails, however fast its machine.
 
 - **SE:** `tests/test_discovery_budget.py` holds `se_components.py commands`, SE's command list
   from the declarations, to the numbers below. A person waits on a listing, so it answers within

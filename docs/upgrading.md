@@ -468,6 +468,24 @@ On main, released as 17.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/work_tickets.py field-report --check <report.md>` passes
   for each open report.
 
+## SE 21
+
+### `[tests] over_limit` is gone
+
+- **Change:** no time budget refuses a suite: `se.toml` `[tests] over_limit` is read by nothing,
+  and a run over its target or its limit passes and prints a `Slow, recorded:` line
+  ([Test budget](tests.md#test-budget)).
+- **Steps:** remove `over_limit` from the project's `se.toml` `[tests]` table.
+- **Check:** `grep -c over_limit se.toml` prints 0.
+
+### `suite` and `suite-time` no longer exit with code 3
+
+- **Change:** `work_tickets.py suite` and `suite-time` exit 0 for a passing suite whatever its
+  time, and 1 for failed tests; exit code 3 is gone.
+- **Steps:** remove every handling of exit code 3 from the project's workflows and scripts, and
+  read a slow run from its `Slow, recorded:` line or its `::notice` annotation instead.
+- **Check:** `grep -rnE "exit code 3|== 3|-eq 3" .github` prints no line about the suite.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

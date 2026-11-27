@@ -35,7 +35,10 @@ prints its comment and close as a plan, as the work model's "Without gh" says fo
 `overhaul.py facts [--json] [--repo PATH]` lists what an overhaul's pruning judgment starts from:
 the functions and classes in `scripts/` that nothing but tests reaches, duplicate and
 near-duplicate blocks, the lines of code and of tests per script, the longest functions, files and
-parameter lists, the files untouched longest, and each script command that no authored text names.
+parameter lists, the files untouched longest, each script command that no authored text names,
+and what is slow: each recorded run over a time budget (the metrics lines, docs/running.md
+"Metrics") and the slowest test files (tests/file-seconds.json). No time budget refuses work; the
+overhaul collects the slow and turns the slowest into work (rule tst-003).
 Where `overhaul.py coverage [--repo PATH] [--source DIR]` kept a run of the suite under coverage,
 per test, in COVERAGE_DIR, it also lists the tests that add no line of their own, slowest first
 (`repeats`): those that run the same lines as another, and those whose lines another test runs.
@@ -110,6 +113,10 @@ class Checkout:
     # The tracked files, and each one's last change as a Unix time where git has one.
     tracked: list[str]
     changed: dict[str, int]
+    # Each recorded overrun of a time budget, newest first (metrics.overruns of this machine's
+    # metrics lines), and each test file's seconds as CI ran it (tests/file-seconds.json).
+    overruns: list[str] = field(default_factory=list)
+    file_seconds: dict[str, float] = field(default_factory=dict)
     # The coverage measurement where one is kept (`measurement`), and the rule's levels.
     coverage: Measurement | None = None
     levels: dict[str, str] = field(default_factory=lambda: dict(REPEAT_LEVELS))
@@ -138,6 +145,7 @@ class Facts:
     long_parameters: list[dict] = field(default_factory=list)
     untouched: list[dict] = field(default_factory=list)
     unnamed: list[str] = field(default_factory=list)
+    slow: list[str] = field(default_factory=list)
     # Tests that repeat another's lines (`repeats`); None where no measurement is kept.
     repeats: dict | None = None
 
@@ -188,6 +196,7 @@ def read(root: Path) -> Checkout:
         return (root / path).read_text(encoding="utf-8", errors="replace")
 
     present = [path for path in tracked if (root / path).is_file()]
+    seconds = json.loads(text(FILE_SECONDS)) if FILE_SECONDS in present else {}
     return Checkout(
         scripts={path: text(path) for path in present
                  if path.startswith("scripts/") and path.count("/") == 1 and path.endswith(".py")},
@@ -197,9 +206,34 @@ def read(root: Path) -> Checkout:
                   if any(pattern.match(path) for pattern in patterns)},
         tracked=present,
         changed=last_changes(root),
+        overruns=recorded_overruns(),
+        file_seconds={path: float(value) for path, value in seconds.items()
+                      if isinstance(value, (int, float)) and not isinstance(value, bool)},
         coverage=measurement(root / COVERAGE_DIR),
         levels=repeat_levels(root),
     )
+
+
+FILE_SECONDS = "tests/file-seconds.json"
+
+
+def recorded_overruns() -> list[str]:
+    """Each distinct overrun the metrics lines record, newest first: `<command> <start>: <what>`."""
+    metrics = sibling("metrics")
+    lines, _ = metrics.read(metrics.path())
+    found: dict[str, None] = {}
+    for line in sorted(lines, key=lambda line: str(line["start"]), reverse=True):
+        for what in metrics.overruns(line):
+            found.setdefault(f"{line['command']} {str(line['start'])[:10]}: {what}")
+    return list(found)
+
+
+def slow_facts(checkout: Checkout) -> list[str]:
+    """What is slow: the TOP newest recorded overruns, then the TOP slowest test files."""
+    files = sorted(checkout.file_seconds.items(), key=lambda item: (-item[1], item[0]))
+    return [*checkout.overruns[:TOP],
+            *(f"{path}: {seconds:g} s on CI ({FILE_SECONDS})" for path, seconds in files[:TOP]
+              if seconds > 0)]
 
 
 # The facts
@@ -701,6 +735,7 @@ def find(checkout: Checkout) -> Facts:
         untouched=[{"at": path, "last": time.strftime("%Y-%m-%d", time.gmtime(checkout.changed[path]))}
                    for path in untouched[:TOP]],
         unnamed=unnamed_commands(checkout.scripts, trees, checkout.authored),
+        slow=slow_facts(checkout),
         repeats=(None if checkout.coverage is None else
                  {**repeats(checkout.coverage, marked_distinct(checkout.tests)), "levels": checkout.levels}),
     )
@@ -734,6 +769,7 @@ def render(facts: Facts) -> str:
                                         for item in facts.long_parameters])
     section("Untouched longest", [f"{item['at']}: {item['last']}" for item in facts.untouched])
     section("Commands no authored text names", facts.unnamed)
+    section("Slow: recorded overruns and the slowest test files", facts.slow)
     out.extend(repeat_sections(facts.repeats))
     return "\n".join(out).rstrip() + "\n"
 
@@ -981,7 +1017,7 @@ def fact_counts(facts: Facts) -> dict:
     return {"unreached": len(facts.unreached), "duplicates": len(facts.duplicates),
             "near": len(facts.near), "lines": sum(row["lines"] for row in facts.sizes),
             "test_lines": sum(row["test_lines"] for row in facts.sizes),
-            "unnamed": len(facts.unnamed),
+            "unnamed": len(facts.unnamed), "slow": len(facts.slow),
             **({} if facts.repeats is None else repeat_counts(facts.repeats))}
 
 
