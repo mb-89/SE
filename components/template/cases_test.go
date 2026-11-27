@@ -37,12 +37,49 @@ func readCases(t *testing.T) map[string]Object {
 		if err != nil {
 			t.Fatalf("%s: %v", entry.Name(), err)
 		}
-		sets[entry.Name()] = v.(Object)
+		sets[entry.Name()] = expandInputs(v.(Object))
 	}
 	if len(sets) == 0 {
 		t.Fatal("no shared cases; run `uv run python tests/template_cases.py`")
 	}
 	return sets
+}
+
+// expandInputs puts back each recorded-inputs payload a case file holds once, under `inputs`, where
+// its `$inputs:<n>$` stands (tests/template_cases.py `_shared_inputs`).
+func expandInputs(set Object) Object {
+	list, _ := set.Value("inputs").([]any)
+	if len(list) == 0 {
+		return set
+	}
+	pairs := make([]string, 0, 2*len(list))
+	for i, payload := range list {
+		pairs = append(pairs, "$inputs:"+itoa(i)+"$", payload.(string))
+	}
+	replacer := strings.NewReplacer(pairs...)
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch x := v.(type) {
+		case string:
+			return replacer.Replace(x)
+		case []any:
+			out := make([]any, len(x))
+			for i, item := range x {
+				out[i] = walk(item)
+			}
+			return out
+		case Object:
+			out := make(Object, len(x))
+			for i, pair := range x {
+				out[i] = Pair{pair.Key, walk(pair.Value)}
+			}
+			return out
+		}
+		return v
+	}
+	expanded := walk(set).(Object)
+	expanded.Delete("inputs")
+	return expanded
 }
 
 func seTemplates(t *testing.T) Catalog {

@@ -311,6 +311,12 @@ func Check(t *Template, doc *Document, raw *string) []Finding {
 
 // CheckText is Check with the error of a check that fails, as templates.py check raises it.
 func CheckText(t *Template, doc *Document, raw *string) ([]Finding, error) {
+	if doc.err != nil {
+		return nil, doc.err
+	}
+	if doc.inputs != nil {
+		t = doc.inputs
+	}
 	if t.IsAdapter() {
 		return adapterFindings(t, doc)
 	}
@@ -826,6 +832,9 @@ func fenceOrder(t *Template, doc *Document) []Finding {
 }
 
 func provenance(t *Template, doc *Document) []Finding {
+	if doc.inputs != nil {
+		t = doc.inputs
+	}
 	recorded, current := doc.Recorded, t.Version
 	parts, isVersion := versionParts(t, recorded)
 	now, _ := versionParts(t, current)
