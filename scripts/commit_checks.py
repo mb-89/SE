@@ -68,11 +68,7 @@ def checks(settings: str, source: str = SETTINGS) -> dict[str, list[str]]:
 
 
 def git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
-    result = git_door.run(*args, root=root, stdin=stdin, binary=True)
-    if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", "replace").strip()
-        raise SetupError(f"git {args[0]} failed: {detail}")
-    return result.stdout
+    return git_door.output(*args, root=root, stdin=stdin, error=SetupError)
 
 
 def staged(root: Path) -> list[tuple[str, str, str]]:
@@ -87,19 +83,6 @@ def staged(root: Path) -> list[tuple[str, str, str]]:
         if mode != "160000":
             entries.append((mode, blob, path.decode("utf-8", "surrogateescape")))
     return entries
-
-
-def blobs(root: Path, ids: list[str]) -> list[bytes]:
-    if not ids:
-        return []
-    output = git(root, "cat-file", "--batch", stdin="".join(f"{blob}\n" for blob in ids).encode())
-    found, position = [], 0
-    for _ in ids:
-        header_end = output.index(b"\n", position)
-        size = int(output[position:header_end].split()[2])
-        found.append(output[header_end + 1:header_end + 1 + size])
-        position = header_end + 1 + size + 1
-    return found
 
 
 def settings_of(entries: list[tuple[str, str, str]], contents: list[bytes]) -> str:
@@ -132,7 +115,7 @@ def run(root: Path, out=None, err=None) -> int:
     out, err = out or sys.stdout, err or sys.stderr
     try:
         entries = staged(root)
-        contents = blobs(root, [blob for _, blob, _ in entries])
+        contents = git_door.blobs(root, [blob for _, blob, _ in entries], SetupError)
         named = checks(settings_of(entries, contents), f"{SETTINGS} (staged)")
     except (SetupError, UnicodeDecodeError) as error:
         print(f"commit checks: error: {error}; refusing the commit", file=err)

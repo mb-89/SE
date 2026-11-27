@@ -139,10 +139,11 @@ finding's disposition, and due says whether a retro or an overhaul is due or ope
 `components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
 report, a deck, from the judged draft, file checks the judged draft and posts its report, which
 blesses the overhaul until its last finding outcome closes it, facts lists a checkout's pruning
-facts, and coverage measures the suite per test for them.
+facts, check refuses copies and dead code, and coverage measures the suite per test.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `overhaul.py check` | `overhaul.py check [--repo REPO]` | refuse a duplicate block or dead code in a checkout's scripts |
 | `overhaul.py coverage` | `overhaul.py coverage [--repo REPO] [--source SOURCE]` | measure the suite's coverage per test for the facts |
 | `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
@@ -512,12 +513,15 @@ directory). It only reads, uses the standard library alone and judges nothing: e
 and its neighbours. It lists:
 
 - the functions, classes and methods in `scripts/` that nothing but tests reaches, each marked with
-  whether the tests reach it: a name-based call graph (`ast`) from each script's import-time code,
-  the handlers a decorator registers by name and the names authored text writes as code (a
-  documented interface such as `preflight`); it errs towards missing dead code, never towards
-  naming live code;
-- duplicate blocks, six or more lines written alike in two places, and near-duplicate functions,
-  75% or more of their shape (names and literals aside) alike;
+  whether the tests reach it; it errs towards missing dead code, never towards naming live code.
+  It is a name-based call graph (`ast`) from
+  - each script's import-time code and the handlers a decorator registers by name;
+  - the names authored text writes as code (a documented interface such as `preflight`);
+  - the pytest hooks a plugin's manager calls by name (`pytest_<hook>`);
+  - each `<script>:<name>` a template names for templates.py to resolve;
+- duplicate blocks, six or more lines written alike in two places, imports and the python-script
+  template's entry aside, and the helpers to make, one per group of places those blocks join;
+- near-duplicate functions, 75% or more of their shape (names and literals aside) alike;
 - the lines of code and of tests per script, a test file counting for the script it imports or runs;
 - the ten longest functions, files and parameter lists, and the ten files untouched longest (git);
 - each script command (argparse's and `work_tickets.py`'s registry) that no line of the authored
@@ -527,6 +531,16 @@ and its neighbours. It lists:
   one kept and the others to prune, and the tests whose lines another single test runs, by file.
 
 `--json` prints the same facts as data.
+
+`overhaul.py check` holds the code to two of those facts, with no baseline:
+
+- it refuses each block of six lines or more written twice in `scripts/` (`duplicate_blocks`)
+  and each definition there that nothing reaches, not even a test (`dead_code`), naming every
+  case and its remedy, one helper each place calls or the definition deleted;
+- each class has its level in `se.toml` `[overhaul]`: `error`, built in, fails the check; `warn`
+  names the cases and passes while they are fixed;
+- it reads the files, not git, so the commit hook runs it on its copy of the index (`se.toml`
+  `[commit_checks]`), and `scripts/hygiene.py` runs it as its check `code`.
 
 `overhaul.py coverage` runs the suite once under coverage with a context per test (pytest-cov,
 for that run only) and keeps the run in `.se/overhaul/coverage/`, which `facts` and `read` list;

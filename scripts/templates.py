@@ -439,11 +439,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import re
 import sys
 import tomllib
+from collections.abc import Iterable, Iterator
 from dataclasses import MISSING, dataclass, field as dataclass_field, fields as dataclass_fields, replace
 from pathlib import Path
 
@@ -1055,15 +1055,7 @@ def _git_files(root: Path, ref: str | None = None) -> dict[str, str]:
     return files if any(name.endswith(TEMPLATE_SUFFIX) for name in files) else {}
 
 
-def _sibling(name: str):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
+_sibling = se_script.loader(__file__)
 
 
 #: A front matter line: its key and what follows it.
@@ -2212,28 +2204,37 @@ def _matches(item: Field, line: str, level: int, base: int, own: int) -> bool:
     return name == want or name.startswith(want + " (")
 
 
+def fenced(lines: Iterable[str]) -> Iterator[tuple[str, bool]]:
+    """Each of `lines` with whether it is code: a fence's opening or closing line (FENCE), or a line
+    between them; a fence closes on a marker of its own kind at least as long."""
+    fence: str | None = None
+    for line in lines:
+        marker = FENCE.match(line)
+        if fence is None and marker:
+            fence = marker.group(1)
+            yield line, True
+        elif fence is not None:
+            if marker and marker.group(1).startswith(fence):
+                fence = None
+            yield line, True
+        else:
+            yield line, False
+
+
 def _split(text: str, template: Template, base: int) -> tuple[str, list[Part]]:
     """`text` as its preamble and its sections at levels deeper than `base`."""
     preamble: list[str] = []
     parts: list[Part] = []
     current: tuple[Part, int, list[str]] | None = None
-    fence: str | None = None
     seen: set[str] = set()
 
     def close() -> None:
         if current is not None:
             current[0].raw = "".join(current[2])
 
-    for line in text.splitlines(keepends=True):
+    for line, code in fenced(text.splitlines(keepends=True)):
         bare = line.rstrip("\r\n")
-        marker = FENCE.match(bare)
-        heading = None
-        if fence is None and marker:
-            fence = marker.group(1)
-        elif fence is not None and marker and marker.group(1).startswith(fence):
-            fence = None
-        elif fence is None:
-            heading = HEADING.match(bare)
+        heading = None if code else HEADING.match(bare)
         if heading and len(heading.group(1)) > base:
             level = len(heading.group(1))
             found = next((item for item in template.fields if item.in_body and item.name not in seen
@@ -2451,16 +2452,10 @@ def _fence_span(text: str, info: str) -> tuple[int, int] | None:
 def _title_end(template: Template, text: str) -> int:
     """Where a file's head ends: just after its page title, the first `#` line above the first
     field; 0 where a field's heading comes first or there is no `#` line."""
-    offset, fence = 0, None
-    for line in text.splitlines(keepends=True):
+    offset = 0
+    for line, code in fenced(text.splitlines(keepends=True)):
         bare = line.rstrip("\r\n")
-        marker = FENCE.match(bare)
-        if fence is None and marker:
-            fence = marker.group(1)
-        elif fence is not None:
-            if marker and marker.group(1).startswith(fence):
-                fence = None
-        elif heading := HEADING.match(bare):
+        if not code and (heading := HEADING.match(bare)):
             level = len(heading.group(1))
             if level == 1:
                 return offset + len(line)
@@ -2665,15 +2660,8 @@ def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
     rest = lines[index + 1:]
     want = _norm(template.scope.get("section", ""))
     start = None
-    fence = None
-    for i, line in enumerate(rest):
-        marker = FENCE.match(line)
-        if fence is None and marker:
-            fence = marker.group(1)
-            continue
-        if fence is not None:
-            if marker and marker.group(1).startswith(fence):
-                fence = None
+    for i, (line, code) in enumerate(fenced(rest)):
+        if code:
             continue
         heading = HEADING.match(line.rstrip("\r\n"))
         if heading and _norm(heading.group(2)) == want:
@@ -2681,17 +2669,11 @@ def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
             break
     if start is None:
         return [Part("prefix", raw=prefix), Part("gap", raw="".join(rest))], ""
-    end, fence = len(rest), None
-    for i in range(start + 1, len(rest)):
-        marker = FENCE.match(rest[i])
-        if fence is None and marker:
-            fence = marker.group(1)
+    end = len(rest)
+    for i, (line, code) in enumerate(fenced(rest[start + 1:]), start + 1):
+        if code:
             continue
-        if fence is not None:
-            if marker and marker.group(1).startswith(fence):
-                fence = None
-            continue
-        heading = HEADING.match(rest[i].rstrip("\r\n"))
+        heading = HEADING.match(line.rstrip("\r\n"))
         if heading and len(heading.group(1)) <= level:
             end = i
             break
@@ -3195,6 +3177,18 @@ def select(templates: dict[str, Template], action: str, body: str, title: str | 
                   if template.name == name), None)
     if named is not None:
         return Selection(named, tuple(refused))
+    claimed = _claiming(candidates, lines, title)
+    if claimed is not None:
+        return Selection(claimed, tuple(refused))
+    plain = next((template for template in candidates if template.fallback or (
+        not template.marker and not template.marker_pattern and not template.title_pattern)), None)
+    return Selection(plain, tuple(refused))
+
+
+def _claiming(candidates, lines: set[str], title: str | None) -> Template | None:
+    """The first of `candidates` that claims a text by what it carries: a template with a marker,
+    a marker pattern or a title pattern, whose marker the text's `lines` carry and whose title
+    pattern its `title` matches; None where none does."""
     for template in candidates:
         if not template.marker and not template.marker_pattern and not template.title_pattern:
             continue
@@ -3202,10 +3196,8 @@ def select(templates: dict[str, Template], action: str, body: str, title: str | 
             continue
         if template.title_pattern and not re.search(template.title_pattern, title or ""):
             continue
-        return Selection(template, tuple(refused))
-    plain = next((template for template in candidates if template.fallback or (
-        not template.marker and not template.marker_pattern and not template.title_pattern)), None)
-    return Selection(plain, tuple(refused))
+        return template
+    return None
 
 
 def _select_file(templates: dict[str, Template], body: str, title: str | None, path: str) -> Selection:
@@ -3226,14 +3218,9 @@ def _select_file(templates: dict[str, Template], body: str, title: str | None, p
                                f"derived from template {named}, which does not claim this file; "
                                f"name one of {names}"))
     lines = {line.strip() for line in body.splitlines()}
-    for template in candidates:
-        if not template.marker and not template.marker_pattern and not template.title_pattern:
-            continue
-        if (template.marker or template.marker_pattern) and not _carries(template, lines):
-            continue
-        if template.title_pattern and not re.search(template.title_pattern, title or ""):
-            continue
-        return Selection(template, tuple(refused))
+    claimed = _claiming(candidates, lines, title)
+    if claimed is not None:
+        return Selection(claimed, tuple(refused))
     if all(template.kind == CODE for template in candidates):
         refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; it "
                                f"carries no template marker: scaffold it, templates.py scaffold <template> --path "
@@ -3524,16 +3511,7 @@ def _before(template: Template, document: Document, since: str) -> bool:
 
 def holds_slot(text: str) -> bool:
     """Whether `text` holds the fill slot `{{slot}}` outside code: a fence, or a code span."""
-    kept, fence = [], None
-    for line in text.splitlines():
-        marker = FENCE.match(line)
-        if fence is None and marker:
-            fence = marker.group(1)
-        elif fence is not None:
-            if marker and marker.group(1).startswith(fence):
-                fence = None
-        else:
-            kept.append(CODE_SPAN.sub("", line))
+    kept = [CODE_SPAN.sub("", line) for line, code in fenced(text.splitlines()) if not code]
     return SLOT in "\n".join(kept)
 
 
@@ -3600,19 +3578,9 @@ def entries(text: str) -> list[tuple[str, str]]:
     """A register's entries, (name, text): each heading at the shallowest level `text` holds outside
     its fences, its text up to the next such heading; the text before the first is none."""
     found: list[tuple[int, str, list[str]]] = []
-    fence: str | None = None
     lines: list[tuple[int, str]] = []  # (heading level or 0, line)
-    for line in text.splitlines(keepends=True):
-        bare = line.rstrip("\r\n")
-        marker = FENCE.match(bare)
-        heading = None
-        if fence is None and marker:
-            fence = marker.group(1)
-        elif fence is not None:
-            if marker and marker.group(1).startswith(fence):
-                fence = None
-        else:
-            heading = HEADING.match(bare)
+    for line, code in fenced(text.splitlines(keepends=True)):
+        heading = None if code else HEADING.match(line.rstrip("\r\n"))
         lines.append((len(heading.group(1)) if heading else 0, line))
     levels = [level for level, _ in lines if level]
     if not levels:
@@ -4402,20 +4370,10 @@ def stale(templates: dict[str, Template], folder: Path) -> tuple[list[str], list
         raise TemplateError(f"templates.py stale: --path {folder} is no folder; name the folder that "
                             "holds the documents")
     older, unresolved = [], []
-    for path in sorted(folder.rglob(f"*{TEMPLATE_SUFFIX}")):
-        relative = path.relative_to(folder)
-        if not path.is_file() or any(part.startswith(".") for part in relative.parts):
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        front = FRONT_MATTER.match(text)
-        found = derived_from(front.group(0)) if front else None
+    for where, _, found in _file_documents(folder):
         if found is None or not found[2]:
             continue
         name, recorded = found[2].rsplit("/", 1)[-1], found[3]
-        where = relative.as_posix()
         template = templates.get(name)
         if template is None:
             unresolved.append(f"{where}: derived from {name} {recorded}, which is no template here")
@@ -4585,17 +4543,25 @@ def _given(options: argparse.Namespace) -> tuple[str | None, dict[str, object] |
             raise TemplateError("templates.py check: give the text: --body-file, --fields, --body, "
                             "--fields-json or --path")
         return _file_text(options.path, "templates.py check"), None
+    return given_text(options)
+
+
+def given_text(options: argparse.Namespace, command: str = "templates.py check"
+               ) -> tuple[str | None, dict[str, object] | None]:
+    """The body or the field values a check was given, by whichever of its options `--body`,
+    `--body-file`, `--fields-json` and `--fields` is set, in that order; what cannot be read
+    raises TemplateError, naming `command`."""
     if options.body is not None:
         return options.body, None
     if options.body_file is not None:
         try:
             return options.body_file.read_text(encoding="utf-8"), None
         except OSError as error:
-            raise TemplateError(f"templates.py check: cannot read --body-file {options.body_file} "
-                            f"({error})") from error
+            raise TemplateError(f"{command}: cannot read --body-file {options.body_file} "
+                                f"({error})") from error
     if options.fields_json is not None:
-        return None, fields_data(options.fields_json, "--fields-json")
-    return None, fields_file(options.fields)
+        return None, fields_data(options.fields_json, "--fields-json", command)
+    return None, fields_file(options.fields, command)
 
 
 def _selected(templates: dict[str, Template], options: argparse.Namespace,

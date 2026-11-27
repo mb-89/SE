@@ -122,6 +122,14 @@
     - A door at `error` refuses each reach; one at `warn` prints one warning line while its
       reaches move behind it, and is refused once none is left, naming the step to `error`.
     - No door keeps a baseline.
+  - It also fails on a block of six lines or more written twice in `scripts/`, and on a
+    definition there that nothing reaches, not even a test (`scripts/overhaul.py check`, which
+    owns what each is; its check `code`); the commit hook runs the same check (`se.toml`
+    `[commit_checks]`).
+    - Each class has its level in `se.toml` `[overhaul]`, `duplicate_blocks` and `dead_code`,
+      `error` built in, with no baseline.
+    - A repeated block becomes one helper, such as `scripts/se_script.py`'s, which every
+      script's loader and `main` call.
 - Dangling references:
   - A section reference, `<page>.md "<section>"` or `README "<section>"`, in any tracked text file
     whose page holds no such heading (the check `sections`).

@@ -69,7 +69,6 @@ Exit code 0: written, a gap included; 1: GitHub refused the read of every reposi
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -694,15 +693,7 @@ def build(files: dict[str, str], destination: Path, read_at: str) -> int:
 # --- Command ----------------------------------------------------------------------------------
 
 
-def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once under its own name."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+sibling = se_script.loader(__file__)
 
 
 #: The pages SE renders as one kern component (docs/start.md "Commands as components"), timeline.py's
@@ -729,8 +720,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None, post: Poster | None = None, now: datetime | None = None) -> int:
     args = make_parser().parse_args(argv)
-    routed = sibling("se_components").routed(
-        Path(__file__), [], list(sys.argv[1:] if argv is None else argv), False)
+    routed = se_script.route(__file__, [], argv, False)
     if routed is not None:
         return routed
     ages = ages_setting(args.config)

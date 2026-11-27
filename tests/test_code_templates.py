@@ -4,6 +4,7 @@ writes; the claimed scripts and modules are held to that shape by the check and 
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import io
 import json
@@ -302,3 +303,58 @@ def test_stop_check_and_push_check_nothing_where_the_integration_branch_shares_n
     (tmp_path / "scripts" / "free.py").write_text("print(1)\n", encoding="utf-8")
     assert se_templates.claims_a_carried_path(se_templates.claim_templates(tmp_path, None)[0])
     assert se_templates.changed_refusal(tmp_path, "origin/main") is None
+
+
+def test_se_script_s_loader_loads_a_sibling_once_and_answers_the_running_script(tmp_path, monkeypatch):
+    """Every script's `sibling` is se_script's `loader`: the script beside it loaded once under
+    its own name, the one running as __main__ where that is it, and nothing left half loaded where
+    a module fails to load."""
+    (tmp_path / "probe_sibling.py").write_text("LOADS = []\nLOADS.append(1)\n", encoding="utf-8")
+    (tmp_path / "probe_broken.py").write_text("raise ValueError('broken')\n", encoding="utf-8")
+    (tmp_path / "probe_main.py").write_text("", encoding="utf-8")
+    monkeypatch.delitem(sys.modules, "probe_sibling", raising=False)
+    sibling = se_script.loader(tmp_path / "caller.py")
+    first = sibling("probe_sibling")
+    assert sibling("probe_sibling") is first and first.LOADS == [1]
+    with pytest.raises(ValueError):
+        sibling("probe_broken")
+    assert "probe_broken" not in sys.modules
+    running = type(sys)("__main__")
+    running.__file__ = str(tmp_path / "probe_main.py")
+    monkeypatch.setitem(sys.modules, "__main__", running)
+    assert sibling("probe_main") is running
+    monkeypatch.delitem(sys.modules, "probe_sibling")
+
+
+def test_se_script_s_dispatch_runs_the_command_and_answers_the_scripts_refusal(monkeypatch, capsys):
+    """`dispatch` runs the parsed command where kern does not (SE_KERN=off); an error of the
+    script's `refused` type is its answer, `<script>: <error>` and exit code 1, given as the type
+    or as a callable that loads it; any other error is raised."""
+    monkeypatch.setenv("SE_KERN", "off")
+
+    class Refusal(Exception):
+        pass
+
+    def refuse(args):
+        raise Refusal("not now")
+
+    script = ROOT / "scripts" / "probe.py"
+    ran = argparse.Namespace(command="go", run=lambda args: 7)
+    assert se_script.route(script, ["go"], ["go"], frozenset({"go"})) is None
+    assert se_script.dispatch(script, ran, ["go"], frozenset()) == 7
+    refused = argparse.Namespace(command="go", run=refuse)
+    assert se_script.dispatch(script, refused, ["go"], frozenset(), refused=Refusal) == 1
+    assert se_script.dispatch(script, refused, ["go"], frozenset(), refused=lambda: Refusal) == 1
+    assert capsys.readouterr().err == "probe.py: not now\nprobe.py: not now\n"
+    with pytest.raises(Refusal):
+        se_script.dispatch(script, refused, ["go"], frozenset(), refused=KeyError)
+
+
+def test_se_script_s_swapped_sets_a_value_for_the_block_and_restores_it_on_an_error():
+    """Each door's `use(backend)` is se_script's `swapped` of its BACKEND."""
+    holder = type(sys)("holder")
+    holder.BACKEND = "real"
+    with pytest.raises(RuntimeError), se_script.swapped(holder, "BACKEND", "fake") as value:
+        assert (value, holder.BACKEND) == ("fake", "fake")
+        raise RuntimeError
+    assert holder.BACKEND == "real"

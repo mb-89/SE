@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+import sys
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from pathlib import PurePath
 from typing import Any, Protocol
 
@@ -67,15 +68,10 @@ class RealShell:
 BACKEND: Backend = RealShell()
 
 
-@contextmanager
-def use(backend: Backend) -> Iterator[Backend]:
+def use(backend: Backend) -> AbstractContextManager[Backend]:
     """Run every shell through `backend` for the block (a test's fake), then restore."""
-    global BACKEND
-    previous, BACKEND = BACKEND, backend
-    try:
-        yield backend
-    finally:
-        BACKEND = previous
+    import se_script  # here, not above: spawn_guard.py loads this door by its path alone
+    return se_script.swapped(sys.modules[__name__], "BACKEND", backend)
 
 
 def run(argv: Sequence[str] | str, **options: Any) -> subprocess.CompletedProcess:

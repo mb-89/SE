@@ -12,7 +12,6 @@ before it has an origin; `se_modules.py sync kern` keeps it there afterwards.
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import re
 import sys
@@ -20,6 +19,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 
 import git_door
+import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
@@ -57,14 +57,7 @@ class NewError(Exception):
     """A refusal that names its remedy."""
 
 
-def _sibling(name: str):
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+_sibling = se_script.loader(__file__)
 
 
 def _git(cwd: Path, *args: str, env: dict[str, str] | None = None, binary: bool = False):

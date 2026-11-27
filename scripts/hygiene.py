@@ -38,6 +38,10 @@ each named with its check.
   its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
   `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
   commit hook runs the same check (se.toml `[commit_checks]`).
+- code: no block of six lines or more written twice in `scripts/` and no definition there that
+  nothing reaches, not even a test, each class at its level (`scripts/overhaul.py check`, which
+  owns what each is; se.toml `[overhaul]`); a class at `warn` prints its lines and passes; the
+  commit hook runs the same check (se.toml `[commit_checks]`).
 - template-engine: SE's template engine is the Go one (`components/template`), which a script asks
   through `scripts/template_door.py`; an import of the Python engine (`templates`, `se_templates`)
   in scripts, tests and the components, outside the engine's own files, is a finding, with no
@@ -61,6 +65,7 @@ from pathlib import Path
 import door_report
 import generated
 import git_door
+import overhaul
 import process_door
 import readme
 import references
@@ -193,11 +198,6 @@ def marker_findings(repo: Path) -> list[str]:
     return found
 
 
-def called_name(call: ast.Call) -> str:
-    function = call.func
-    return function.id if isinstance(function, ast.Name) else getattr(function, "attr", "")
-
-
 def git_subprocess_lines(path: Path) -> list[int]:
     """The lines of `path` (Python or Go) that start a git subprocess: a command list that starts
     with "git" (not one announced with `.reading`), a command string that does, or Go's
@@ -207,13 +207,13 @@ def git_subprocess_lines(path: Path) -> list[int]:
         return [number for number, line in enumerate(text.splitlines(), 1) if GO_GIT.search(line)]
     tree = ast.parse(text, str(path))
     announced = {id(argument) for node in ast.walk(tree)
-                 if isinstance(node, ast.Call) and called_name(node) == "reading" for argument in node.args}
+                 if isinstance(node, ast.Call) and door_report.called_name(node) == "reading" for argument in node.args}
     lines = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)) and node.elts and isinstance(node.elts[0], ast.Constant) \
                 and node.elts[0].value == "git" and id(node) not in announced:
             lines.append(node.lineno)
-        elif isinstance(node, ast.Call) and called_name(node) in SUBPROCESS_CALLS and node.args \
+        elif isinstance(node, ast.Call) and door_report.called_name(node) in SUBPROCESS_CALLS and node.args \
                 and isinstance(node.args[0], ast.Constant) and str(node.args[0].value).startswith("git "):
             lines.append(node.lineno)
     return sorted(lines)
@@ -404,6 +404,16 @@ def door_findings(root: Path) -> list[str]:
     return refused
 
 
+def code_findings(root: Path) -> list[str]:
+    """What the code check refuses in `root` (overhaul.py `checked`); its warnings are printed."""
+    try:
+        lines, refused = overhaul.checked(root)
+    except (OSError, ValueError, SyntaxError) as error:
+        raise HygieneError(f"code: {error}") from error
+    for line in lines:
+        if line not in refused:
+            print(f"hygiene: code: {line}")
+    return refused
 def template_engine_lines(path: Path) -> list[int]:
     """The lines of the Python file `path` that import the Python template engine (TEMPLATE_MODULES)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
@@ -446,6 +456,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "readme": readme_findings(root),
         "ported": ported_findings(root),
         "doors": door_findings(root),
+        "code": code_findings(root),
         "template-engine": template_engine_findings(root),
     }
 

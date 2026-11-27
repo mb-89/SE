@@ -54,7 +54,6 @@ from __future__ import annotations
 import argparse
 import ast
 import bisect
-import importlib
 import io
 import json
 import keyword
@@ -84,6 +83,17 @@ SHINGLE = 8
 NEAR_ALIKE = 75
 COMMON = 8
 TOP = 10
+# The folder of SE's templates, read for the definitions they name.
+TEMPLATES = "templates/"
+# A definition a template names for a script beside it to resolve, `<script>:<name>`
+# (templates.py `resolve`, such as `when: retro:is_object`).
+SCRIPT_REFERENCE = re.compile(r"\b([a-z_][a-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*)\b")
+# An import statement, and the entry every script ends with (templates/python-script.md), which a
+# duplicate block leaves out (`copied`).
+IMPORT = re.compile(r"(?:import|from)\s+[\w.]+")
+ENTRY = frozenset({'if __name__ == "__main__":', "raise SystemExit(se_script.run(main))"})
+# The prefix of the hooks pytest's plugin manager calls by name on a plugin it is handed.
+HOOK_PREFIX = "pytest_"
 
 # The authored text where se.toml names none: every tracked Markdown file.
 DEFAULT_AUTHORED = ["**/*.md"]
@@ -101,6 +111,14 @@ DISTINCT = "distinct"
 # The two classes of the rule, each with its built-in level; `[overhaul]` in se.toml sets them.
 LEVELS = ("error", "warn")
 REPEAT_LEVELS = {"repeated_tests": "error", "subset_tests": "warn"}
+# The classes `check` holds the code to (a block written twice, a definition nothing reaches, not
+# even a test), each with its built-in level and its remedy; `[overhaul]` in se.toml sets the levels.
+CHECK_LEVELS = {"duplicate_blocks": "error", "dead_code": "error"}
+CHECK_REMEDIES = {
+    "duplicate_blocks": f"make one helper each place calls (des-005): no block of {WINDOW} lines or more "
+                        "is written twice in scripts/, imports and the script entry aside",
+    "dead_code": "delete each: nothing reaches it, not even a test (des-015)",
+}
 
 
 @dataclass
@@ -119,6 +137,8 @@ class Checkout:
     file_seconds: dict[str, float] = field(default_factory=dict)
     # The coverage measurement where one is kept (`measurement`), and the rule's levels.
     coverage: Measurement | None = None
+    # SE's templates by path, whose `<script>:<name>` a script beside templates.py resolves.
+    templates: dict[str, str] = field(default_factory=dict)
     levels: dict[str, str] = field(default_factory=lambda: dict(REPEAT_LEVELS))
 
 
@@ -138,6 +158,8 @@ class Measurement:
 class Facts:
     unreached: list[dict] = field(default_factory=list)
     duplicates: list[dict] = field(default_factory=list)
+    # Each group of places the duplicate blocks join, one helper to make (`helpers`).
+    helpers: list[list[str]] = field(default_factory=list)
     near: list[dict] = field(default_factory=list)
     sizes: list[dict] = field(default_factory=list)
     long_functions: list[dict] = field(default_factory=list)
@@ -154,10 +176,7 @@ class Facts:
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = git_door.run(*arguments, root=root)
-    if result.returncode != 0:
-        raise ValueError(f"git {' '.join(arguments)} failed in {root}: {result.stderr.strip()}")
-    return result.stdout
+    return git_door.output(*arguments, root=root, error=ValueError, binary=False)
 
 
 def glob_pattern(pattern: str) -> re.Pattern[str]:
@@ -188,8 +207,18 @@ def last_changes(root: Path) -> dict[str, int]:
     return changed
 
 
-def read(root: Path) -> Checkout:
-    tracked = [path for path in git(root, "ls-files", "-z").split("\0") if path]
+def tracked_files(root: Path) -> list[str]:
+    """The checkout's tracked files; a copy of a tree without git (a commit check's copy of the
+    index, commit_checks.py) holds only those, so there they are every file under `root`."""
+    if (root / ".git").exists():
+        return [path for path in git(root, "ls-files", "-z").split("\0") if path]
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+
+
+def read(root: Path, history: bool = True) -> Checkout:
+    """The checkout as facts reads it; without `history`, as `check` does, no git history, no
+    coverage measurement and no levels of the coverage rule."""
+    tracked = tracked_files(root)
     patterns = [glob_pattern(pattern) for pattern in authored_patterns(root)]
 
     def text(path: str) -> str:
@@ -205,12 +234,13 @@ def read(root: Path) -> Checkout:
         authored={path: text(path) for path in present
                   if any(pattern.match(path) for pattern in patterns)},
         tracked=present,
-        changed=last_changes(root),
-        overruns=recorded_overruns(),
+        changed=last_changes(root) if history else {},
+        overruns=recorded_overruns() if history else [],
         file_seconds={path: float(value) for path, value in seconds.items()
                       if isinstance(value, (int, float)) and not isinstance(value, bool)},
-        coverage=measurement(root / COVERAGE_DIR),
-        levels=repeat_levels(root),
+        coverage=measurement(root / COVERAGE_DIR) if history else None,
+        levels=repeat_levels(root) if history else dict(REPEAT_LEVELS),
+        templates={path: text(path) for path in present if path.startswith(TEMPLATES)},
     )
 
 
@@ -262,9 +292,10 @@ def names_in(*nodes: ast.AST) -> set[str]:
 
 
 def registers(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> bool:
-    """Whether a decorator registers the definition by name, `@command("sync", ...)`: the
-    registry, not a caller, reaches it."""
-    return any(isinstance(decorator, ast.Call) and decorator.args
+    """Whether a registry, not a caller, reaches the definition by name: a decorator that registers
+    it, `@command("sync", ...)`, or pytest's plugin manager, which calls every `pytest_<hook>`
+    function or method of a plugin it is handed (HOOK_PREFIX)."""
+    return node.name.startswith(HOOK_PREFIX) or any(isinstance(decorator, ast.Call) and decorator.args
                and isinstance(decorator.args[0], ast.Constant) and isinstance(decorator.args[0].value, str)
                for decorator in node.decorator_list)
 
@@ -290,6 +321,8 @@ def definitions(path: str, tree: ast.Module) -> tuple[list[Definition], set[str]
                 if isinstance(child, functions):
                     found.append(Definition(path, child.name, "method", statement.name, child,
                                             names_in(child)))
+                    if registers(child):
+                        roots.add(child.name)
         else:
             roots |= names_in(statement)
             continue
@@ -331,10 +364,11 @@ def reached_from(every: list[Definition], roots: set[str]) -> set[int]:
     return reached
 
 
-def unreached(scripts: dict[str, ast.Module], tests: dict[str, str], authored: dict[str, str]
-              ) -> list[dict]:
-    """The definitions in scripts that no import-time code, command, reached definition or authored
-    code span (`name`, a documented interface) refers to by name: what nothing but tests reaches,
+def unreached(scripts: dict[str, ast.Module], tests: dict[str, str], authored: dict[str, str],
+              templates: dict[str, str] | None = None) -> list[dict]:
+    """The definitions in scripts that no import-time code, command, registry (`registers`),
+    reached definition, authored code span (`name`, a documented interface) or template's
+    `<script>:<name>` (SCRIPT_REFERENCE) refers to by name: what nothing but tests reaches,
     each marked with whether the tests reach it. Names are matched across scripts, so a name
     another script uses reaches every definition of it; the list errs towards missing dead code,
     never towards naming live code."""
@@ -346,6 +380,9 @@ def unreached(scripts: dict[str, ast.Module], tests: dict[str, str], authored: d
         roots |= module_roots
     for text in authored.values():
         roots |= set(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)(?:\(\))?`", text))
+    stems = {Path(path).stem for path in scripts}
+    for text in (templates or {}).values():
+        roots |= {name for stem, name in SCRIPT_REFERENCE.findall(text) if stem in stems}
     reached = reached_from(every, roots)
     tested = reached_from(every, roots | set().union(*map(identifiers, tests.values())))
     return [{"at": f"{definition.path}:{definition.node.lineno}",
@@ -359,11 +396,19 @@ def meaningful(line: str) -> str:
     return "" if not stripped or stripped.startswith("#") else stripped
 
 
+def copied(line: str) -> str:
+    """The line as a copy is compared: `meaningful`, with an import and the python-script
+    template's entry (ENTRY) left out, as no helper could share what every script must write."""
+    text = meaningful(line)
+    return "" if IMPORT.match(text) or text in ENTRY else text
+
+
 def duplicate_blocks(scripts: dict[str, str]) -> list[dict]:
-    """Runs of WINDOW or more lines written alike in two places, blank and comment lines aside."""
+    """Runs of WINDOW or more lines written alike in two places, blank, comment and import lines
+    aside (`copied`)."""
     lines: dict[str, list[tuple[int, str]]] = {
         path: [(number, text) for number, raw in enumerate(source.splitlines(), 1)
-               if (text := meaningful(raw))]
+               if (text := copied(raw))]
         for path, source in scripts.items()}
     windows: dict[tuple[str, ...], list[tuple[str, int]]] = defaultdict(list)
     for path, kept in lines.items():
@@ -391,6 +436,36 @@ def duplicate_blocks(scripts: dict[str, str]) -> list[dict]:
 
         found.append({"lines": length, "a": span(path_a, start_a), "b": span(path_b, start_b)})
     return sorted(found, key=lambda block: (-block["lines"], block["a"]))
+
+
+def helpers(blocks: list[dict]) -> list[list[str]]:
+    """The helpers the duplicate blocks ask for: each group of places that blocks join, a place
+    joining every block whose span overlaps it in the same file, the most places first."""
+    spans = sorted({span for block in blocks for span in (block["a"], block["b"])})
+    parent = {span: span for span in spans}
+
+    def root(span: str) -> str:
+        while parent[span] != span:
+            parent[span] = parent[parent[span]]
+            span = parent[span]
+        return span
+
+    def lines(span: str) -> tuple[str, int, int]:
+        path, _, numbers = span.rpartition(":")
+        first, _, last = numbers.partition("-")
+        return path, int(first), int(last)
+
+    for block in blocks:
+        parent[root(block["a"])] = root(block["b"])
+    for index, one in enumerate(spans):
+        for other in spans[index + 1:]:
+            (path, start, end), (other_path, other_start, other_end) = lines(one), lines(other)
+            if path == other_path and start <= other_end and other_start <= end:
+                parent[root(one)] = root(other)
+    groups: dict[str, list[str]] = defaultdict(list)
+    for span in spans:
+        groups[root(span)].append(span)
+    return sorted(groups.values(), key=lambda group: (-len(group), group))
 
 
 def functions(path: str, tree: ast.Module):
@@ -622,11 +697,18 @@ def measurement(folder: Path) -> Measurement | None:
     return Measurement(call_lines(folder / COVERAGE_DATA), seconds, spawning, skipped)
 
 
-def repeat_levels(root: Path) -> dict[str, str]:
-    """The rule's level per class, `[overhaul]` of se.toml over REPEAT_LEVELS, each checked."""
-    given = sibling("work_tickets").se_table(root, "overhaul")
+def repeat_levels(root: Path, defaults: dict[str, str] = REPEAT_LEVELS) -> dict[str, str]:
+    """Each class's level, `[overhaul]` of se.toml over `defaults` (REPEAT_LEVELS, CHECK_LEVELS),
+    each checked."""
+    settings = root / "se.toml"
+    try:
+        given = tomllib.loads(settings.read_text(encoding="utf-8")).get("overhaul", {}) \
+            if settings.is_file() else {}
+    except (UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise ValueError(f"cannot read {settings}: {error}") from error
+    given = given if isinstance(given, dict) else {}
     levels = {}
-    for key, default in REPEAT_LEVELS.items():
+    for key, default in defaults.items():
         value = given.get(key, default)
         if value not in LEVELS:
             raise ValueError(f"overhaul.{key} in {root / 'se.toml'} must be one of {', '.join(LEVELS)}; "
@@ -723,8 +805,9 @@ def find(checkout: Checkout) -> Facts:
     untouched = sorted((path for path in checkout.tracked if path in checkout.changed),
                        key=lambda path: (checkout.changed[path], path))
     return Facts(
-        unreached=unreached(trees, checkout.tests, checkout.authored),
-        duplicates=duplicate_blocks(checkout.scripts),
+        unreached=unreached(trees, checkout.tests, checkout.authored, checkout.templates),
+        duplicates=(blocks := duplicate_blocks(checkout.scripts)),
+        helpers=helpers(blocks),
         near=near_duplicates(checkout.scripts, trees),
         sizes=sizes(checkout.scripts, checkout.tests),
         long_functions=[{"at": at, "what": name, "lines": node.end_lineno - node.lineno + 1}
@@ -744,6 +827,35 @@ def find(checkout: Checkout) -> Facts:
 # The report
 
 
+def code_findings(checkout: Checkout) -> dict[str, list[str]]:
+    """What `check` refuses, by class (CHECK_LEVELS): each duplicate block, and each definition
+    nothing reaches, not even a test."""
+    trees = {path: ast.parse(source, filename=path) for path, source in checkout.scripts.items()}
+    return {
+        "duplicate_blocks": [f"{block['lines']} lines: {block['a']} and {block['b']}"
+                             for block in duplicate_blocks(checkout.scripts)],
+        "dead_code": [f"{item['at']} {item['what']}" for item in
+                      unreached(trees, checkout.tests, checkout.authored, checkout.templates)
+                      if not item["tests"]],
+    }
+
+
+def checked(root: Path) -> tuple[list[str], list[str]]:
+    """The code check of `root` (`check`): the lines to print and those that refuse, each class
+    with findings at level `error` refusing, at `warn` printed while its cases are fixed."""
+    levels = repeat_levels(root, CHECK_LEVELS)
+    lines, refused = [], []
+    for key, found in code_findings(read(root, history=False)).items():
+        if not found:
+            continue
+        said = [f"{levels[key]}: {key}: {len(found)} found; {CHECK_REMEDIES[key]}",
+                *(f"  {item}" for item in found)]
+        lines += said
+        if levels[key] == "error":
+            refused += said
+    return lines, refused
+
+
 def render(facts: Facts) -> str:
     out = ["# Overhaul facts", ""]
 
@@ -757,6 +869,8 @@ def render(facts: Facts) -> str:
              for item in facts.unreached])
     section(f"Duplicate blocks ({WINDOW} lines or more)",
             [f"{block['lines']} lines: {block['a']} and {block['b']}" for block in facts.duplicates])
+    section("Helpers to make, one per group of duplicate blocks",
+            [f"one helper for {', '.join(group)}" for group in facts.helpers])
     section(f"Near-duplicate functions ({NEAR_ALIKE}% alike or more)",
             [f"{pair['alike']}%: {pair['a']} and {pair['b']}" for pair in facts.near])
     total, tested = sum(row["lines"] for row in facts.sizes), sum(row["test_lines"] for row in facts.sizes)
@@ -796,13 +910,7 @@ def repeat_sections(found: dict | None) -> list[str]:
 # The overhaul issue: new, read, file
 
 
-def sibling(name: str):
-    """The script `<name>.py` beside this one, imported when a command needs it: `facts` imports
-    only se_components, for its route, which uses the standard library alone."""
-    here = str(Path(__file__).resolve().parent)
-    if here not in sys.path:
-        sys.path.append(here)
-    return importlib.import_module(name)
+sibling = se_script.loader(__file__)
 
 
 SE_ROOT = Path(__file__).resolve().parents[1]
@@ -944,12 +1052,7 @@ def overhaul_countdown(closed: list, opened: list, settings: dict[str, int], now
 def door_for(retro, work_tickets, args: argparse.Namespace, root: Path):
     """The read door: the answer files where given, else gh, else the plan's placeholders."""
     tracker = work_tickets.resolve_repo(root, args.repo)
-
-    if args.answers is not None:
-        return retro.FileDoor(args.answers, tracker, tracker)
-    if work_tickets.hand_off():
-        return retro.FileDoor(Path("<dir>"), tracker, tracker)
-    return retro.GhDoor(root, tracker, tracker)
+    return retro.read_door(root, args.answers, tracker, tracker)
 
 
 def last_block(texts: list[str], marker: str, reader) -> dict | None:
@@ -1513,6 +1616,20 @@ def run_facts(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_check(args: argparse.Namespace) -> int:
+    root = args.repo.resolve()
+    try:
+        lines, refused = checked(root)
+    except (OSError, ValueError, SyntaxError) as error:
+        print(f"error: overhaul.py check: {error}", file=sys.stderr)
+        return 2
+    for line in lines:
+        print(line, file=sys.stderr if refused else sys.stdout)
+    if not lines:
+        print(f"overhaul.py check: passed: no duplicate block and no dead code in {root / 'scripts'}")
+    return 1 if refused else 0
+
+
 def coverage_command(folder: Path, source: str) -> list[str]:
     """The suite under coverage with per-test contexts and a JUnit report that names each case's
     file and its whole time, both into `folder`; pytest-cov comes for this run only."""
@@ -1561,8 +1678,8 @@ COMPONENTS = (sibling("se_components").Group(
     "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, "
     "from the judged draft, file checks the judged draft and posts its report, which blesses the "
     "overhaul until its last finding outcome closes it, facts lists a checkout's pruning facts, "
-    "and coverage measures the suite per test for them.",
-    ("new", "read", "deck", "file", "facts", "coverage")),)
+    "check refuses copies and dead code, and coverage measures the suite per test.",
+    ("new", "read", "deck", "file", "facts", "check", "coverage")),)
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
 #: the checkout while a person waits; new, read and file write or read GitHub at length.
 INTERACTIVE_COMMANDS = frozenset({"facts"})
@@ -1570,6 +1687,8 @@ INTERACTIVE_COMMANDS = frozenset({"facts"})
 READ_ONLY_COMMANDS = {
     "facts": "Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting "
              "or judging an overhaul.",
+    "check": "Refuses a block written twice or a definition nothing reaches in a checkout's scripts. "
+             "Use it before committing a change to scripts/, as the commit hook does.",
 }
 
 
@@ -1615,13 +1734,7 @@ def make_parser() -> argparse.ArgumentParser:
     deck_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
     deck_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
                               help="the draft overhaul.py read wrote, its block judged")
-    deck_command.add_argument("--destination", type=Path, required=True, metavar="HTML",
-                              help="the deck's HTML file")
-    deck_command.add_argument("--host", choices=sibling("deck").HOSTS,
-                              help="the host the person's answers go back to (deck.py build "
-                                   "--host; default: the one this runs under)")
-    deck_command.add_argument("--answers", type=Path, metavar="FILE",
-                              help="the person's answers (answers.json): build the deck as their record")
+    sibling("deck").report_arguments(deck_command)
     deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
         "file", help="check a judged overhaul draft and post its report on the overhaul issue",
@@ -1642,6 +1755,17 @@ def make_parser() -> argparse.ArgumentParser:
     facts_command.add_argument("--repo", type=Path, default=Path("."), help="the checkout (default: .)")
     facts_command.add_argument("--json", action="store_true", help="print the facts as JSON")
     facts_command.set_defaults(run=run_facts)
+    check_command = commands.add_parser(
+        "check", help="refuse a duplicate block or dead code in a checkout's scripts",
+        description="Check the checkout's scripts/ as the commit hook and hygiene.py do: each block "
+                    f"of {WINDOW} lines or more written twice (duplicate_blocks; imports and the "
+                    "script entry aside) and each definition nothing reaches, not even a test "
+                    "(dead_code), as facts lists them. Each class fails the check at its level "
+                    "error, built in, and warns at warn ([overhaul] in se.toml); there is no "
+                    "baseline. It reads the files, not git, so it runs on a commit check's copy "
+                    "of the index.")
+    check_command.add_argument("--repo", type=Path, default=Path("."), help="the checkout (default: .)")
+    check_command.set_defaults(run=run_check)
     coverage_command_parser = commands.add_parser(
         "coverage", help="measure the suite's coverage per test for the facts",
         description=f"Run the suite once under coverage with per-test contexts and keep the run in "
@@ -1658,18 +1782,8 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = make_parser().parse_args(argv)
-    words = [args.command]
-    routed = sibling("se_components").routed(
-        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        args.command in INTERACTIVE_COMMANDS)
-    if routed is not None:
-        return routed
-    try:
-        return args.run(args)
-    except sibling("work_tickets").QueueError as error:
-        print(f"overhaul.py: {error}", file=sys.stderr)
-        return 1
+    return se_script.dispatch(__file__, make_parser().parse_args(argv), argv, INTERACTIVE_COMMANDS,
+                              refused=lambda: sibling("work_tickets").QueueError)
 
 
 if __name__ == "__main__":

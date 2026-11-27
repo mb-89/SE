@@ -8,7 +8,8 @@ fake `tests/fake_git.py`; every other test that needs git uses the fake (`use`),
 refuses real git behind this door to any test outside `tests/conftest.py`'s `REAL_GIT`. A git
 subprocess outside this module fails `scripts/hygiene.py`'s git-door check, a step of CI's `check` job.
 
-The door adds nothing to what git is asked: each caller keeps its own error type and message.
+The door adds nothing to what git is asked: each caller keeps its own error type and message;
+`output` raises the caller's type on a failed command, naming the command and git's stderr.
 
 `SE_GIT_DOOR` picks the backend of a process the door starts in (`from_environment`), so a test
 reaches the child processes it starts too: unset or `real`, the git on PATH; `fake:<state file>`,
@@ -28,8 +29,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Protocol
 import se_script
@@ -125,15 +125,9 @@ if __name__ == "__main__":  # run as a command: the fake a state file loads impo
 BACKEND: Backend = from_environment()
 
 
-@contextmanager
-def use(backend: Backend) -> Iterator[Backend]:
+def use(backend: Backend) -> AbstractContextManager[Backend]:
     """Run every git command through `backend` for the block (a test's fake), then restore."""
-    global BACKEND
-    previous, BACKEND = BACKEND, backend
-    try:
-        yield backend
-    finally:
-        BACKEND = previous
+    return se_script.swapped(sys.modules[__name__], "BACKEND", backend)
 
 
 def argv(arguments: tuple[str, ...], root: Path | str | None) -> list[str]:
@@ -154,6 +148,37 @@ def run(*arguments: str, root: Path | str | None = None, cwd: Path | None = None
     if binary:
         return done
     return subprocess.CompletedProcess(done.args, done.returncode, text(done.stdout), text(done.stderr))
+
+
+def output(*arguments: str, root: Path | str | None = None, stdin: bytes | None = None,
+           error: type[Exception] = RuntimeError, binary: bool = True) -> bytes | str:
+    """The stdout of `git [-C root] <arguments>`, bytes or with `binary` False text (`run`); a
+    non-zero exit raises `error`, the caller's own type, as `git <arguments> failed in <root>:
+    <git's stderr>`."""
+    result = run(*arguments, root=root, stdin=stdin, binary=True)
+    if result.returncode != 0:
+        raise error(f"git {' '.join(arguments)} failed in {root}: {text(result.stderr).strip()}")
+    return result.stdout if binary else text(result.stdout)
+
+
+def blobs(root: Path | str, ids: list[str], error: type[Exception] = RuntimeError) -> list[bytes]:
+    """The contents of the blobs `ids`, in their order, read in one `git cat-file --batch`."""
+    if not ids:
+        return []
+    data = output("cat-file", "--batch", root=root, stdin="".join(f"{blob}\n" for blob in ids).encode(),
+                  error=error)
+    found, position = [], 0
+    for _ in ids:
+        header_end = data.index(b"\n", position)
+        size = int(data[position:header_end].split()[2])
+        found.append(data[header_end + 1:header_end + 1 + size])
+        position = header_end + 1 + size + 1
+    return found
+
+
+def same_commit(one: str, other: str) -> bool:
+    """Whether two commit names, either abbreviated, name the same commit."""
+    return bool(one) and bool(other) and (one.startswith(other) or other.startswith(one))
 
 
 def text(data: bytes | str | None) -> str:

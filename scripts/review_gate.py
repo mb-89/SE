@@ -28,6 +28,8 @@ import re
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 
+import git_door
+
 #: The kinds of risky change, in the order a refusal names them.
 RISKS = ("major", "rule-book", "role-file", "history")
 #: The paths each path-borne kind of risk watches, from the checkout's root (`matches`).
@@ -148,11 +150,6 @@ def reviews(comments: list[object]) -> list[Review]:
     return found
 
 
-def same_commit(one: str, other: str) -> bool:
-    """Whether two commit names, either abbreviated, name the same commit."""
-    return bool(one) and bool(other) and (one.startswith(other) or other.startswith(one))
-
-
 def decide(change: Facts, found: list[Review], head: str, gate: Settings) -> Decision:
     """Land or refuse `change`, whose pull request's head is `head`, by the reviews `found` on it
     (oldest first) and the gate's settings: the newest review of `head` decides."""
@@ -162,7 +159,7 @@ def decide(change: Facts, found: list[Review], head: str, gate: Settings) -> Dec
     if not carried:
         return Decision(True)
     named = ", ".join(carried)
-    of_head = [review for review in found if same_commit(review.head, head)]
+    of_head = [review for review in found if git_door.same_commit(review.head, head)]
     if of_head and of_head[-1].verdict in LANDING_VERDICTS:
         return Decision(True, f"risky ({named}), reviewed: {of_head[-1].verdict} at {head[:12]}",
                         carried)

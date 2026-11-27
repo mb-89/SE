@@ -6,20 +6,12 @@ does; this file only names them (docs/applications.md "New application")."""
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from pathlib import Path
 import se_script
 
 
-def _sibling(name: str):
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+_sibling = se_script.loader(__file__)
 
 
 #: se.py's commands as one kern component (docs/start.md "Commands as components"); each command's usage
@@ -57,9 +49,7 @@ def _checkout(start: Path) -> Path:
 def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
     words = [args.command, args.what if args.command == "new" else args.action]
-    routed = _sibling("se_components").routed(
-        Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        " ".join(words) in INTERACTIVE_COMMANDS)
+    routed = se_script.route(__file__, words, argv, INTERACTIVE_COMMANDS)
     if routed is not None:
         return routed
     if args.command == "component":

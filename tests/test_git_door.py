@@ -320,6 +320,21 @@ def test_cat_file_merge_base_and_diff_compare_two_commits(door, tmp_path: Path) 
     assert {"-a", "+a2", "-g", "+    return 42", "--- /dev/null", "+++ /dev/null"} <= set(diff)
 
 
+def test_output_and_blobs_answer_or_raise_the_callers_error(door, tmp_path: Path) -> None:
+    """`output` is a command's stdout, raising the caller's own error type on a failure, naming
+    the command; `blobs` reads blobs in one batch, in their order; `same_commit` compares
+    abbreviated names."""
+    root = project(tmp_path)
+    commit(root, {"a.txt": "first\n", "b.txt": "second\n"})
+    staged = {line.split("\t")[1]: line.split()[1] for line in git(root, "ls-files", "-s").splitlines()}
+    ids = [staged["b.txt"], staged["a.txt"]]
+    assert git_door.blobs(root, ids) == [b"second\n", b"first\n"] and git_door.blobs(root, []) == []
+    assert git_door.output("rev-parse", "HEAD", root=root, binary=False).strip() == git(root, "rev-parse", "HEAD")
+    with pytest.raises(LookupError, match=r"git show HEAD:gone\.txt failed in .*: \S"):
+        git_door.output("show", "HEAD:gone.txt", root=root, error=LookupError)
+    assert git_door.same_commit(ids[0][:7], ids[0]) and not git_door.same_commit("", ids[0])
+
+
 def test_ls_files_status_and_archive_read_the_tracked_files(door, tmp_path: Path) -> None:
     import io
     import tarfile

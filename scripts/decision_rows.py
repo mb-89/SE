@@ -25,7 +25,6 @@ Read-only and standalone: nothing in SE calls it. Standard library only.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 import sys
@@ -35,16 +34,7 @@ from pathlib import Path
 import se_script
 
 
-def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once under its own name."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+sibling = se_script.loader(__file__)
 
 
 retro = sibling("retro")

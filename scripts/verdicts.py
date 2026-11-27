@@ -18,10 +18,7 @@ STORE = "se-verdicts"
 
 
 def git(root: Path, *arguments: str) -> str:
-    result = git_door.run(*arguments, root=root)
-    if result.returncode != 0:
-        raise ValueError(f"git {' '.join(arguments)} failed in {root}: {result.stderr.strip()}")
-    return result.stdout.strip()
+    return git_door.output(*arguments, root=root, error=ValueError, binary=False).strip()
 
 
 def tree(root: Path, commit: str) -> str:

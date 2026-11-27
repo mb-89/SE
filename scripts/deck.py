@@ -84,6 +84,18 @@ def default_host(environment: dict[str, str]) -> str:
     return "claude-code" if hosts.host(environment) == "claude" else "local"
 
 
+def report_arguments(parser: argparse.ArgumentParser) -> None:
+    """The options of a command that builds a report's deck (retro.py and overhaul.py `deck`): its
+    HTML file, the host its answers go back to and the answers it is the record of."""
+    parser.add_argument("--destination", type=Path, required=True, metavar="HTML",
+                        help="the deck's HTML file")
+    parser.add_argument("--host", choices=HOSTS,
+                        help="the host the person's answers go back to (deck.py build "
+                             "--host; default: the one this runs under)")
+    parser.add_argument("--answers", type=Path, metavar="FILE",
+                        help="the person's answers (answers.json): build the deck as their record")
+
+
 def document_path(destination: Path) -> Path:
     """Where ``build`` writes the obs Document a deck at ``destination`` was built from: ``<deck>.document.json``."""
     return destination.with_suffix(".document.json")
