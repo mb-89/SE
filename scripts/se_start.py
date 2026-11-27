@@ -1106,24 +1106,33 @@ def kern_version(se_root: Path, root: Path | None) -> str:
 
 
 def load_kern(se_root: Path, root: Path | None, kern: Kern, ask: Callable[[Path, Path], dict | None]) -> Loaded:
-    """kern: the binary bootstrap.sh placed and started answers `status` with a running core; else
-    why not. A core the machine switched off is no failure, the person's choice."""
+    """kern: the binary bootstrap.sh placed and started answers `status` with a running core, the
+    session's checkout's (`kern_root`) or, where that record's core is gone, SE's root's; else why
+    not, the session's checkout's cause. A core the machine switched off is no failure, the person's choice."""
     if kern.off:
         return Loaded(se_modules.KERN, "off", note=f"kern is not loaded: {kern.off}")
     if kern.failed:
         return Loaded(se_modules.KERN, cause=kern.failed)
-    core_root = kern_root(se_root, root)
-    binary = kern_binary(kern, core_root)
-    if binary is None:
-        return Loaded(se_modules.KERN, cause=f"no binary is placed for {core_root}; the start's hook places "
-                                             f"and starts it: bash {se_root.as_posix()}/scripts/bootstrap.sh --hook")
-    answer = ask(binary, core_root)
-    state = (answer or {}).get("state")
-    if state != "running":
+    first = kern_root(se_root, root)
+    causes = []
+    for core_root in dict.fromkeys([first, se_root]):
+        binary = kern_binary(kern if core_root == first else Kern(), core_root)
+        if binary is None:
+            causes.append(f"no binary is placed for {core_root}; the start's hook places and starts it: "
+                          f"bash {se_root.as_posix()}/scripts/bootstrap.sh --hook")
+            continue
+        answer = ask(binary, core_root)
+        state = (answer or {}).get("state")
+        if state == "running":
+            break
         log = core_root / ".se" / ".runtime" / "core.log"
-        cause = ("its status does not answer" if answer is None else
-                 "the core ended at its start" if (answer or {}).get("died") else f"the core is {state or 'not running'}")
-        return Loaded(se_modules.KERN, cause=f"{binary} {cause}; see {log}")
+        causes.append(f"{binary} " + ("its status does not answer" if answer is None else
+                                     "the core ended at its start" if (answer or {}).get("died") else
+                                     f"the core is {state or 'not running'}") + f"; see {log}")
+    else:
+        # A record whose core is gone is no core: the live one of SE's root counts, and only where
+        # none runs does the first checkout's cause stand.
+        return Loaded(se_modules.KERN, cause=causes[0])
     try:
         version = kern_version(se_root, root)
     except ModuleError as error:
