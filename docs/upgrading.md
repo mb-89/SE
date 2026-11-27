@@ -468,6 +468,30 @@ On main, released as 17.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/work_tickets.py field-report --check <report.md>` passes
   for each open report.
 
+## SE 21
+
+### Overhauls scrutinize the tests and the long files
+
+- **Change:** the overhaul's own questions (`templates/overhaul-questions.md` 1.1.0) add five
+  required ones: enough doors and reaches around them, each door tested once, superfluous,
+  duplicated and over-broad tests, the slowest test files, and every file over 1,000 lines.
+  `overhaul.py file` refuses a draft that leaves one unanswered.
+- **Steps:** run `uv run python <se>/scripts/overhaul.py read <issue> --out <draft>` again for an
+  open overhaul, so its draft holds the new sections, and answer each from the facts its section
+  of the draft's facts names.
+- **Check:** `uv run python <se>/scripts/overhaul.py facts` exits 0 and prints
+  `## The questions and the facts behind them`.
+
+### A file over 1,000 lines states why
+
+- **Change:** SE's `hygiene.py` refuses a tracked text file over 1,000 lines whose reason se.toml
+  `[long_files]` does not state (check `long-files`). It holds SE's own checkout; a project that
+  runs SE's hygiene on its own checkout (`hygiene.py --repo <project>`) is held the same way.
+- **Steps:** for each file `hygiene.py --repo <project>` names, split it by job, or add
+  `"<path>" = "<its jobs and why they stay together>"` under `[long_files]` in the project's
+  `se.toml`; remove each entry the check names as naming no such file.
+- **Check:** `uv run python <se>/scripts/hygiene.py --repo <project>` prints no `long-files:` line.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:
