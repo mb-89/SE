@@ -6203,15 +6203,22 @@ def used_steps(repo: str, name: str, existing: int | None) -> tuple[Step, ...]:
     stop = (f" Where one is `{name}`, stop: the name is used, nothing is filed; choose another "
             "name.")
     return (
-        Step("find_used:issues", "list_issues", {
-            **owner_repo(repo), "state": "CLOSED", "perPage": 100, "fields": ["number", "title"]},
-            note=f"Only where step 1 found no twin. Read every closed issue (page with `after` "
-                 f"until none is left); compare each title, and each open issue's{other} from "
-                 "step 1, with the name." + stop),
+        Step("find_used:issues", "search_issues", title_search(repo, name),
+             note=f"Only where step 1 found no twin. One search, open and closed issues alike "
+                  "(without the tool: `gh api -X GET search/issues -f q=<query>`); compare each "
+                  f"title found, and each open issue's{other} from step 1, with the name exactly."
+                  + stop),
         Step("find_used:branches", "list_branches", {**owner_repo(repo), "perPage": 100},
              note="Only where step 1 found no twin. Read every branch (page with `page` until "
-                  "none is left)." + stop),
+                  "none is left), or ask git once: `git ls-remote <the repository> "
+                  f"refs/heads/{name}`." + stop),
     )
+
+
+def title_search(repo: str, name: str) -> dict[str, object]:
+    """The one search_issues request for the issues of `repo` whose title holds `name`: GitHub's
+    search matches words, so the caller compares each title found exactly."""
+    return {"query": f'repo:{api_repo(repo)} is:issue in:title "{name}"', "perPage": 100}
 
 
 def used_refusal(command: str, name: str, clashes: list[str]) -> QueueError:
@@ -6224,10 +6231,10 @@ def used_refusal(command: str, name: str, clashes: list[str]) -> QueueError:
 
 def used_by_issues(name: str, issues: list[dict[str, object]], exclude: int | None) -> list[str]:
     """Each issue of `issues` titled `name`, other than `exclude`, as a clash."""
-    return [f"#{issue['number']} ({str(issue.get('state') or 'open').lower()})"
-            for issue in sorted(issues, key=lambda issue: int(str(issue["number"])))
-            if str(issue.get("title") or "").strip() == name
-            and int(str(issue["number"])) != exclude]
+    once = {int(str(issue["number"])): issue for issue in reversed(issues)}  # each issue once
+    return [f"#{number} ({str(issue.get('state') or 'open').lower()})"
+            for number, issue in sorted(once.items())
+            if str(issue.get("title") or "").strip() == name and number != exclude]
 
 
 def issues_titled(root: Path, repo: str, name: str) -> list[dict[str, object]]:
@@ -6703,7 +6710,7 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
         if state["twin"] is not None:
             return
         if what == "issues":
-            found = ([*door.issues("CLOSED"), *state["open"]]  # type: ignore[misc]
+            found = ([*door.titled(title), *state["open"]]  # type: ignore[misc]
                      if door is not None else issues_titled(root, repo, title))
             clashes = used_by_issues(title, found, existing)
         else:
@@ -10506,9 +10513,21 @@ class RelayDoor(Workflows):
             if not after:
                 return found
 
+    def titled(self, name: str) -> list[dict[str, object]]:
+        """The issues, open and closed, whose title holds `name`: one search_issues request,
+        whatever the repository's issue count."""
+        data = self.ask("search_issues", title_search(self.repo, name))
+        return [{**issue, "state": str(issue.get("state") or "open").lower()}
+                for issue in tool_items(data, "items") or tool_items(data, "issues")
+                if "pull_request" not in issue]
+
     def branch(self, name: str) -> bool:
-        """Whether the repository has the branch `name`, page by page (list_branches with
-        `page`)."""
+        """Whether the repository has the branch `name`: one `git ls-remote` of the remote that
+        hosts it, else page by page (list_branches with `page`)."""
+        listed = run_git(self.root, "ls-remote", issue_remote(self.root, self.repo),
+                         f"refs/heads/{name}")
+        if listed.returncode == 0:
+            return bool(listed.stdout.strip())
         page = 1
         while True:
             names = [str(item.get("name") or "") for item in tool_items(
