@@ -46,3 +46,5 @@ commit:a667f7ccf3b8bcace946be1024fc39b05b53d4f2 author  # published squash merge
 commit:a667f7ccf3b8bcace946be1024fc39b05b53d4f2 committer  # published squash merge made with GitHub's merge button instead of work_tickets.py integrate
 commit:a667f7ccf3b8bcace946be1024fc39b05b53d4f2 message  # published squash merge made with GitHub's merge button instead of work_tickets.py integrate
 components/template/testdata/cases/se-python-component.json email-address sha256:3a2ab7a515679fe8  # a JSON-escaped line break before the python-component template's decorator line, `@<ident>.command`, read as an address
+commit:65bf776da8bee8fc8c6274e028d0038805a01482 message  # published history; preserve its message without rewriting the public branch
+commit:264a026c2f0c00af782c544dd9cc527e4442c728 author  # published history; preserve attribution without rewriting the public branch

@@ -7,7 +7,7 @@ help = "The integrator's and SE's work: integrate, the release SE asks for, ref 
 usage = "work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]\n                          [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]\n                          [--read-back BRANCH] [--record-fix BRANCH]\n                          [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL]\n                          [--check-run CHECK_RUN] [--landing-description FILE]\n                          [--build-command BUILD_COMMAND] [--include-late REASON]\n                          [--check-command JSON] [--check-command-temporary-directory]\n                          [pull_request]"
 summary = "validate the field report a pull request's description carries, ..."
 group = "Integration"
-help = "validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out"
+help = "validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue when one is named. An authorized fix without one still gets the same checks and closes only its pull request. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out"
 class = "batch"
 
 [commands."work_tickets.py rehearse"]
