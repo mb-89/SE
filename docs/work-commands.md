@@ -322,7 +322,7 @@ The draft has one known path on the machine, `~/.se/retros/<owner>/<repo>/retro-
 `collect` writes it there unless `--out` names another file (`--out -` prints it).
 
 `deck`, `bless` and `file` read it from there unless `--draft` names another, so no session searches
-another's folders. Where none is there, they name that path and `retro.py collect <n>`.
+another's folders. Where none is there, they name that path and `retro.py collect` for the retro.
 
 `--sessions <file>` adds the cloud sessions' costs: the file holds each session `list_sessions`
 lists, with its `list_events` result events (kinds `["result"]`) as `"events"`. Each session is
@@ -334,7 +334,7 @@ Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved
 into `--answers <dir>` ([Without gh](../src/skills/work-model/SKILL.md#without-gh)).
 
-`retro.py bless <issue>` is the one call after the person checks and blesses the prefilled report:
+`retro.py bless` is the one call after the person checks and blesses the prefilled report:
 it records approval, immediately opens this retro's filing gate, posts the report and closes the
 issue, then reads both back. It needs no landed document, update, build or second session.
 

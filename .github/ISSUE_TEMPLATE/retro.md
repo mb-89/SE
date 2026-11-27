@@ -48,8 +48,8 @@ None.
    controversy reason where applicable.
 5. **Anything else**: the retro deck ends with a bless chapter titled `Anything else?`, offering
    only the selectable default `Nothing else`, which the person may reject with a comment.
-6. **Report**: the draft keeps the template version and rules recorded at collection. After the
-   person blesses the answered report, `uv run python <se>/scripts/retro.py bless <this issue>`
+6. **Report**: once the person blesses the answered report, which keeps the template version
+   and rules recorded at collection, `uv run python <se>/scripts/retro.py bless <this issue>`
    opens the gate, posts the report and closes this retro in one call, without a landing.
 7. **Outcomes**: SE records each accepted `work` finding with
    `work_tickets.py file --finding <retro>:<finding>` and each declined or merged finding with

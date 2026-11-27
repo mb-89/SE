@@ -6158,11 +6158,12 @@ def twin_rule(key: tuple[str, str | None]) -> str:
 
 
 def comment_quote(text: str) -> str:
-    """`text` as a Markdown quote, without the fleet marker and template markers, so a comment
-    shows it as data and names no template it is not filled from."""
-    marker = sibling("templates").TEMPLATE_MARKER_PATTERN
-    lines = "\n".join(line for line in text.replace(FLEET_MARKER, "").splitlines()
-                      if not marker.fullmatch(line)).strip().splitlines()
+    """`text` as a Markdown quote, without the fleet marker, template markers and recorded template
+    inputs, so a comment shows it as data and names no template it is not filled from."""
+    templates = sibling("templates")
+    marker = templates.TEMPLATE_MARKER_PATTERN
+    lines = "\n".join(line for line in templates.INPUTS_PATTERN.sub("", text.replace(FLEET_MARKER, ""))
+                      .splitlines() if not marker.fullmatch(line)).strip().splitlines()
     return "\n".join(f"> {line}".rstrip() for line in lines)
 
 
