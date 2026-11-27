@@ -459,6 +459,24 @@ def test_a_failure_weighs_its_failure_weight_and_an_unlanded_close_nothing():
     assert (found.count, found.due) == (18, False)
 
 
+def test_a_partial_landing_counts_as_a_landing_and_an_overhauls_start_resets_the_count():
+    """SE#2006: on 27 Nov two partial landings, labelled escalated, weighed 5 each and made a
+    retro due at 22 minutes after an overhaul closed. A partial landing (escalated, its pull
+    request merged) is a landing, 1, open or closed; an escalation with no landing stays a
+    failure; and an overhaul's start resets the count, as a retro's does."""
+    partial = [work(10, updated="2026-11-03T00:00:00Z", labels=("work", "escalated")),
+               work(11, "2026-11-03T00:00:00Z", labels=("work", "escalated"))]
+    failed = work(12, updated="2026-11-03T00:00:00Z", labels=("work", "escalated"))
+    pulls = [landing(10, "2026-11-02T00:00:00Z"), landing(11, "2026-11-02T00:00:00Z")]
+    now = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    found = countdown([partial[1]], [partial[0], failed], pulls, now=now)
+    assert (found.landed, found.failed, found.count) == (2, 1, 7)
+    overhaul_run = retro.Issue(3, "overhaul-20261103", ["discovery"], "", "",
+                               created_at="2026-11-03T12:00:00Z")
+    found = countdown([partial[1]], [partial[0], failed, overhaul_run], pulls, now=now)
+    assert (found.since_run, found.count, found.due) == (3, 0, False)
+
+
 def test_a_retro_is_due_seven_days_after_the_last_started_where_anything_came_back():
     one = ([work(10, "2026-11-02T00:00:00Z")], (), [landing(10, "2026-11-02T00:00:00Z")])
     assert not countdown(*one, now=datetime(2026, 11, 7, tzinfo=timezone.utc)).due
@@ -566,6 +584,19 @@ def test_the_draft_ends_in_the_block_that_parses_back(checkout):
 def run_line(start: str, wall: float, issue: int) -> dict:
     return {"command": "work_tickets.py integrate", "start": start, "wall_seconds": wall,
             "gh_calls": 3, "gh_refusals": 0, "gh_wait_seconds": 0.0, "exit_code": 0, "issue": issue}
+
+
+def test_the_window_counts_a_partial_landing_as_a_failure(checkout):
+    """SE#2006: a partial landing closes its issue without the `escalated` label, and the retro
+    still counts it as a failure, one escalation."""
+    given = answers(checkout)
+    given["issues.json"][3] = issue(12, "feat/b", "2026-11-03T12:00:00Z")
+    pulls = given["pulls.json"]
+    pulls[3] = {**pulls[3], "body": pulls[3]["body"].replace("**Result:** complete",
+                                                             "**Result:** partial")}
+    assert "**Result:** partial" in pulls[3]["body"]
+    by = {item.number: item for item in collected(checkout, given).issues}
+    assert (by[12].landed, by[12].escalations) == (True, 1)
 
 
 def test_collect_reads_metrics_back_from_the_landings_and_counts_a_run_once(
@@ -1615,10 +1646,10 @@ def test_filing_state_is_done_only_after_every_outcome_is_recorded():
         retro.filing_state([{"body": retro.report_state_comment("done", 2)}])
 
 
-def test_finding_argument_is_a_positive_retro_and_finding_pair():
-    assert (retro.FindingRef("30:2").retro, retro.FindingRef("30:2").finding) == (30, 2)
+def test_finding_argument_is_a_positive_run_and_finding_pair():
+    assert (retro.FindingRef("30:2").run, retro.FindingRef("30:2").finding) == (30, 2)
     for value in ("0:1", "3:0", "3:1:2", "x:1"):
-        with pytest.raises(ValueError, match="must be <retro>:<finding>"):
+        with pytest.raises(ValueError, match="must be <run>:<finding>"):
             retro.FindingRef(value)
 
 

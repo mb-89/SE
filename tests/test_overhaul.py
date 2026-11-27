@@ -851,8 +851,12 @@ def test_file_marks_rule_changes_for_the_person_posts_the_report_and_files_nothi
 
     assert overhaul.main(["file", str(THIS), "--draft", str(draft), "--repo", REPO,
                           "--worktree", str(checkout)]) == 0
-    assert [name for name, _ in tracker.calls] == ["comment_issue", "close_issue"]
+    # The report, then its blessed state: the report is the overhaul's blessing, the gate open,
+    # its three findings filed with `file --finding 50:<k>` until the last outcome closes it
+    # (SE#2006).
+    assert [name for name, _ in tracker.calls] == ["comment_issue", "comment_issue"]
     assert all(arguments["issue_number"] == THIS for _, arguments in tracker.calls)
+    assert tracker.calls[1][1]["body"].startswith(retro.report_state_comment("blessed", 3))
     comment = tracker.calls[0][1]["body"]
     assert comment.startswith(overhaul.REPORT_MARKER + "\n# Overhaul #50: the report\n")
     template = overhaul.overhaul_template()
@@ -867,7 +871,7 @@ def test_file_marks_rule_changes_for_the_person_posts_the_report_and_files_nothi
             if finding.severity == templates.REFUSE] == []
     assert "| gen-001 Mechanize first | none | Holds. |" in comment
     assert "- **outside**: Nothing to change." in comment
-    assert ("- **1. Prune the three functions only tests reach** (work, for SE to bundle; rule "
+    assert ("- **1. Prune the three functions only tests reach** (work, for SE to file; rule "
             "des-015; place `scripts/overhaul.py`)") in comment
     assert ("- **2. Name the speed of the suite as a rule** (decision, for the owner's decision "
             "list: it changes a rule; a rule change; rule tst-002; place "
@@ -918,7 +922,7 @@ def test_the_next_read_scores_the_findings_file_posted(checkout, tmp_path, monke
         (1, "work", [], "none"), (2, "decision", [51], "open"), (3, "decision", [], "none")]
 
 
-def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, monkeypatch, capsys):
+def test_file_without_gh_prints_the_report_and_its_state(checkout, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     draft = tmp_path / "draft.md"
     draft.write_text(judged_draft(checkout), encoding="utf-8")
@@ -928,9 +932,8 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, mo
     out = capsys.readouterr().out
     assert "GitHub plan: the report of overhaul #50" in out
     assert '1. add_issue_comment {"body": "<!-- se:overhaul-report -->' in out
-    assert ('2. issue_write {"issue_number": 50, "method": "update", "owner": "owner", '
-            '"repo": "repo", "state": "closed", "state_reason": "completed"}') in out
-    assert '"method": "create"' not in out
+    assert '2. add_issue_comment {"body": "<!-- se:retro-state blessed findings=3 -->' in out
+    assert "issue_write {" not in out
 
 
 def test_new_files_the_overhaul_issue_through_file_labelled_discovery(checkout, monkeypatch,

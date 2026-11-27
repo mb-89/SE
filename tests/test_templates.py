@@ -35,6 +35,10 @@ import test_work_ticket_issues as issue_tests
 import work_tickets
 from manual import page
 
+# The field-report check reads its template at the report's Tested against commit through git's
+# door (SE#2006); the fake answers it, as no test here reaches real git.
+pytestmark = pytest.mark.usefixtures("fake_git_door")
+
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "work.md"
 
