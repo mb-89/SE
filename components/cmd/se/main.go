@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"kern/cli"
+	"se/components/template"
 	// kern's shared components and SE's own, one blank import each.
 	_ "kern/components/clock"
 	_ "kern/components/github"
@@ -16,7 +17,6 @@ import (
 	_ "se/components/fleet"
 	_ "se/components/origin"
 	_ "se/components/retro-due"
-	_ "se/components/template"
 )
 
 // Greeting is what the MCP door's greeting tool reads, the live part of SE's
@@ -29,6 +29,7 @@ func main() {
 	cli.Greeting = Greeting
 	cli.About = "se: SE's command line: the SE agent's start, and the core its hosts and hooks run"
 	cli.Add(agentVerb)
+	cli.Add(template.Verb)
 	cli.Bare = bareVerb
 	os.Exit(cli.Run("se", os.Args[1:], os.Stdout, os.Stderr))
 }

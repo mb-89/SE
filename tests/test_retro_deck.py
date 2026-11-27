@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import retro_deck
+from fake_processes import Answer
 import templates
 
 STEPS = [("2. Table of what happened", "| chapter | steps |\n|---|---|\n| 1 | #11 |"),
@@ -36,6 +37,23 @@ def test_the_deck_is_a_document_of_the_retro_deck_template_steps_first_decisions
         "\n#### Answers to the standing questions\n") < text.index("\n## Decisions\n") < text.index(
         "\n### 1. Refuse a landing without a field report\n") < text.index("\n### Anything else?\n")
     assert "\n# not a heading\n" in text  # a fence's lines are no headings
+
+
+def test_the_deck_is_filled_by_the_go_engine_through_its_door(fake_processes):
+    # The cut-over's one instance (work issue go-template-engine-only): the deck's text is the Go
+    # engine's fill, asked through scripts/template_door.py, never the Python engine's render.
+    text = deck_text()
+    asked = [call for call in fake_processes.calls if call.words[1:3] == ["template", "fill"]]
+    assert len(asked) == 1 and json.loads(asked[0].stdin)["template"] == "retro-deck"
+    assert text.startswith("<!-- se:fleet -->\n<!-- se:template se/retro-deck ")
+
+
+def test_a_refusal_of_the_go_engine_names_the_template_and_the_engines_reason(fake_processes):
+    fake_processes.on(lambda call: call.words[1:3] == ["template", "fill"],
+                      lambda call: Answer(1, "", "se template fill: templates fill retro-deck: refused\n"))
+    with pytest.raises(retro_deck.DeckError, match=r"retro-deck template \(templates/retro-deck.md\): se template "
+                                                   r"fill: templates fill retro-deck: refused"):
+        deck_text()
 
 
 def test_the_chapters_read_back_as_the_parts_were_given():
