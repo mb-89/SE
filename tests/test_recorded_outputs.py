@@ -137,6 +137,11 @@ def test_a_missing_recording_names_the_command_that_records_it(tmp_path, monkeyp
     assert not (tmp_path / "new.txt").exists()
 
 
+def test_recorded_accepts_windows_line_endings(tmp_path):
+    (tmp_path / "windows.txt").write_bytes(b"recorded\r\n")
+    r.recorded("windows", "recorded\n", directory=tmp_path)
+
+
 @pytest.mark.parametrize(("name", "text", "expected"), [
     ("clock", "read at 2026-11-12T15:00:00+00:00 and 2026-11-12 15:00 UTC on 2026-11-12",
      "read at <time> and <time> on 2026-11-12"),

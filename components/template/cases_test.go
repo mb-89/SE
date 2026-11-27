@@ -48,26 +48,78 @@ func readCases(t *testing.T) map[string]Object {
 func seTemplates(t *testing.T) Catalog {
 	t.Helper()
 	folder := filepath.Join("..", "..", TemplatesFolder)
-	files := map[string]string{}
-	entries, err := os.ReadDir(folder)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasSuffix(name, templateSuffix) || name == TermsFile {
-			data, err := os.ReadFile(filepath.Join(folder, name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			files[name] = string(data)
-		}
-	}
-	catalog, err := Load(Layer{SERepository, files, func(name string) string { return TemplatesFolder + "/" + name }})
+	catalog, err := LoadFolder(folder, SERepository)
 	if err != nil {
 		t.Fatalf("SE's templates do not load in Go: %v", err)
 	}
 	return catalog
+}
+
+func TestLoadFolderMatchesPythonTextNewlines(t *testing.T) {
+	const source = `---
+name: sample
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A template.
+applies:
+  actions: ["issue.create"]
+fields:
+  - name: goal
+    kind: text
+    required: true
+---
+
+## Goal
+
+<!-- goal: The goal. -->
+`
+	loadDigest := func(t *testing.T, newline string, viaFolderFiles bool) string {
+		t.Helper()
+		folder := t.TempDir()
+		path := filepath.Join(folder, "sample.md")
+		text := strings.ReplaceAll(source, "\n", newline)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var catalog Catalog
+		var err error
+		if viaFolderFiles {
+			files, readErr := folderFiles(folder)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			catalog, err = Load(Layer{ProjectRepository, files, func(name string) string {
+				return TemplatesFolder + "/" + name
+			}})
+		} else {
+			catalog, err = LoadFolder(folder, ProjectRepository)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return catalog["sample"].Digest
+	}
+
+	want := loadDigest(t, "\n", false)
+	readers := []struct {
+		name string
+		load bool
+	}{{"LoadFolder", false}, {"folderFiles", true}}
+	lineEndings := []struct {
+		name string
+		text string
+	}{{"CRLF", "\r\n"}, {"CR", "\r"}}
+	for _, reader := range readers {
+		for _, lineEnding := range lineEndings {
+			t.Run(reader.name+"/"+lineEnding.name, func(t *testing.T) {
+				if got := loadDigest(t, lineEnding.text, reader.load); got != want {
+					t.Fatalf("template digest = %s; LF digest = %s", got, want)
+				}
+			})
+		}
+	}
 }
 
 func fixtureFiles(set Object) map[string]string {

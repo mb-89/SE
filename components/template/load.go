@@ -345,6 +345,12 @@ func Load(layers ...Layer) (Catalog, error) {
 	return nest(built, digests)
 }
 
+// normalizeNewlines matches Python's text-mode universal newline translation.
+func normalizeNewlines(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
+}
+
 func digestOf(name string, raw map[string]Object, texts, overlays map[string]string) string {
 	chain := sha256.New()
 	for {

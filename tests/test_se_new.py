@@ -149,7 +149,8 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
     assert 'identity = "alice <alice>"' in (app / "se.toml").read_text()
     # The generic pair, byte for byte SE's, RUNME.sh executable.
     for name in ("RUNME.sh", "RUNME.ps1"):
-        assert (app / name).read_bytes() == (PROJECT / name).read_bytes(), name
+        expected = (PROJECT / name).read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        assert (app / name).read_bytes() == expected, name
     assert os.access(app / "RUNME.sh", os.X_OK) or os.name == "nt"
     # Its CI calls the battery's copy beside it, at the SE it was made from, reaching SE beside it.
     assert "uses: ./.github/workflows/kern-battery.yml" in (app / ".github" / "workflows" / "check.yml").read_text()
