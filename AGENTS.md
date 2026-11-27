@@ -86,6 +86,9 @@
   - It fails on a tracked binary file, a tracked file over 200 KB, or a `TODO`/`FIXME` in
     `scripts/` or `tests/` naming no issue; a file that must break the first two goes in its allow
     list there, with its reason.
+  - It also fails on a tracked text file over 1,000 lines whose reason se.toml `[long_files]` does
+    not state (its check `long-files`, rule book des-007), and on an entry there that names no such
+    file; a generated file is left out, as its source states the reason.
   - It also fails on a git subprocess outside `scripts/git_door.py`, git's one door, in scripts,
     tests, kern and the components; a test that needs git uses the door's fake (`fake_git_door`
     fixture, `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Its allow

@@ -34,6 +34,11 @@ each named with its check.
   subcommand of `scripts/se_start.py`: a step moves to Go whole, its Python and its callers with it,
   with no parallel fallback (docs/start.md "Kern"). It has no baseline: it fails from the first
   twin.
+- long-files: every tracked text file over LONG_LINES lines states why it needs more, in se.toml
+  `[long_files]` (its path or a glob, then the reason; rule book des-007): a file does one job on one
+  abstraction level, and past the bound the reason is asked for, not a cut enforced; a generated file
+  is left out, as its source carries the reason (`long_files`). It has no baseline: it fails from the
+  first file without a reason, and an entry naming no such file is refused.
 - doors: every reach outside a door the checkout declares (its `scripts/doors/*.toml`) is refused at
   its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
   `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
@@ -49,6 +54,7 @@ import ast
 import fnmatch
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 import door_report
@@ -65,6 +71,11 @@ ROOT = Path(__file__).resolve().parents[1]
 # The most bytes a tracked file holds outside LARGE_ALLOWED: source stays well under it, a build
 # output, a data dump or a vendored bundle does not.
 MAX_BYTES = 200_000
+
+# The most lines a tracked text file holds without a stated reason, and se.toml's table of the
+# reasons, by path or glob (the check long-files).
+LONG_LINES = 1_000
+LONG_TABLE = "long_files"
 
 # Tracked binary files, each with the reason it is tracked.
 BINARY_ALLOWED: dict[str, str] = {}
@@ -366,6 +377,63 @@ def ported_findings(root: Path) -> list[str]:
     twins = sorted(set(VERB_NAME.findall(verbs.read_text(encoding="utf-8"))) & set(references.command_tree(script)))
     return [f"{PORTED_FROM} {name}: the se binary runs this step in Go ({PORTED_VERBS}); remove its Python "
             f"and call `se {name}` where it is called" for name in twins]
+def long_files(root: Path, limit: int = LONG_LINES) -> dict[str, int]:
+    """Each tracked text file of `root` over `limit` lines with its line count; the outputs
+    `generated.yaml` declares are left out, as their source states the reason."""
+    try:
+        outputs = [generated.glob(output) for generator in generated.load(root) for output in generator.outputs]
+    except generated.DeclarationError as error:
+        raise HygieneError(str(error)) from error
+    found = {}
+    for name in tracked(root):
+        if any(pattern.match(name) for pattern in outputs):
+            continue
+        try:
+            text = (root / name).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "\0" not in text and (count := len(text.splitlines())) > limit:
+            found[name] = count
+    return found
+
+
+def long_reasons(root: Path) -> dict[str, str]:
+    """se.toml's `[long_files]` of `root`: each path or glob with the reason its files need more
+    than LONG_LINES lines."""
+    settings = root / "se.toml"
+    if not settings.is_file():
+        return {}
+    try:
+        table = tomllib.loads(settings.read_text(encoding="utf-8")).get(LONG_TABLE, {})
+    except tomllib.TOMLDecodeError as error:
+        raise HygieneError(f"{settings}: {error}") from error
+    if not isinstance(table, dict) or not all(isinstance(reason, str) for reason in table.values()):
+        raise HygieneError(f"{settings} [{LONG_TABLE}]: each entry is a path or glob and its reason, a string")
+    return table
+
+
+def long_reason(path: str, reasons: dict[str, str]) -> str:
+    """The reason `reasons` states for `path`, by its path or the first glob that matches it; ""
+    where none does."""
+    if path in reasons:
+        return reasons[path].strip()
+    return next((reason.strip() for key, reason in reasons.items() if fnmatch.fnmatchcase(path, key)), "")
+
+
+def long_findings(root: Path, reasons: dict[str, str], limit: int = LONG_LINES) -> list[str]:
+    """Each tracked text file over `limit` lines without a reason in `reasons`, and each entry of
+    `reasons` that names no such file."""
+    long = long_files(root, limit)
+    return [
+        f"{path}: {count} lines, over {limit}; split it by job, or state in se.toml [{LONG_TABLE}] why it "
+        f"needs more (\"{path}\" = \"<its jobs and why they stay together>\")"
+        for path, count in sorted(long.items()) if not long_reason(path, reasons)
+    ] + [
+        f"se.toml [{LONG_TABLE}] {key}: names no tracked file over {limit} lines; remove the entry"
+        for key in sorted(reasons) if not any(key == path or fnmatch.fnmatchcase(path, key) for path in long)
+    ]
+
+
 def doors_skip(root: Path) -> str:
     """Why the door check cannot run on `root`, or "" where it can."""
     folder = root / "scripts" / "doors"
@@ -403,6 +471,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "sections": section_findings(root, SECTIONS_SKIPPED),
         "readme": readme_findings(root),
         "ported": ported_findings(root),
+        "long-files": long_findings(root, long_reasons(root)),
         "doors": door_findings(root),
     }
 

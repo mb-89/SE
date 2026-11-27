@@ -23,7 +23,8 @@ import hygiene
 import pytest
 from conftest import (MACHINE_HOME, REAL_GIT, XDG_VARIABLES, RefusedGit, door_backend, door_variable,
                       machine_caches, runner_variables, use_machine_home)
-from hygiene import binary_findings, git_door_findings, large_findings, marker_findings
+from hygiene import (binary_findings, git_door_findings, large_findings, long_findings, long_reasons,
+                     marker_findings)
 from test_public_check import commit, repo, se_checkout  # noqa: F401  (repo: the public check's fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,25 @@ def test_a_large_retro_report_passes_but_other_large_docs_do_not(tmp_path: Path,
     ]
 
 
+def test_a_long_file_without_a_stated_reason_fails_and_a_stale_reason_too(tmp_path: Path, fake_git_door) -> None:
+    long = b"line\n" * 8
+    repo = fixture_repo(tmp_path, {
+        "scripts/tool.py": long, "scripts/kept.py": long, "docs/retro-1.md": long, "short.py": b"x\n",
+        "out/made.txt": long, "logo.png": b"\x89PNG\0" + long,
+        "generated.yaml": b"generators:\n  - generator: gen.py\n    source: src\n    outputs:\n"
+                          b"      - out/*.txt\n    unchecked: a fixture\n",
+        "se.toml": b'[long_files]\n"scripts/kept.py" = "one job"\n"docs/retro-*.md" = "a record"\n'
+                   b'"short.py" = "shrank"\n"scripts/blank.py" = " "\n',
+    })
+
+    assert long_findings(repo, long_reasons(repo), limit=7) == [
+        'scripts/tool.py: 8 lines, over 7; split it by job, or state in se.toml [long_files] why it '
+        'needs more ("scripts/tool.py" = "<its jobs and why they stay together>")',
+        "se.toml [long_files] scripts/blank.py: names no tracked file over 7 lines; remove the entry",
+        "se.toml [long_files] short.py: names no tracked file over 7 lines; remove the entry",
+    ]
+
+
 def test_a_marker_without_an_issue_fails(tmp_path: Path, fake_git_door) -> None:
     todo, fixme = "TO" + "DO", "FIX" + "ME"
     repo = fixture_repo(
@@ -118,7 +138,7 @@ def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsy
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].startswith("hygiene: passed (12 checks) in ")
+    assert out[-1].startswith("hygiene: passed (13 checks) in ")
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
     assert out[1] == "hygiene: doors: skipped: the checkout declares no door in scripts/doors"
 

@@ -279,7 +279,10 @@ changes state, not both.
 - **Prevents:** long functions and large modules; divergent change; a query with a side effect.
 - **Implementations:**
   - se: by judgment, the reviewer for its change; an overhaul reads the longest functions, files
-    and parameter lists [`<se>/scripts/overhaul.py facts`](../../../scripts/overhaul.py) lists.
+    and parameter lists [`<se>/scripts/overhaul.py facts`](../../../scripts/overhaul.py) lists,
+    and asks of each file over 1,000 lines which jobs it does.
+  - se: a tracked file over 1,000 lines states why in se.toml `[long_files]`; `hygiene.py`'s check
+    `long-files` refuses one without a reason ([AGENTS.md "Tests"](../../../AGENTS.md#tests)).
   - Go line (frozen): `se overhaul read` listed the longest functions and files.
 - **Related:** des-008, des-014
 
@@ -543,6 +546,10 @@ integration branch past a failing one.
 - **Implementations:**
   - se: the suite (`uv run pytest -q`) that `integrate` runs before each integration push, the
     [public check](../../../AGENTS.md#public-safety) on every push, and this book's check.
+  - se: each overhaul scrutinizes the tests with the questions of `templates/overhaul-questions.md`,
+    each answered from a fact [`<se>/scripts/overhaul.py facts`](../../../scripts/overhaul.py)
+    computes: the doors and their reaches, the spawn marks, the repeated and over-broad tests and
+    the slowest files.
   - Go line (frozen): the battery, with SE's own rules as checks.
 - **Related:** gen-001, wrk-006
 
