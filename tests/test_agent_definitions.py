@@ -1310,3 +1310,14 @@ def test_no_built_agent_or_skill_names_a_handover_issue():
              for match in HANDOVER_ISSUE.finditer(" ".join(path.read_text(encoding="utf-8").split()))]
     assert named == []
     assert ".se/handover.md" in normalized(ROOT / "skills" / "catch-up" / "SKILL.md")
+
+
+def test_the_se_agent_opens_every_first_message_after_a_start_with_the_live_report():
+    """The person may not see hook output (a Claude Code cloud session): SE runs the report live
+    after every start, restart and compaction and never shows a copy."""
+    se = normalized(AGENTS / "se.md")
+    assert ("your first message after every start, restart and compaction opens with SE's start "
+            "report, as it is, and adds nothing to it, without exception") in se
+    assert "Run `uv run python <se>/scripts/se_start.py status --greeting` first" in se
+    assert ("Show never a report you did not just produce, neither the copy the start hook handed you nor one "
+            "from an earlier start") in se

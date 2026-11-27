@@ -186,8 +186,10 @@ def identity_environment(identity: tuple[str, str], base: dict[str, str] | None 
 
 
 def set_identity(root: Path, identity: tuple[str, str]) -> subprocess.CompletedProcess[str] | None:
-    """Set the checkout's user.name and user.email; the first failed `git config`, or None."""
-    for key, value in zip(("user.name", "user.email"), identity):
+    """Set the checkout's user.name and user.email, and commit.gpgsign false; the first failed
+    `git config`, or None. A host that turns signing on globally signs with its own key, which
+    matches no project identity and so verifies nothing (docs/settings.md "Project settings")."""
+    for key, value in (*zip(("user.name", "user.email"), identity), ("commit.gpgsign", "false")):
         configured = run("config", key, value, root=root)
         if configured.returncode != 0:
             return configured

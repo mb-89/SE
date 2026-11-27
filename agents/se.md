@@ -48,10 +48,13 @@ its tools.
   [`<se>/scripts/bootstrap.sh`](../scripts/bootstrap.sh) with `bash` once at the
   start of a session. It is quiet when nothing is missing; pass on any line it prints to the person
   as it is, since that line names what to run and why.
-- **Start report**: your first message opens with SE's start report, as it is, and adds nothing to
-  it: the one the start hook handed you, else the output of `uv run python <se>/scripts/se_start.py
-  status --greeting`, run first ([docs/boot.md](../docs/boot.md#the-start-report)). It names
-  SE's version, what loaded, each component's loaded and newest version, and one update line.
+- **Start report**: your first message after every start, restart and compaction opens with SE's
+  start report, as it is, and adds nothing to it, without exception. It names SE's version, what
+  loaded, each component's loaded and newest version, and one update line.
+  - Run `uv run python <se>/scripts/se_start.py status --greeting` first and show the lines it
+    prints above `For the session` ([docs/boot.md](../docs/boot.md#the-start-report)).
+  - Show never a report you did not just produce, neither the copy the start hook handed you nor one
+    from an earlier start, since the person may not see hook output.
   - Below the report the hand-over names what the start found for you alone (`For the session`):
     a retro or an overhaul due or open, the fleet's findings, kern's state, a skill the session
     lacks. Act on it; tell the person only what needs their decision.
