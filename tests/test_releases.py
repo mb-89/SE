@@ -188,6 +188,7 @@ def test_each_package_kind_bumps_its_part_and_the_tag_is_pushed_with_the_merge(
     assert f"Release: v{version} (" in capsys.readouterr().out
 
 
+@pytest.mark.distinct("asserts the version two patch landings raise, not the identity")
 def test_two_patch_landings_then_one_release_raise_the_version_by_one_patch(checkout, capsys):
     """The acceptance of the release SE asks for: landings record their kind, release nothing."""
     integrate(checkout, "fix/one-20261106")
@@ -237,6 +238,7 @@ def test_without_gh_the_release_prints_its_landing_plan_and_the_read_back_finish
     assert "Released v1.2.4 in " in capsys.readouterr().out
 
 
+@pytest.mark.distinct("asserts the landing pull request's title and body, not the release's identity")
 def test_the_release_landing_names_its_integrations_and_no_work_issue(checkout):
     integrate(checkout, "fix/one-20261106")
     integrate(checkout, "feature/two-20261106")
@@ -608,6 +610,7 @@ def test_release_trailer_passes_a_branch_at_its_reported_tip(checkout, capsys):
     assert capsys.readouterr().out.strip() == "Release-kind: patch"
 
 
+@pytest.mark.distinct("asserts a branch only origin has is read")
 def test_release_trailer_reads_a_branch_only_origin_has(checkout, capsys):
     tip = commit_on(checkout, "fix/topic-20261106", "reported")
     git(checkout, "push", "-q", "origin", "fix/topic-20261106")
@@ -726,6 +729,7 @@ def origin_tags(root: Path) -> list[str]:
     return git(root.parent / "origin.git", "tag", "--list").split()
 
 
+@pytest.mark.distinct("asserts the version landed and no tag pushed")
 def test_with_release_by_workflow_the_release_lands_the_version_and_pushes_no_tag(checkout, capsys):
     by_workflow(checkout)
     integrate(checkout, "feature/topic-20261106")
@@ -739,6 +743,7 @@ def test_with_release_by_workflow_the_release_lands_the_version_and_pushes_no_ta
     assert "Released v1.3.0 in " in out
 
 
+@pytest.mark.distinct("asserts the wait for the workflow is named")
 def test_with_release_by_workflow_an_untagged_version_waits_for_the_workflow(checkout, capsys):
     by_workflow(checkout, "2.0.0")
     integrate(checkout, "feature/topic-20261106")
@@ -966,6 +971,7 @@ def missed_release(checkout: Path) -> str:
     return first
 
 
+@pytest.mark.distinct("asserts the missed version's tag on its first commit")
 def test_the_workflow_backfills_a_missed_version_on_its_first_commit(checkout):
     first = missed_release(checkout)
     before = {tag: origin_tag(checkout, tag) for tag in ("v1.2.3", "v1.3.1")}
@@ -976,6 +982,7 @@ def test_the_workflow_backfills_a_missed_version_on_its_first_commit(checkout):
     assert {tag: origin_tag(checkout, tag) for tag in before} == before
 
 
+@pytest.mark.distinct("asserts a second run moves no tag")
 def test_a_second_workflow_run_changes_nothing(checkout):
     missed_release(checkout)
     assert run_workflow(checkout).returncode == 0
@@ -986,6 +993,7 @@ def test_a_second_workflow_run_changes_nothing(checkout):
     assert git(checkout.parent / "origin.git", "show-ref", "--tags") == tags
 
 
+@pytest.mark.distinct("asserts an existing tag stays, with a warning")
 def test_the_workflow_never_moves_an_existing_tag(checkout):
     by_workflow(checkout, "1.3.0")
     stray = git(checkout, "rev-parse", "HEAD~1")
@@ -997,6 +1005,7 @@ def test_the_workflow_never_moves_an_existing_tag(checkout):
     assert origin_tag(checkout, "v1.3.0") == stray
 
 
+@pytest.mark.distinct("asserts no major tag of an older release")
 def test_the_workflow_creates_the_major_tag_of_its_own_release_only(checkout):
     missed_release(checkout)
     older = git(checkout, "rev-parse", "v1.2.3")
@@ -1018,6 +1027,7 @@ def next_major(checkout: Path) -> None:
     git(checkout, "push", "-q", "origin", "main")
 
 
+@pytest.mark.distinct("asserts the refs pushed")
 def test_a_release_pushes_exactly_its_version_tag_and_its_major_tag_each_on_its_own(checkout):
     next_major(checkout)
     result = run_workflow(checkout)
@@ -1027,6 +1037,7 @@ def test_a_release_pushes_exactly_its_version_tag_and_its_major_tag_each_on_its_
     assert not {"v1", "v3"} & set(origin_tags(checkout))
 
 
+@pytest.mark.distinct("asserts the ruleset remedy and the other tags landing")
 def test_a_refused_ref_fails_the_run_naming_it_and_the_remedy_and_the_others_land(checkout):
     next_major(checkout)
     result = run_workflow(checkout, refused="refs/tags/v4")
@@ -1050,6 +1061,7 @@ def test_a_ref_refused_for_another_reason_names_a_rerun_and_no_ruleset(checkout)
     assert "Settings > Rules > Rulesets" not in error
 
 
+@pytest.mark.distinct("asserts the major tag moves to the newest release")
 def test_the_workflow_force_updates_a_major_tag_behind_its_newest_release(checkout):
     missed_release(checkout)
     git(checkout, "tag", "v1", "v1.2.3")
@@ -1059,6 +1071,7 @@ def test_the_workflow_force_updates_a_major_tag_behind_its_newest_release(checko
     assert origin_tag(checkout, "v1") == origin_tag(checkout, "v1.3.1")
 
 
+@pytest.mark.distinct("asserts no tag on another branch")
 def test_the_workflow_tags_nothing_on_another_branch(checkout):
     missed_release(checkout)
     git(checkout, "push", "-q", "origin", "main:fix/other-20261106")
@@ -1109,6 +1122,7 @@ def test_every_runner_image_is_pinned():
             assert not re.search(r"runs-on:.*-latest\b", line), f"{path.name}: {line}"
 
 
+@pytest.mark.distinct("asserts the tags of a squash onto an unrelated main")
 def test_the_squash_commit_onto_an_unrelated_main_releases_its_version_and_major_only(checkout):
     """se becoming main: main's first-parent history holds a line that never had an se.toml, then
     one squash commit with se's tree at a new major; se's own tags stay where they are."""

@@ -63,6 +63,7 @@ def test_both_vaults_build_with_build_docs_without_a_warning(tmp_path, obs, caps
         assert destination.stat().st_size > 0
 
 
+@pytest.mark.distinct("asserts the example's story lines")
 def test_the_example_tells_the_whole_arc_with_four_claims_not_yet_run():
     assert _run(EXAMPLE) == ["story: Copilot install pass", "actor: The owner", "slides: 6, steps: 3",
                              "not yet run: 4 of 6 evidence halves", "problems: none"]

@@ -416,6 +416,7 @@ def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys
     assert "skills come from se.toml [roles.<role>] skills" in capsys.readouterr().err
 
 
+@pytest.mark.distinct("asserts each agent's fields")
 def test_every_generated_agent_holds_to_copilots_fields_and_claude_codes_it_ignores(checkout):
     files = se_plugin.expected(checkout)
     agents = [path for path in files if path.parent.as_posix() == "agents"]
@@ -425,6 +426,7 @@ def test_every_generated_agent_holds_to_copilots_fields_and_claude_codes_it_igno
         assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS | agent_lint.CLAUDE_AGENT_FIELDS, path
 
 
+@pytest.mark.distinct("asserts each skill's name and description")
 def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
     files = se_plugin.expected(checkout)
     skills = [path for path in files if path.name == "SKILL.md"]
@@ -480,6 +482,7 @@ def write_source(root: Path, path: str, text: str) -> None:
     (root / path).write_text(text, encoding="utf-8", newline="\n")
 
 
+@pytest.mark.distinct("asserts a CRLF checkout builds the same layout")
 def test_a_checkout_with_crlf_line_endings_builds_the_same_layout(checkout, tmp_path):
     """git on Windows checks src/ out with CRLF; the kern-platforms leg builds the layout from it."""
     crlf = tmp_path / "crlf"
@@ -556,6 +559,7 @@ def test_claude_mcp_on_declares_the_door_run_from_the_plugin_root(tmp_path):
     assert list(manifest) == ["name", "version", "description", "license", "hooks", "mcpServers"]
 
 
+@pytest.mark.distinct("asserts the manifest without the setting")
 @pytest.mark.parametrize("setting", ["", "claude_mcp = false"], ids=["unset", "off"])
 def test_claude_mcp_unset_or_off_writes_the_manifest_as_before(tmp_path, setting):
     """Without the setting the manifest is byte for byte the one before it existed: the on build's
@@ -583,22 +587,15 @@ def test_a_claude_mcp_that_is_no_boolean_is_refused(tmp_path, capsys):
     assert "`claude_mcp = true|false`" in capsys.readouterr().err
 
 
-def test_check_refuses_a_hand_edit_to_the_plugin_hooks(checkout, capsys):
-    path = checkout / ".github" / "plugin" / "hooks.json"
-    original = path.read_bytes()
-    path.write_bytes(original.replace(b"$PLUGIN_ROOT/scripts/bootstrap.sh", b"scripts/bootstrap.sh", 1))
-    try:
-        assert se_plugin.main(["check", "--root", str(checkout)]) == 1
-        assert ".github/plugin/hooks.json: differs from its source" in capsys.readouterr().err
-    finally:
-        path.write_bytes(original)
-
-
-@pytest.mark.parametrize("name", (".github/plugin/plugin.json", ".github/mcp.json"))
-def test_check_covers_the_copilot_manifest_and_mcp_file(checkout, capsys, name):
+@pytest.mark.parametrize("name, edited, edit", [
+    (".github/plugin/plugin.json", b'"se"', b'"other"'),
+    (".github/mcp.json", b'"se"', b'"other"'),
+    (".github/plugin/hooks.json", b"$PLUGIN_ROOT/scripts/bootstrap.sh", b"scripts/bootstrap.sh"),
+])
+def test_check_refuses_a_hand_edit_to_the_copilot_manifest_its_hooks_and_mcp_file(checkout, capsys, name, edited, edit):
     path = checkout / name
     original = path.read_bytes()
-    path.write_bytes(original.replace(b'"se"', b'"other"', 1))
+    path.write_bytes(original.replace(edited, edit, 1))
     try:
         assert se_plugin.main(["check", "--root", str(checkout)]) == 1
         assert f"{name}: differs from its source" in capsys.readouterr().err
@@ -790,6 +787,7 @@ def test_what_each_value_of_the_setting_means_per_host(checkout, tmp_path, setti
 HOOKS_FILES = (se_plugin.COPILOT_HOOKS_FILE, se_plugin.PLUGIN_HOOKS_FILE)
 
 
+@pytest.mark.distinct("asserts powershell_hooks' default and its bash hook lines")
 def test_the_powershell_hooks_setting_is_unset_and_unset_builds_todays_files_byte_for_byte(tmp_path):
     """Off stays off: SE's se.toml leaves [plugin] powershell_hooks unset, and unset (or set to its
     default) the build writes exactly the committed files, the bare `bash` lines among them."""

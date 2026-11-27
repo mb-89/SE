@@ -122,6 +122,7 @@ def run_json(capsys, *args) -> dict:
 # msg-c (sub-agent): 2 + 50*0.1 + 8*1.25 + 3*5 = 32
 
 
+@pytest.mark.distinct("asserts the values, not the keys")
 def test_tokens_and_units_equal_the_hand_computed_values(capsys, folder, prices):
     result = run_json(capsys, folder, "--prices", prices)
     assert [entry["session"] for entry in result["sessions"]] == ["sess-a"]
@@ -153,6 +154,7 @@ def test_the_text_prints_the_same_figures(capsys, folder, prices):
                                  "write 1h 30  output 20  units 246.00")
 
 
+@pytest.mark.distinct("asserts no main calls")
 def test_a_subagent_file_without_its_parent_shows_no_main_calls(capsys, folder, prices):
     result = run_json(capsys, folder / "sess-a" / "subagents", "--prices", prices)
     entry, = result["sessions"]

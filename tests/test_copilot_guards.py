@@ -26,6 +26,7 @@ def test_by_default_dispatch_is_on_and_stop_refusal_is_off(tmp_path, text):
     assert not copilot_guards.guarded(None, "start_sessions")
 
 
+@pytest.mark.distinct("asserts each explicit setting")
 @pytest.mark.parametrize("name", sorted(copilot_guards.GUARDS))
 @pytest.mark.parametrize("value", (False, True))
 def test_each_explicit_setting_overrides_only_its_default(tmp_path, name, value):

@@ -46,6 +46,7 @@ retro doc (`docs/retro-*.md`) lands without a work issue, a field report or runn
 1. **Collect.** A retro: `retro.py collect <issue>`, which writes the draft at its known path,
    `~/.se/retros/<owner>/<repo>/retro-<issue>.md`, where `deck`, `file` and `bless` read it.
    The draft records the template version and effective rules it starts with. An overhaul:
+   `overhaul.py coverage --repo <main checkout>`, which records each test's coverage, then
    `overhaul.py read <issue> --out <draft>`. Without gh, run each plan they print as the work
    model says.
    **Ask SE for its input** in the same step: send the SE session your prompt names one message

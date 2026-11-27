@@ -4,6 +4,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import host_size  # noqa: E402
@@ -30,6 +32,7 @@ def rows(files=FILES, tools=None) -> dict[tuple[str, str], host_size.Row]:
     return {(row.item, row.subject): row for row in host_size.measure(files, FACTS, tools)}
 
 
+@pytest.mark.distinct("asserts over and under")
 def test_a_size_over_its_limit_is_over_and_one_under_is_under():
     found = rows()
     assert (found["agents/big.md", "agent-body"].status, found["agents/big.md", "agent-body"].size) == ("over", 11)
@@ -54,6 +57,7 @@ def test_a_limit_in_a_unit_that_cannot_be_counted_is_skipped_for_the_one_that_ca
     assert (row.status, row.limit.unit) == ("not measured", "tokens")
 
 
+@pytest.mark.distinct("asserts the tightest limit")
 def test_the_tightest_limit_is_the_one_the_size_takes_most_of():
     row = rows()["skills/probe/SKILL.md", "skill-length"]
     assert (row.status, row.size, row.unit, row.load) == ("over", 7, "lines", "on demand")
@@ -78,6 +82,7 @@ def test_always_on_and_on_demand_bytes_are_summed_apart():
     assert sums["agents/big.md"].on_demand == sums["agents/small.md"].on_demand == on_demand
 
 
+@pytest.mark.distinct("asserts the order")
 def test_rows_come_in_a_stable_order_largest_overrun_first():
     first = host_size.measure(FILES, FACTS)
     again = host_size.measure(dict(reversed(list(FILES.items()))), FACTS)

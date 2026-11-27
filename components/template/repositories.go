@@ -689,6 +689,27 @@ func templateRepositories(root string) ([]templateRepository, error) {
 	return found, nil
 }
 
+// ComponentDir is where the component name that root's se.toml pins is used from on this
+// machine, its path applied, as se_modules.py `resolve` answers its `dir`: the machine's [paths]
+// checkout where it has one, else its pinned clone .se/modules/<name>. It answers false where
+// se.toml pins no such component, and se_modules.py's refusal where se.toml does not read.
+func ComponentDir(root, name string) (string, bool, error) {
+	found, err := loadManifest(root)
+	if err != nil {
+		return "", false, err
+	}
+	for _, c := range found {
+		if c.name == name {
+			dir := componentFolder(root, name)
+			if c.path != "" {
+				dir = filepath.Join(dir, filepath.FromSlash(c.path))
+			}
+			return dir, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // componentFolder is where the component name is used from for the checkout at root: the machine's
 // [paths] checkout where it has one, else its pinned clone .se/modules/<name>.
 func componentFolder(root, name string) string {

@@ -171,6 +171,7 @@ def test_a_test_marked_for_another_reason_is_refused_naming_the_reason(pytester:
     assert "git status --short (test_planted.py:7)" in output, output
 
 
+@pytest.mark.distinct("asserts asyncio's starts are counted")
 def test_asyncio_subprocesses_are_counted(pytester: pytest.Pytester, no_starts) -> None:
     pytester.makepyfile(test_planted="import asyncio\n\ndef test_starts(tmp_path):\n    async def start():\n"
                                      "        try:\n            await asyncio.create_subprocess_exec(str(tmp_path / 'git'), 'gc')\n"

@@ -27,6 +27,7 @@ def body(decisions: str | None, result: str = "complete") -> str:
             f"{work_tickets.REPORT_END}\n")
 
 
+@pytest.mark.distinct("asserts the rows and the result")
 def test_two_rows_come_out_in_order_with_the_result():
     report = decision_rows.parse(body(
         HEADER + "| Keep A | B, C | A is smaller | high |\n| Name it x | y | shorter | medium |\n",
@@ -75,13 +76,6 @@ def test_an_escaped_pipe_does_not_split_a_cell():
 
     assert [(row.status, row.decision, row.rationale) for row in report.rows] == [
         ("parsed", "Use `a | b`", "one | two")]
-
-
-def test_the_core_gives_the_same_rows_each_time():
-    text = body(HEADER + "| A | B | C | high |\n| D | E | F | low |\n")
-
-    assert decision_rows.parse(text) == decision_rows.parse(text)
-    assert [row.decision for row in decision_rows.parse(text).rows] == ["A", "D"]
 
 
 # A window's landings, as the session's GitHub tools answer them: the landing pull requests carry

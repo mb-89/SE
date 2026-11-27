@@ -39,6 +39,7 @@ def problems(facts: dict) -> list[d.Finding]:
     return [f for f in d.diagnose(facts) if f.level == d.PROBLEM]
 
 
+@pytest.mark.distinct("asserts a clean box's findings")
 def test_a_clean_box_has_no_problem_and_every_area_is_seen():
     findings = d.diagnose(clean_facts())
     assert problems(clean_facts()) == []
@@ -526,6 +527,7 @@ def test_the_latest_release_is_read_under_ses_own_url(tmp_path: Path) -> None:
     assert d.gather_latest(cache, 160.0, None) == {"version": "9.0.0", "age_seconds": 60}
 
 
+@pytest.mark.distinct("asserts the placeholder without a home")
 def test_without_a_home_the_fix_line_names_a_placeholder(tmp_path: Path):
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
@@ -592,6 +594,7 @@ def test_without_an_instruction_file_gather_has_no_key_and_the_report_no_line(tm
     assert d.check_instructions(None) == d.check_instructions([]) == []
 
 
+@pytest.mark.distinct("asserts an untracked file's note")
 def test_an_untracked_local_file_is_one_note_and_a_failing_git_leaves_tracking_not_measured(tmp_path: Path):
     home, project = boxed(tmp_path)
     put(project, "CLAUDE.local.md")

@@ -42,6 +42,7 @@ def test_every_place_is_a_host_fact_of_a_known_surface_with_source_and_register_
     assert any(not p.outside for p in places) and any(p.outside for p in places)
 
 
+@pytest.mark.distinct("asserts the Windows and VS Code fix lines")
 def test_the_windows_fix_line_starts_the_powershell_launcher_with_root():
     copilot = place("copilot-cli", "user MCP config")
     windows, other = copilot.fix("windows", FILL), copilot.fix("linux", FILL)
@@ -184,6 +185,7 @@ def test_the_same_command_is_judged_per_folder_it_starts_in():
     assert second.level == h.PROBLEM and second.fix == p.fix("linux", FILL)
 
 
+@pytest.mark.distinct("asserts the fix line with the plugin installed")
 @pytest.mark.parametrize("platform", ["linux", "windows"])
 def test_an_installed_copilot_plugin_turns_the_user_level_fix_into_the_guides_door_line(platform):
     p = place("copilot-cli", "user MCP config")

@@ -30,6 +30,10 @@ each named with its check.
   of that page (`scripts/references.py` `dangling_sections`), outside SECTIONS_SKIPPED;
 - readme: README.md is one page with its one command first (`scripts/readme.py`, the guidance note
   readme-is-one-page); the commit hook runs the same check (se.toml `[commit_checks]`).
+- ported: no step of SE's start that the `se` binary runs in Go (a verb of PORTED_VERBS) is still a
+  subcommand of `scripts/se_start.py`: a step moves to Go whole, its Python and its callers with it,
+  with no parallel fallback (docs/start.md "Kern"). It has no baseline: it fails from the first
+  twin.
 - doors: every reach outside a door the checkout declares (its `scripts/doors/*.toml`) is refused at
   its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
   `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
@@ -364,6 +368,20 @@ def readme_findings(root: Path) -> list[str]:
     return [f"README.md: {finding}" for finding in readme.findings(path.read_text(encoding="utf-8"))]
 
 
+PORTED_VERBS = "components/cmd/se/start.go"  # the start's steps the se binary runs in Go
+PORTED_FROM = "scripts/se_start.py"
+VERB_NAME = re.compile(r'^\s*Name:\s*"([^"]+)"', re.MULTILINE)
+
+
+def ported_findings(root: Path) -> list[str]:
+    """Each verb of the start's Go port (PORTED_VERBS) that `scripts/se_start.py` still defines as
+    a subcommand: a Python twin of a step the se binary runs."""
+    verbs, script = root / PORTED_VERBS, root / PORTED_FROM
+    if not verbs.is_file() or not script.is_file():
+        return []
+    twins = sorted(set(VERB_NAME.findall(verbs.read_text(encoding="utf-8"))) & set(references.command_tree(script)))
+    return [f"{PORTED_FROM} {name}: the se binary runs this step in Go ({PORTED_VERBS}); remove its Python "
+            f"and call `se {name}` where it is called" for name in twins]
 def doors_skip(root: Path) -> str:
     """Why the door check cannot run on `root`, or "" where it can."""
     folder = root / "scripts" / "doors"
@@ -426,6 +444,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "generated": generated_findings(root),
         "sections": section_findings(root, SECTIONS_SKIPPED),
         "readme": readme_findings(root),
+        "ported": ported_findings(root),
         "doors": door_findings(root),
         "template-engine": template_engine_findings(root),
     }

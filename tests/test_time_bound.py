@@ -33,6 +33,7 @@ class Item:
         return marker.args[0] if marker is not None else None
 
 
+@pytest.mark.distinct("asserts each test's time bound")
 def test_each_test_gets_the_bound_and_one_that_takes_obs_the_wait_on_top():
     plain = Item(TESTS / "test_example.py", ["tmp_path"])
     deck = Item(TESTS / "test_deck.py", ["decks", "obs", "tmp_path"])
@@ -41,6 +42,14 @@ def test_each_test_gets_the_bound_and_one_that_takes_obs_the_wait_on_top():
     assert plain.bound == time_bound.BOUND
     assert deck.bound == time_bound.BOUND + 600
     assert kern.bound == time_bound.BOUND
+
+
+def test_a_test_that_takes_the_se_binary_gets_the_wait_of_its_build_on_top():
+    setup = Item(TESTS / "test_public_check.py", ["se_bin", "se_binary", "tmp_path"])
+    plain = Item(TESTS / "test_example.py", ["tmp_path"])
+    time_bound.mark([setup, plain], obs_wait=600, build_wait=300)
+    assert setup.bound == time_bound.BOUND + 300
+    assert plain.bound == time_bound.BOUND
 
 
 def test_a_test_with_its_own_mark_keeps_it_and_one_beside_the_suite_gets_none():

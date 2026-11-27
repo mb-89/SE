@@ -41,6 +41,14 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   the core starts them. [`release.toml`](release.toml) owns the binary's version and its release,
   `se-v<version>`.
 
+## The start in Go
+
+`start/` is SE's session start in Go, the port of [scripts/se_start.py](../scripts/se_start.py)
+step by step (docs/start.md "Start and refresh"): a package the binary's verbs call, not a
+component on the bus. It holds the hooks step, the verbs `se start-hooks` (bootstrap.sh at a
+session's start) and `se stopped-hooks` (setup.sh and setup.ps1), in `cmd/se/start.go`; the rest
+of the start is still `se_start.py`'s, each step moving here whole, with its tests, as it is ported.
+
 ## The template engine in Go
 
 `template/` is SE's template engine ported to Go (SE#1683): the same template notes and template
