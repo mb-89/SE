@@ -471,6 +471,8 @@ def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
 
 @pytest.hookimpl(tryfirst=True)  # before junitxml opens its report
 def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "distinct(answer): this test runs the lines of another yet asserts "
+                                       "another answer, which it names (scripts/overhaul.py coverage)")
     if not hasattr(config, "workerinput"):
         build_plugin_layouts(config)
         place_kern()  # on the controller, before pytest-xdist starts the workers that collect

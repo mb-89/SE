@@ -463,7 +463,9 @@ sleeping: a test waits on an event, and a deadline stays only as the bound of a 
 - **Implementations:**
   - se: the work model's [Tests](../SKILL.md#tests); the suite runs in parallel
     (`pyproject.toml`); `tests/test_no_sleep.py` refuses a `time.sleep` in a test module or
-    fixture, naming its line.
+    fixture, naming its line; each overhaul measures the coverage of every test and prunes those
+    that add no line of their own
+    ([`<se>/scripts/overhaul.py coverage`](../../../../scripts/overhaul.py)).
   - Go line (frozen): the battery's `fast-test` rule; `se overhaul read`'s test ratio, test code
     at or under code size.
 - **Related:** tst-001, tst-003
