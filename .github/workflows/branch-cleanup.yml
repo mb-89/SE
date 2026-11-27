@@ -1,54 +1,73 @@
-# Deletes a closed pull request's head branch, merged or not (docs/running.md "Workflows"): the commits stay
-# reachable through the closed pull request. Cloud sessions cannot delete a ref themselves (HTTP 403),
-# so the integrator's own delete (work_tickets.py delete_merged_branch) leaves the branch to this
-# workflow, which deletes it with the run's token.
+# Deletes the branches finished work leaves behind, where nothing can be lost (docs/running.md
+# "Workflows"). Cloud sessions cannot delete a ref themselves (HTTP 403), so the integrator's own
+# delete (work_tickets.py delete_merged_branch) leaves the branch to this workflow, which deletes it
+# with the run's token.
 #
-# It deletes only the closed pull request's head branch, and only where
-#   - the head repository is this repository, never a fork;
+# Two passes, one script:
+#   - the close: a closed pull request's head branch, merged or not; its commits stay reachable
+#     through the closed pull request;
+#   - the sweep, after every close, daily and by hand: every other branch of this repository whose
+#     commits are all on the default branch, or whose tip is the head of a closed pull request that
+#     keeps it reachable. A branch that holds commits nothing else keeps is never deleted: the start
+#     report lists it for the person (work_tickets.py leftovers).
+#
+# It deletes a branch only where
+#   - the head repository is this repository, never a fork (the close);
 #   - the branch is none of main, the default branch, se and rehearsal, and starts with neither
 #     `ccr-` nor `claude/`;
-#   - no other open pull request has it as its head;
-#   - it still points at the pull request's head sha (the lease).
+#   - no open pull request has it as its head (the close: no other one);
+#   - no open issue labelled in-progress has it as its title, and it is not at the default branch's
+#     tip, a start's claim in flight (the sweep);
+#   - it still points at the sha the decision read (the lease).
 # A guard that does not hold deletes nothing and says why in the run's summary; a branch already gone
 # (GitHub's own deletion after a merge) is a success with a note.
 #
+# SE's own triggers: `pull_request_target`, not `pull_request`, as GitHub runs no `pull_request`
+# workflow for a pull request that conflicts with its base, and a worker's pull request conflicts
+# with main once its landing commit is there. The run checks out nothing and reads the pull request
+# only as data, so the base's context runs no code of the head.
+#
 # Reusable: a project calls the copy SE writes into it at its pin (scripts/se_workflows.py) with the
-# short trigger file docs/running.md "Workflows" shows; SE's own trigger is the `pull_request` one below,
-# which the copy drops.
+# short trigger file docs/running.md "Workflows" shows; SE's own triggers are the ones below, which
+# the copy drops. A call without `number` sweeps only.
 name: branch-cleanup
 
 on:
   workflow_call:
     inputs:
       number:
-        description: The closed pull request's number
+        description: The closed pull request's number; 0 or none sweeps only
         type: number
-        required: true
+        required: false
       head_ref:
         description: Its head branch
         type: string
-        required: true
+        required: false
       head_sha:
         description: Its head commit, the sha the branch must still point at
         type: string
-        required: true
+        required: false
       head_repository:
         description: Its head repository, owner/name
         type: string
-        required: true
-  # SE's own trigger: the run reads the pull request from the event instead of the inputs.
-  pull_request:
+        required: false
+  # SE's own triggers: the run reads the pull request from the event instead of the inputs.
+  pull_request_target:
     types: [closed]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: read
+  issues: read
 
 jobs:
   delete:
     runs-on: ubuntu-26.04
     steps:
-      - name: Delete the closed pull request's branch
+      - name: Delete the closed pull request's branch, then sweep
         env:
           GITHUB_TOKEN: ${{ github.token }}
           NUMBER: ${{ inputs.number || github.event.pull_request.number }}
@@ -57,9 +76,10 @@ jobs:
           HEAD_REPOSITORY: ${{ inputs.head_repository || github.event.pull_request.head.repo.full_name }}
         shell: python3 {0}
         run: |
-          # The guards, then one delete through GitHub's REST API; every outcome is one line in the
-          # run's summary. A guard that does not hold, or a branch already gone, ends the run green.
-          import json, os, sys, urllib.error, urllib.parse, urllib.request
+          # The guards, then one delete per branch through GitHub's REST API; every outcome is one
+          # line in the run's summary. A guard that does not hold, or a branch already gone, ends
+          # the run green.
+          import json, os, urllib.error, urllib.parse, urllib.request
 
           PROTECTED = {"main", "se", "rehearsal"}
           PREFIXES = ("ccr-", "claude/")
@@ -79,6 +99,17 @@ jobs:
                       return error.code, None
                   raise
 
+          def pages(path):
+              """Every item of a listing, page by page."""
+              found, page = [], 1
+              while True:
+                  joiner = "&" if "?" in path else "?"
+                  _, items = api("GET", f"{path}{joiner}per_page=100&page={page}")
+                  found += items or []
+                  if len(items or []) < 100:
+                      return found
+                  page += 1
+
           def say(line):
               print(line)
               summary = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -87,36 +118,79 @@ jobs:
                       out.write(line + "\n")
 
           repository = os.environ["GITHUB_REPOSITORY"]
-          number, branch = os.environ["NUMBER"], os.environ["HEAD_REF"]
-          sha, head = os.environ["HEAD_SHA"], os.environ["HEAD_REPOSITORY"]
-          ref = urllib.parse.quote(f"heads/{branch}", safe="/")
+          owner = repository.split("/")[0]
+          _, about = api("GET", f"/repos/{repository}")
+          default = (about or {}).get("default_branch", "main")
 
-          def why_kept():
+          def ref(branch):
+              return urllib.parse.quote(f"heads/{branch}", safe="/")
+
+          def protected(branch):
+              return branch in PROTECTED | {default} or branch.startswith(PREFIXES)
+
+          def delete(branch, sha, of="", since="", because=""):
+              """Delete `branch` where it still points at `sha` (the lease); the outcome's line."""
+              status, found = api("GET", f"/repos/{repository}/git/ref/{ref(branch)}")
+              if status == 404:
+                  return f"Branch cleanup: {branch}{of} is already gone."
+              tip = (found or {}).get("object", {}).get("sha", "")
+              if tip != sha:
+                  return f"Branch cleanup: kept {branch}{of}: it moved to {tip[:12]} since {since}{sha[:12]}."
+              status, _ = api("DELETE", f"/repos/{repository}/git/refs/{ref(branch)}")
+              if status == 422:
+                  return f"Branch cleanup: {branch}{of} is already gone."
+              return f"Branch cleanup: deleted {branch}{of} at {sha[:12]}{because}."
+
+          def close(number, branch, sha, head):
+              """The close: the closed pull request's head branch, unless a guard holds it."""
+              of = f" of #{number}"
               if head.lower() != repository.lower():
-                  return f"its head repository {head or '(deleted)'} is not {repository}"
-              _, about = api("GET", f"/repos/{repository}")
-              default = (about or {}).get("default_branch", "main")
-              if branch in PROTECTED | {default} or branch.startswith(PREFIXES):
-                  return "it is a protected branch"
-              owner = repository.split("/")[0]
+                  return f"Branch cleanup: kept {branch}{of}: its head repository {head or '(deleted)'} is not {repository}."
+              if protected(branch):
+                  return f"Branch cleanup: kept {branch}{of}: it is a protected branch."
               query = urllib.parse.urlencode({"state": "open", "head": f"{owner}:{branch}", "per_page": 100})
               _, pulls = api("GET", f"/repos/{repository}/pulls?{query}")
               others = sorted(pull["number"] for pull in pulls or [] if str(pull["number"]) != number)
               if others:
-                  return "it is the head of the open pull request " + ", ".join(f"#{n}" for n in others)
-              return None
+                  return (f"Branch cleanup: kept {branch}{of}: it is the head of the open pull request "
+                          + ", ".join(f"#{n}" for n in others) + ".")
+              return delete(branch, sha, of, "the pull request's head ")
 
-          kept = why_kept()
-          if kept:
-              sys.exit(say(f"Branch cleanup: kept {branch} of #{number}: {kept}."))
-          status, found = api("GET", f"/repos/{repository}/git/ref/{ref}")
-          if status == 404:
-              sys.exit(say(f"Branch cleanup: {branch} of #{number} is already gone."))
-          tip = (found or {}).get("object", {}).get("sha", "")
-          if tip != sha:
-              sys.exit(say(f"Branch cleanup: kept {branch} of #{number}: it moved to {tip[:12]} since the "
-                           f"pull request's head {sha[:12]}."))
-          status, _ = api("DELETE", f"/repos/{repository}/git/refs/{ref}")
-          if status == 422:
-              sys.exit(say(f"Branch cleanup: {branch} of #{number} is already gone."))
-          say(f"Branch cleanup: deleted {branch} of #{number} at {sha[:12]}.")
+          def sweep():
+              """The sweep: every branch whose commits nothing can lose, one line each."""
+              branches = {item["name"]: item["commit"]["sha"] for item in pages(f"/repos/{repository}/branches")}
+              open_heads = {pull["head"]["ref"] for pull in pages(f"/repos/{repository}/pulls?state=open")
+                            if (pull["head"].get("repo") or {}).get("full_name", "").lower() == repository.lower()}
+              working = {issue["title"] for issue in pages(f"/repos/{repository}/issues?state=open&labels=in-progress")
+                         if "pull_request" not in issue}
+              newest = branches.get(default, "")
+              lines = []
+              for branch, sha in sorted(branches.items()):
+                  if protected(branch):
+                      continue
+                  why = ("it is the head of an open pull request" if branch in open_heads else
+                         "an in-progress issue works on it" if branch in working else
+                         f"it is at {default}'s tip, a start's claim in flight" if sha == newest else None)
+                  if why is None:
+                      _, compared = api("GET", f"/repos/{repository}/compare/{urllib.parse.quote(default)}...{sha}")
+                      ahead = (compared or {}).get("ahead_by")
+                      if ahead == 0:
+                          lines.append(delete(branch, sha, because=f": every commit is on {default}"))
+                          continue
+                      query = urllib.parse.urlencode({"state": "closed", "head": f"{owner}:{branch}", "per_page": 100})
+                      _, closed = api("GET", f"/repos/{repository}/pulls?{query}")
+                      keeper = next((pull["number"] for pull in closed or [] if pull["head"]["sha"] == sha), None)
+                      if keeper is not None:
+                          lines.append(delete(branch, sha, because=f": the closed #{keeper} keeps its commits"))
+                          continue
+                      why = (f"it holds {ahead} commit{'s' if ahead != 1 else ''} not on {default} that no closed pull request keeps; "
+                             "the start report lists it for the person" if ahead else
+                             f"its comparison with {default} could not be read")
+                  lines.append(f"Branch cleanup: kept {branch}: {why}.")
+              return lines
+
+          number = os.environ.get("NUMBER", "")
+          if number not in ("", "0"):
+              say(close(number, os.environ["HEAD_REF"], os.environ["HEAD_SHA"], os.environ["HEAD_REPOSITORY"]))
+          for line in sweep():
+              say(line)
