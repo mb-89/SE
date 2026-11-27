@@ -443,6 +443,8 @@ On main, released as 17.0.0 at the next release.
   the project still wants into `src/skills/` as a skill, or file it as work.
 - **Check:** `uv run python <se>/scripts/se_plugin.py build` exits 0.
 
+## SE 20
+
 ### Standalone decision decks
 
 - **Change:** SE no longer serves decision decks or posts their answers to a local server.
