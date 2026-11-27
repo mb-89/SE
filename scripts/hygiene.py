@@ -38,6 +38,10 @@ each named with its check.
   its door's level (`scripts/door_report.py`, which owns what a reach and a level are); a door at
   `warn` prints one warning line and passes; a checkout that declares none skips it, naming why; the
   commit hook runs the same check (se.toml `[commit_checks]`).
+- rule-of-five: each surface a person sees holds at most five visible files and five visible
+  folders (rule book doc-006, `scripts/rule_of_five.py`, which owns the surfaces and the level); at
+  `warn` it prints one warning line per crowded surface and passes; the commit hook runs the same
+  check (se.toml `[commit_checks]`).
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -57,6 +61,7 @@ import git_door
 import process_door
 import readme
 import references
+import rule_of_five
 import se_home
 import se_script
 
@@ -388,6 +393,18 @@ def door_findings(root: Path) -> list[str]:
     return refused
 
 
+def five_findings(root: Path) -> list[str]:
+    """What the rule of five refuses in `root` at its level; its warnings are printed."""
+    try:
+        found = rule_of_five.settings(root)
+    except rule_of_five.SettingError as error:
+        raise HygieneError(f"rule-of-five: {error}") from error
+    warnings, refused = rule_of_five.check(root, found)
+    for line in warnings:
+        print(f"hygiene: rule-of-five: {line}")
+    return refused
+
+
 def checks(root: Path) -> dict[str, list[str]]:
     """Each check's findings on `root`, in the order the module's docstring names them."""
     return {
@@ -404,6 +421,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "readme": readme_findings(root),
         "ported": ported_findings(root),
         "doors": door_findings(root),
+        "rule-of-five": five_findings(root),
     }
 
 

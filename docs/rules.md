@@ -2,7 +2,7 @@
 
 # Rules
 
-The 77 rules in force: the rule book's 65 and 12 guidance notes, the notes after the book.
+The 78 rules in force: the rule book's 66 and 12 guidance notes, the notes after the book.
 
 | Rule | What it says |
 |---|---|
@@ -40,6 +40,7 @@ The 77 rules in force: the rule book's 65 and 12 guidance notes, the notes after
 | `doc-003` | No inside baseball for readers |
 | `doc-004` | A table, not a long list |
 | `doc-005` | A tool's documentation opens with its README and its command line |
+| `doc-006` | The rule of five |
 | `wrk-001` | GitHub is the only shared state |
 | `wrk-002` | One work system |
 | `wrk-003` | Every session starts at the newest integration branch |

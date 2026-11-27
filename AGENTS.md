@@ -119,6 +119,11 @@
     - A door at `error` refuses each reach; one at `warn` prints one warning line while its
       reaches move behind it, and is refused once none is left, naming the step to `error`.
     - No door keeps a baseline.
+  - It also fails where a surface a person sees holds more than five visible files or five visible
+    folders, at the level `se.toml` `[rule_of_five]` sets (`scripts/rule_of_five.py`, rule book
+    [doc-006](src/skills/work-model/references/rules.md#doc-006-the-rule-of-five)); at `warn` it
+    prints one line per crowded surface; the commit hook runs the same check (`se.toml`
+    `[commit_checks]`).
 - Dangling references:
   - A section reference, `<page>.md "<section>"` or `README "<section>"`, in any tracked text file
     whose page holds no such heading (the check `sections`).
