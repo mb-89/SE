@@ -449,6 +449,24 @@ def test_a_failure_weighs_its_failure_weight_and_an_unlanded_close_nothing():
     assert (found.count, found.due) == (18, False)
 
 
+def test_a_partial_landing_counts_as_a_landing_and_an_overhauls_start_resets_the_count():
+    """SE#2006: on 27 Nov two partial landings, labelled escalated, weighed 5 each and made a
+    retro due at 22 minutes after an overhaul closed. A partial landing (escalated, its pull
+    request merged) is a landing, 1, open or closed; an escalation with no landing stays a
+    failure; and an overhaul's start resets the count, as a retro's does."""
+    partial = [work(10, updated="2026-11-03T00:00:00Z", labels=("work", "escalated")),
+               work(11, "2026-11-03T00:00:00Z", labels=("work", "escalated"))]
+    failed = work(12, updated="2026-11-03T00:00:00Z", labels=("work", "escalated"))
+    pulls = [landing(10, "2026-11-02T00:00:00Z"), landing(11, "2026-11-02T00:00:00Z")]
+    now = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    found = countdown([partial[1]], [partial[0], failed], pulls, now=now)
+    assert (found.landed, found.failed, found.count) == (2, 1, 7)
+    overhaul_run = retro.Issue(3, "overhaul-20261103", ["discovery"], "", "",
+                               created_at="2026-11-03T12:00:00Z")
+    found = countdown([partial[1]], [partial[0], failed, overhaul_run], pulls, now=now)
+    assert (found.since_run, found.count, found.due) == (3, 0, False)
+
+
 def test_a_retro_is_due_seven_days_after_the_last_started_where_anything_came_back():
     one = ([work(10, "2026-11-02T00:00:00Z")], (), [landing(10, "2026-11-02T00:00:00Z")])
     assert not countdown(*one, now=datetime(2026, 11, 7, tzinfo=timezone.utc)).due

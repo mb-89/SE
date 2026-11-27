@@ -1091,12 +1091,16 @@ def due_reason(kind: str, count: int, what: str, due_after: int, days: int, elap
 def retro_countdown(closed: list[Issue], opened: list[Issue], pulls: list[Pull], tracker: str,
                     branch: str, settings: dict[str, int], now: datetime) -> Countdown:
     """The retro countdown, a pure function of the issues and pull requests it is given: what
-    came back since the newest retro started (its creation: a retro's counters reset when it
-    starts, so a late retro never makes the next one due at once). A work issue that landed adds
-    1; a work issue labelled ESCALATED_LABEL (an escalation or a refused landing) updated since
-    then adds `failure_weight`. Opening an issue counts nothing. components/retro-due counts the
-    same."""
-    runs = [issue for issue in [*closed, *opened] if is_retro(issue) and counted_run(issue)
+    came back since the newest run, a retro or an overhaul, started (its creation: the counters
+    reset when one starts, so a late retro never makes the next one due at once, and an overhaul,
+    which reads the retros, leaves none due behind it). A work issue that landed adds 1, a partial
+    landing among them (one labelled ESCALATED_LABEL whose pull request merged into the branch);
+    any other work issue labelled ESCALATED_LABEL (an escalation or a refused landing) updated
+    since then adds `failure_weight`. Opening an issue counts nothing. components/retro-due counts
+    the same."""
+    overhaul = sibling("overhaul")
+    runs = [issue for issue in [*closed, *opened]
+            if (is_retro(issue) or overhaul.is_overhaul(issue)) and counted_run(issue)
             and run_start(issue)]
     newest = max(runs, key=run_start, default=None)
     since = run_start(newest) if newest else None
@@ -1112,15 +1116,26 @@ def retro_countdown(closed: list[Issue], opened: list[Issue], pulls: list[Pull],
             naming.setdefault(number, []).append(pull)
     moments: list[datetime] = []
     landed = failed = 0
+    counted: set[int] = set()
     for issue in closed:
         moment = after(issue.closed_at)
         if (WORK_LABEL in issue.labels and not is_retro(issue) and moment
                 and landed_issue(issue, naming.get(issue.number, []), branch)):
             landed += 1
+            counted.add(issue.number)
             moments.append(moment)
     for issue in [*closed, *opened]:
+        if WORK_LABEL not in issue.labels or ESCALATED_LABEL not in issue.labels or is_retro(issue):
+            continue
+        partial = landing_of(issue, naming.get(issue.number, []), branch)
+        if partial is not None:  # a partial landing is a landing, never a failure
+            moment = after(partial.merged_at)
+            if moment and issue.number not in counted:
+                landed += 1
+                moments.append(moment)
+            continue
         moment = after(issue.updated_at)
-        if WORK_LABEL in issue.labels and ESCALATED_LABEL in issue.labels and not is_retro(issue) and moment:
+        if moment:
             failed += 1
             moments.append(moment)
     count = landed + failed * settings["failure_weight"]

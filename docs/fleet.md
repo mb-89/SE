@@ -110,9 +110,12 @@ days = 7            # or this many days after the last retro started, with anyth
 ```
 
 A retro falls due by what comes back to the project, never by what is opened: filing 20 issues in
-one session makes none due. Each work issue that landed since the newest retro started adds 1, each
-work issue labelled `escalated` (an escalation, a refused landing) updated since then adds
-`failure_weight`. At `due_after`, or `days` days after that start with anything counted, one is due.
+one session makes none due.
+
+Each work issue that landed since the newest run (a retro or an
+overhaul) started adds 1, a partial landing among them; each other work issue labelled `escalated`
+(an escalation, a refused landing) updated since then adds `failure_weight`. At `due_after`, or
+`days` days after that start with anything counted, one is due.
 
 - **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
   anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
@@ -130,7 +133,8 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
   due included, and a first retro, where none has closed, the whole history from the project's
   first issue; its counters reset when it starts (its issue's creation), so a late retro never
-  makes the next one due at once.
+  makes the next one due at once. An overhaul's start resets them too, as it reads the retros
+  before it.
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
   session; SE presents the completed report deck to the person.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
